@@ -1,7 +1,7 @@
 # job-agent
 
 Fills out job applications and stops before submit so the user reviews and
-sends them himself. Windows, PowerShell, venv at `.venv`, run as
+sends them personally. Windows, PowerShell, venv at `.venv`, run as
 `python apply.py <command>` (no make).
 
 ## Architecture
