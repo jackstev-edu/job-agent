@@ -117,10 +117,18 @@ _SCAN_JS = r"""
       return;
     }
 
+    // React-select-style widgets stamp a plain <input> with role="combobox"
+    // (or aria-autocomplete) instead of being a real <select>. If we tag that
+    // as 'text' here, the later [role=combobox] pass skips it — it's already
+    // stamped — and enrich_comboboxes never opens it to read the options.
+    const isCustomCombobox = el.getAttribute('role') === 'combobox'
+        || el.getAttribute('aria-autocomplete') === 'list';
+
     const tag = el.tagName.toLowerCase();
     const field = {
       ref: stamp(el),
-      type: tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : type,
+      type: isCustomCombobox ? 'combobox'
+          : tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : type,
       name: el.name || el.id || '',
       label: labelFor(el).slice(0, 300),
       placeholder: el.getAttribute('placeholder') || '',
