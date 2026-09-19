@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# Nothing personal should ever be in this repo. Your profile, resume and
+# application log live in ~/.job-agent/ instead — see `python apply.py init`.
+# These rules are a safety net for that, not the primary defence.
+# ---------------------------------------------------------------------------
+
+# Your profile. The repo carries profile.example.yaml only.
+profile.yaml
+profile.local.yaml
+
+# Documents: resumes, transcripts, cover letter drafts.
+documents/
+!documents/README.txt
+
+# Anything the agent generates.
+*.db
+*.sqlite3
+reports/
+
+# Environment and secrets.
+.env
+.env.*
+*.key
+
+# Python.
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editors and OS.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
