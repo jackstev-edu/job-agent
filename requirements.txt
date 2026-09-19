@@ -1,0 +1,6 @@
+# playwright — drives a real Chrome browser from Python
+playwright>=1.48
+# anthropic  — the Claude API client, used only for field matching and letters
+anthropic>=0.40
+# PyYAML     — reads profile.yaml
+PyYAML>=6.0
