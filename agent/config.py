@@ -20,10 +20,6 @@ ROOT = Path(__file__).resolve().parent.parent
 # are all under this one directory.
 STATE_DIR = Path(os.environ.get("JOB_AGENT_HOME", Path.home() / ".job-agent"))
 
-# The blank template that ships with the repo. Contains no personal data.
-TEMPLATE_PATH = ROOT / "profile.example.yaml"
-
-
 def resolve_profile(explicit: str | None = None) -> Path:
     """
     Find your profile, in order of preference:

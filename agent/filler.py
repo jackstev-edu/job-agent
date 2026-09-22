@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from playwright.sync_api import Page
 
+from . import extract, matching
 from .extract import REF_ATTR
 
 # Buttons this tool will never click, whatever it's asked. Matched against
@@ -72,13 +73,7 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
             return True, "selected"
 
         if field_type == "combobox":
-            # Custom dropdown: click to open it, type to filter, take the match.
-            element.click(timeout=4000)
-            page.wait_for_timeout(350)
-            page.keyboard.type(str(value), delay=45)
-            page.wait_for_timeout(700)
-            page.keyboard.press("Enter")
-            return True, "picked from custom dropdown"
+            return _fill_combobox(page, element, field, str(value))
 
         if field_type == "file":
             return False, "file uploads are handled separately"
@@ -91,6 +86,89 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
 
     except Exception as e:
         return False, f"{type(e).__name__}: {str(e)[:110]}"
+
+
+# Appended to the outcome of anything chosen by judgement rather than copied —
+# a broader heading on a field-of-study menu, a name matched loosely by a
+# search box. run_plan turns it into a review flag so it reaches the sheet.
+CONFIRM = " — confirm this one"
+
+
+# Marks the one option row we intend to click, so Playwright can click it with
+# real mouse events — react-select and Workday listen for mousedown, and a
+# JavaScript .click() on the row does nothing on either.
+_MARK_OPTION_JS = r"""
+(wanted) => {
+  const sel = '[role=option], [role=listbox] li, [role=listbox] [data-value],'
+            + 'ul[class*=menu i] li, li[class*=option i], div[class*=option i]';
+  document.querySelectorAll('[data-ja-opt]').forEach(el => el.removeAttribute('data-ja-opt'));
+  const hits = [...document.querySelectorAll(sel)]
+      .filter(el => el.getBoundingClientRect().height > 0);
+  const leaves = hits.filter(el => !hits.some(o => o !== el && el.contains(o)));
+  const row = leaves.find(el => el.innerText.trim() === wanted);
+  if (!row) return false;
+  row.setAttribute('data-ja-opt', '1');
+  return true;
+}
+"""
+
+
+def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool, str]:
+    """
+    Custom dropdown: open it, type, then CLICK the row that matches.
+
+    WHY NOT JUST PRESS ENTER: Enter takes whichever row the widget has
+    highlighted, which on a list still loading is simply the first one to
+    arrive. A school search would then quietly commit a different university
+    than the one in your profile — a wrong fact on a form you sign. If nothing
+    on screen matches what we typed, this clears the box and reports a failure
+    so the field reaches you instead.
+    """
+    element.click(timeout=4000)
+    page.wait_for_timeout(250)
+    page.keyboard.type(value, delay=45)
+
+    options = extract.wait_for_options(page, 3000)
+    if not options:
+        if extract.menu_says_no_results(page) or field.get("search_required"):
+            # The form searched and came back with nothing. Typing a value it
+            # doesn't recognise leaves text in a box that hasn't actually been
+            # answered, which reads as filled on screen and is blank underneath.
+            _abandon_combobox(page, element)
+            return False, f"the form's search found no match for '{value}'"
+        # Some boxes take free text. Leave it, but don't claim it was picked.
+        return True, f"typed '{value}' — nothing offered to pick from{CONFIRM}"
+
+    choice, how = matching.best_match_for_field(field.get("label"), value, options)
+    if choice is None:
+        _abandon_combobox(page, element)
+        return False, f"'{value}' — {how}"
+
+    try:
+        if page.evaluate(_MARK_OPTION_JS, choice):
+            page.locator("[data-ja-opt='1']").first.click(timeout=3000)
+        else:
+            page.keyboard.press("Enter")
+    except Exception:
+        page.keyboard.press("Enter")
+    page.wait_for_timeout(300)
+
+    if extract.read_open_options(page):
+        page.keyboard.press("Enter")          # the menu is still up; commit it
+        page.wait_for_timeout(200)
+
+    if how in ("exact", "normalized"):
+        return True, f"selected '{choice}'"
+    return True, f"selected '{choice}' — {how}{CONFIRM}"
+
+
+def _abandon_combobox(page: "Page", element) -> None:
+    """Leave no half-typed text behind in a box we couldn't answer."""
+    try:
+        element.fill("", timeout=2000)
+    except Exception:
+        pass
+    extract.close_dropdown(page)
 
 
 def upload_file(page: "Page", ref: str, path: Path) -> tuple[bool, str]:
@@ -122,7 +200,7 @@ def run_plan(page: "Page", fields: list[dict], plan: dict) -> list[dict]:
             "value": decision.get("value"),
             "filled": worked,
             "detail": detail,
-            "needs_review": bool(decision.get("needs_review")),
+            "needs_review": bool(decision.get("needs_review")) or CONFIRM in detail,
             "source": decision.get("source", "model"),
             "confidence": decision.get("confidence", ""),
             "note": decision.get("note", ""),

@@ -19,8 +19,9 @@ That creates `~/.job-agent/profile.yaml` and `~/.job-agent/documents/` — the
 same private folder that already holds your application log and saved browser
 logins. On Windows it's `C:\Users\<you>\.job-agent\`.
 
-The repo carries only `profile.example.yaml`, a blank template with no personal
-data in it. You can make this repo public without editing a thing.
+The blank profile is written from a template kept inside the code
+(`agent/template.py`), so the repo carries no profile-shaped file at all. You
+can make this repo public without editing a thing.
 
 **Already have a profile inside the project folder?** Move it:
 

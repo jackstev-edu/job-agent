@@ -4,7 +4,7 @@
 # These rules are a safety net for that, not the primary defence.
 # ---------------------------------------------------------------------------
 
-# Your profile. The repo carries profile.example.yaml only.
+# Your profile. `init` writes a blank one outside the repo.
 profile.yaml
 profile.local.yaml
 

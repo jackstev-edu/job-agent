@@ -14,11 +14,12 @@ portals autofill from the resume and would overwrite everything otherwise.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
-                   filler, letters, mapper, report, sensitive, tracker)
+                   filler, letters, mapper, report, sensitive, template, tracker)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
@@ -83,11 +84,7 @@ def cmd_init(args) -> None:
               f"inside the project folder.{OFF}")
         return
 
-    if not config.TEMPLATE_PATH.exists():
-        print(f"{RED}Template missing:{OFF} {config.TEMPLATE_PATH}")
-        return
-
-    shutil.copy(config.TEMPLATE_PATH, target)
+    target.write_text(template.BLANK_PROFILE, encoding="utf-8")
     print(f"  {GREEN}created{OFF} {target}")
     print(f"  {GREEN}created{OFF} {docs}{DIM}  <- put your resume here{OFF}")
     print(f"\nNext: open the profile and fill it in, drop your resume PDF in the")
@@ -353,12 +350,56 @@ def cmd_fill(args) -> None:
         if all_flags:
             print(f"{AMBER}{len(all_flags)} question(s) are waiting for you — see "
                   f"the top of the review sheet.{OFF}")
-        print(f"\n{DIM}Press Enter when you've finished with the form.{OFF}")
+        print(f"\n{DIM}Press Enter when you've finished with the form "
+              f"(before you click Submit).{OFF}")
         input()
+        _log_corrections(page, url, fields, plan, categories)
 
         if input("Mark as submitted? [y/N] ").strip().lower().startswith("y"):
             tracker.mark_submitted(url)
             print(f"{GREEN}Logged.{OFF}")
+
+
+def _log_corrections(page, url, fields, plan, categories) -> None:
+    """
+    Record what you changed after the agent finished. Values are kept only for
+    ordinary fields; for anything sensitive we log THAT you answered, not WHAT.
+    """
+    try:
+        final = extract.snapshot(page, fields)
+    except Exception as e:
+        print(f"{DIM}  couldn't read the final form ({str(e)[:60]}){OFF}")
+        return
+
+    norm = lambda v: "" if v in (None, False) else str(v).strip()
+    rows = []
+    for f in fields:
+        if f.get("type") in ("file", "password"):
+            continue
+        agent = (plan.get(f["ref"]) or {}).get("value")
+        now = final.get(f["ref"])
+        if norm(agent) == norm(now):
+            continue
+        cat = categories.get(f["ref"], "unknown")
+        # Values are only kept for fields both layers agreed were ordinary --
+        # the same test that let the model near them in the first place.
+        safe = (classify.action_for(cat) in ("autofill", "draft")
+                and not any(rx.search(sensitive._question_text(f))
+                            for rx, _ in sensitive._STOPS))
+        rows.append({
+            "url": url, "label": f.get("label"), "type": f.get("type"),
+            "category": cat,
+            "kind": "filled_blank" if norm(agent) == "" else "overwrote",
+            "agent_value": agent if safe else None,
+            "final_value": now if safe else None,
+        })
+
+    if rows:
+        path = config.STATE_DIR / "corrections.jsonl"
+        with path.open("a", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r, default=str) + "\n")
+        print(f"{DIM}  logged {len(rows)} correction(s) to {path}{OFF}")
 
 
 def _print_dry_run(fields, plan, flags) -> None:
