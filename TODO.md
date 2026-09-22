@@ -19,8 +19,10 @@
    matched that way is flagged for review, because a heading that describes
    your degree is not the same as a copy of it.
 
-4. **Fold in the Chromium-path fix**
-   Kills the `Task was destroyed` traceback after `doctor`.
+4. ~~**Fold in the Chromium-path fix**~~ DONE
+   `cmd_doctor` reads `pw.chromium.executable_path` inside `sync_playwright()`,
+   so the loop is still alive when it closes. `doctor` now runs clean — no
+   `Task was destroyed` traceback.
 
 5. **Write the `why_this_company` and `why_this_role` voice answers**
    Still blank. Drafted essays are built from them — blank in, generic out.
@@ -37,6 +39,8 @@
    LGBTQ+, first-generation, socio-economic background. New `eeo.*` lines
    answered verbatim from profile, defaulting to "Prefer not to say" like the
    existing ones. Profile-lookup path, never the model. Depends on #7.
+   New `eeo.*` patterns go ABOVE the gender pattern in `PROFILE_PATHS` —
+   "gender identity" otherwise catches orientation questions.
 
 9. **Collect corrections, then write `learn`**
    Every `fill` now diffs the form at the "Press Enter" prompt and appends what
@@ -55,3 +59,17 @@
    earlier steps are gone), Workday re-renders can strip `data-ja-ref` so those
    fields drop out of the diff, and you have to press Enter before Submit
    because the page navigates away afterwards.
+
+10. **Resolve the four `# VERIFY` lines** in `~/.job-agent/profile.yaml`
+    The current-status wording is copied verbatim onto forms.
+
+11. **Fix `letters.py` → `save_draft`**
+    Uses `config.DOCUMENTS_DIR`, which doesn't exist (config has
+    `DOCUMENTS_DIRS`). `--cover-letter` fails every time.
+
+12. **Clean up stale references**
+    README and setup.sh still point at `profile.example.yaml` and the in-repo
+    `documents/`. Template now lives in `agent/template.py`.
+
+13. **Decide on the mock form as a test fixture**
+    Currently only in a Claude Code scratchpad.
