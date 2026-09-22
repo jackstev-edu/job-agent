@@ -35,12 +35,39 @@
    login are one click. Then confirm the agent resumes on post-login pages.
    No plaintext credentials in profile.yaml.
 
-8. **Extend the EEO block for voluntary diversity questions**
-   LGBTQ+, first-generation, socio-economic background. New `eeo.*` lines
-   answered verbatim from profile, defaulting to "Prefer not to say" like the
-   existing ones. Profile-lookup path, never the model. Depends on #7.
-   New `eeo.*` patterns go ABOVE the gender pattern in `PROFILE_PATHS` —
-   "gender identity" otherwise catches orientation questions.
+8. ~~**Extend the EEO block for voluntary diversity questions**~~ DONE
+   Four new lines in `agent/template.py`, all defaulting to "Prefer not to
+   say": `sexual_orientation`, `transgender`, `first_generation`,
+   `socioeconomic_background`. Four matching rows in `PROFILE_PATHS`, placed
+   ABOVE the gender row as planned — "sexual orientation or gender identity"
+   is one field on plenty of portals, and the gender pattern matches that
+   phrase, so a lower-placed rule would never have been reached. The `eeo`
+   category in `classify.py` now names these so the classifier can't file one
+   as `personal_fact` and hand it to the model; `eeo` still routes to
+   profile-lookup only. It did NOT depend on #7 — profile lines plus regex,
+   nothing to do with the account wall.
+
+   Found and fixed while testing: `fit_to_widget` matched decline options with
+   a substring list containing "not wish", which misses Greenhouse's actual
+   wording, "I don't wish to answer", on the apostrophe. Every EEO default
+   — including the five that already shipped — silently became a manual field
+   on the commonest portal there is. Now a `_DECLINE` regex covering decline /
+   prefer not / don't wish / don't want to answer / choose not to self-identify
+   / no answer, in both curly and straight apostrophes. The "want" wording
+   turned up only when the regex was tested against the real profile rather
+   than invented examples, which is the argument for #13. Verified it still
+   won't hijack a real answer ("Male" stays "Male", "Yes, I have a disability"
+   stays itself, on lists that also offer a decline option).
+
+   Profile updated by hand on 22 Sep 2026 — all four keys present and
+   resolving, verified end to end against the real file: a bundled
+   "sexual orientation or gender identity" dropdown now fills the decline
+   option instead of being handed back.
+
+   Still open, and yours to decide: `eeo.disability_status` is the boolean
+   `false` rather than a decline string, so unlike the other eight it makes the
+   tool actively select "No, I do not have a disability" on a form. Working as
+   written; flagged only because it reads differently from its neighbours.
 
 9. **Collect corrections, then write `learn`**
    Every `fill` now diffs the form at the "Press Enter" prompt and appends what

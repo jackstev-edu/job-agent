@@ -54,6 +54,19 @@ PROFILE_PATHS: list[tuple[str, str]] = [
     (r"\brace\b|ethnic(ity)?", "eeo.race_ethnicity"),
     (r"veteran|protected\s+vet|military\s+service|uniformed\s+service", "eeo.veteran_status"),
     (r"disabilit|\bdisabled\b|section\s+503", "eeo.disability_status"),
+    # These four sit ABOVE the gender line on purpose. Forms bundle the
+    # questions — "sexual orientation or gender identity" is one field on
+    # plenty of portals — and the gender pattern matches that phrase, so a
+    # lower-placed orientation rule would never be reached and the answer
+    # would be read off the wrong profile line.
+    (r"sexual\s+orientation|\blgbt\w*|\bqueer\b", "eeo.sexual_orientation"),
+    (r"transgender|gender\s+expansive|non-?binary\s+identity", "eeo.transgender"),
+    (r"first[\s-]?gener\w*|first\s+in\s+(your|their|the)\s+family",
+     "eeo.first_generation"),
+    (r"socio-?economic|social\s+mobility|free\s+school\s+meals"
+     r"|parent\w*\s+(education|occupation|qualification)"
+     r"|low[\s-]income\s+(background|household)",
+     "eeo.socioeconomic_background"),
     (r"\bgender\b|\bsex\b(?!ual\s+orientation)|gender\s+identity", "eeo.gender"),
 
     (r"willing\s+to\s+relocat|able\s+to\s+relocat|open\s+to\s+relocat",
@@ -100,6 +113,22 @@ HARD_STOPS: list[tuple[str, str]] = [
      r"|non-?compete|restrictive\s+covenant",
      "Per-company relationship or contract question."),
 ]
+
+# Every way a form writes "I would rather not answer". Matching this as a
+# regex rather than a list of substrings is deliberate: Greenhouse ships
+# "I don't wish to answer", and a plain `"not wish" in option` test misses it
+# on the apostrophe, which silently turned every EEO default into a manual
+# field on the most common portal there is.
+_DECLINE = re.compile(
+    r"decline"
+    r"|prefer\s+not"
+    r"|do\s*n.?t\s+wish"
+    r"|(do\s+not|don.?t|not|choose\s+not|wish\s+not|rather\s+not)\s+(want\s+)?"
+    r"(to\s+)?(self[\s-]?)?(wish|say|answer|disclose|specify|identify|state)"
+    r"|no\s+answer"
+    r"|not\s+(specified|disclosed)",
+    re.I,
+)
 
 _PATHS = [(re.compile(p, re.I), path) for p, path in PROFILE_PATHS]
 _STOPS = [(re.compile(p, re.I), why) for p, why in HARD_STOPS]
@@ -202,9 +231,8 @@ def fit_to_widget(raw: Any, field: dict):
         if target and (target in low or low in target):
             return opt
 
-    if any(k in target for k in ("decline", "wish", "prefer not", "not disclose")):
+    if _DECLINE.search(target):
         for opt in options:
-            if any(k in opt.lower() for k in ("decline", "not wish", "prefer not",
-                                              "not disclose", "choose not", "not answer")):
+            if _DECLINE.search(opt.lower()):
                 return opt
     return None

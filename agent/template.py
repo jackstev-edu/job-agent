@@ -120,6 +120,14 @@ eeo:
   veteran_status: Prefer not to say
   disability_status: Prefer not to say
 
+  # Voluntary diversity questions. Same rule as above: declining is a real
+  # answer, not a gap. Portals ask these under a dozen different headings,
+  # so answer by meaning, not by the wording you happen to have seen.
+  sexual_orientation: Prefer not to say
+  transgender: Prefer not to say
+  first_generation: Prefer not to say      # first in your family at university
+  socioeconomic_background: Prefer not to say
+
 # -----------------------------------------------------------------------------
 #  EDUCATION  (most recent first)
 #
