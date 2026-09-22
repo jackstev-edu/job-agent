@@ -71,14 +71,12 @@ else
 fi
 
 # --- 5. folders --------------------------------------------------------------
+# Everything personal lives outside the repo, so the only folder setup
+# makes is the private one. The repo's documents/ is a fallback, not a
+# destination.
 step "Preparing folders"
-mkdir -p documents
-python - <<'PY'
-from agent import config
-config.ensure_dirs()
-print(f"    working folder: {config.STATE_DIR}")
-PY
-ok "documents/ and ~/.job-agent/ ready"
+JA_HOME=$(python -c 'from agent import config; config.ensure_dirs(); print(config.STATE_DIR)')
+ok "private folder ready: $JA_HOME"
 
 # --- 6. what's left ----------------------------------------------------------
 step "What's still needed"
@@ -91,13 +89,21 @@ else
     ok "ANTHROPIC_API_KEY is set"
 fi
 
-if ls documents/*.pdf >/dev/null 2>&1; then
-    ok "found a resume in documents/"
+if [ ! -f "$JA_HOME/profile.yaml" ]; then
+    warn "no profile yet — run 'python apply.py init' to write a blank one"
 else
-    warn "no PDF in documents/ — put your resume there and check the path in profile.yaml"
+    ok "profile found"
+fi
+
+if ls "$JA_HOME"/documents/*.pdf >/dev/null 2>&1; then
+    ok "found a resume in $JA_HOME/documents/"
+else
+    warn "no PDF in $JA_HOME/documents/ — put your resume there, then set"
+    printf "      %sdocuments.resume_default%s in your profile to match it\n" "$dim" "$off"
 fi
 
 printf "\n%sDone.%s Next:\n\n" "$green" "$off"
 printf "  source .venv/bin/activate\n"
+printf "  python apply.py init       %s# write a blank profile outside the repo%s\n" "$dim" "$off"
 printf "  make check                 %s# see what's missing from your profile%s\n" "$dim" "$off"
 printf "  make fill URL=<posting>    %s# fill an application%s\n\n" "$dim" "$off"

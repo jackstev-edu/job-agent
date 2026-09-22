@@ -63,13 +63,35 @@
 10. **Resolve the four `# VERIFY` lines** in `~/.job-agent/profile.yaml`
     The current-status wording is copied verbatim onto forms.
 
-11. **Fix `letters.py` → `save_draft`**
-    Uses `config.DOCUMENTS_DIR`, which doesn't exist (config has
-    `DOCUMENTS_DIRS`). `--cover-letter` fails every time.
+11. ~~**Fix `letters.py` → `save_draft`**~~ DONE
+    Now writes to `config.DOCUMENTS_DIRS[0]` — always the private
+    `~/.job-agent/documents`, never the in-repo fallback, because a draft names
+    a company you're applying to. The old `AttributeError` was invisible:
+    `apply.py` catches it and prints "cover letter failed" with the first 100
+    characters, so every `--cover-letter` run looked like an API problem.
 
-12. **Clean up stale references**
-    README and setup.sh still point at `profile.example.yaml` and the in-repo
-    `documents/`. Template now lives in `agent/template.py`.
+12. ~~**Clean up stale references**~~ DONE
+    `profile.example.yaml` was already gone everywhere, and README already
+    described `agent/template.py` and the private folder correctly — the only
+    file still steering you wrong was setup.sh. It no longer runs
+    `mkdir -p documents`, it captures `STATE_DIR` once and reports the private
+    folder, it looks for your resume in `$JA_HOME/documents/` rather than the
+    repo, and it points at `documents.resume_default` instead of "the path in
+    profile.yaml". It also now tells you to run `init`, which nothing in the
+    setup path mentioned.
 
 13. **Decide on the mock form as a test fixture**
     Currently only in a Claude Code scratchpad.
+
+14. **Decide whether `make` stays in the docs**
+    README and setup.sh both hand you `make check` / `make fill`, but the
+    Makefile hardcodes `.venv/bin/python`, which doesn't exist on Windows —
+    so every `make` example is dead on your own machine. Either teach the
+    Makefile to find `.venv/Scripts/python.exe` too, or drop `make` from the
+    docs and show `python apply.py` everywhere.
+
+15. **`documents/README.txt` is untracked**
+    `.gitignore` negates it (`!documents/README.txt`) but it was never added,
+    so a fresh clone gets no `documents/` at all and no explanation of the
+    fallback. Either `git add -f` it, or drop `ROOT / "documents"` from
+    `DOCUMENTS_DIRS` and make the private folder the only place documents live.

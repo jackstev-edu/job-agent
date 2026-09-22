@@ -68,12 +68,15 @@ def draft_cover_letter(profile, job_text: str, company: str = "",
 
 
 def save_draft(text: str, company: str = "", role: str = "") -> Path:
-    """Write the draft to documents/ so you can open and edit it."""
+    """Write the draft to your private documents folder so you can edit it."""
     config.ensure_dirs()
     slug = "-".join(
         w for w in f"{company}-{role}".lower().replace("/", "-").split() if w
     )[:60] or "untitled"
-    path = config.DOCUMENTS_DIR / f"cover-letter-{date.today():%Y%m%d}-{slug}.md"
+    # Always the first entry (~/.job-agent/documents), never the in-repo
+    # fallback: a draft names a company you're applying to, and that is not
+    # something to leave sitting in a git working tree.
+    path = config.DOCUMENTS_DIRS[0] / f"cover-letter-{date.today():%Y%m%d}-{slug}.md"
     path.write_text(
         f"# Cover letter draft\n\n"
         f"- Company: {company or '(unknown)'}\n"
