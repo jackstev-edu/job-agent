@@ -7,7 +7,8 @@ sends them personally. Windows, PowerShell, venv at `.venv`, run as
 ## Architecture
 
 - `profile.yaml` — the user's facts. Lives at `~/.job-agent/profile.yaml`,
-  NEVER in this repo. The repo ships `profile.example.yaml` (blank) only.
+  NEVER in this repo. `init` writes a blank one from the string in
+  `agent/template.py`; the repo holds no profile-shaped file at all.
 - `agent/classify.py` — asks the model what KIND each field is
   (`personal_fact`, `credential`, `legal_declaration`, `consent`,
   `per_company`, `eeo`, `work_authorization`, `free_text`...). It never asks

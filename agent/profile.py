@@ -30,6 +30,7 @@ REQUIRED_PATHS = [
 
 RECOMMENDED_PATHS = [
     "links.github",
+    "current_status.situation",
     "voice.canned_answers.why_this_company",
     "voice.canned_answers.why_this_role",
     "experience[0].supervisor_name",
@@ -80,6 +81,52 @@ class Profile:
             return default
         return default if node is None else node
 
+    def current_employment(self) -> dict:
+        """
+        Who you work for RIGHT NOW, resolved in code rather than inferred.
+
+        WHY THIS EXISTS: forms ask for "Current Employer" and "Current Job
+        Title" constantly, and the obvious answer — the top entry of your work
+        history — is wrong the moment that job has ended. Left to a model, the
+        most recent past employer gets offered as the current one, which is a
+        false statement on a form you sign. So the rule lives here:
+
+          1. an experience entry marked `current: true` wins;
+          2. otherwise the answers you wrote in `current_status`;
+          3. otherwise nothing, and the field goes to you.
+        """
+        for i, job in enumerate(self.data.get("experience") or []):
+            if job.get("current") is True:
+                return {
+                    "known": True,
+                    "employed": True,
+                    "employer": self.get(f"experience[{i}].company"),
+                    "job_title": self.get(f"experience[{i}].title"),
+                    "situation": self.get("current_status.situation"),
+                    "source": "experience entry marked current",
+                }
+
+        employer = self.get("current_status.employer_answer")
+        title = self.get("current_status.job_title_answer")
+        if employer or title:
+            return {
+                "known": True,
+                "employed": bool(self.get("current_status.employed")),
+                "employer": employer,
+                "job_title": title,
+                "situation": self.get("current_status.situation"),
+                "source": "current_status in profile.yaml",
+            }
+
+        return {
+            "known": False,
+            "employed": None,
+            "employer": None,
+            "job_title": None,
+            "situation": self.get("current_status.situation"),
+            "source": "nothing in the profile answers this",
+        }
+
     def facts_for_model(self) -> dict:
         """
         Everything the AI is permitted to see.
@@ -88,12 +135,16 @@ class Profile:
         legal or negotiating positions and they're resolved without a model,
         in sensitive.py.
         """
-        return {
+        facts = {
             k: self.data.get(k)
             for k in ("personal", "links", "education", "experience", "skills",
                       "certifications", "achievements", "voice")
             if k in self.data
         }
+        # Handed over already resolved, so the model copies an answer instead
+        # of working one out from dates. See current_employment().
+        facts["current_employment"] = self.current_employment()
+        return facts
 
     # -- completeness ------------------------------------------------------
 
