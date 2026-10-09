@@ -58,7 +58,9 @@ PROFILE_PATHS: list[tuple[str, str]] = [
     # questions — "sexual orientation or gender identity" is one field on
     # plenty of portals — and the gender pattern matches that phrase, so a
     # lower-placed orientation rule would never be reached and the answer
-    # would be read off the wrong profile line.
+    # would be read off the wrong profile line. Any new eeo.* row goes above
+    # the gender row too: its gender\s+identity alternative matches bundled
+    # "sexual orientation or gender identity" fields and would claim them first.
     (r"sexual\s+orientation|\blgbt\w*|\bqueer\b", "eeo.sexual_orientation"),
     (r"transgender|gender\s+expansive|non-?binary\s+identity", "eeo.transgender"),
     (r"first[\s-]?gener\w*|first\s+in\s+(your|their|the)\s+family",
