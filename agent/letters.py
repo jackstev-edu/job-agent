@@ -73,10 +73,10 @@ def save_draft(text: str, company: str = "", role: str = "") -> Path:
     slug = "-".join(
         w for w in f"{company}-{role}".lower().replace("/", "-").split() if w
     )[:60] or "untitled"
-    # Always the first entry (~/.job-agent/documents), never the in-repo
-    # fallback: a draft names a company you're applying to, and that is not
-    # something to leave sitting in a git working tree.
-    path = config.DOCUMENTS_DIRS[0] / f"cover-letter-{date.today():%Y%m%d}-{slug}.md"
+    # Named outright rather than taken from DOCUMENTS_DIRS, so reordering that
+    # search list can never move drafts into the repo: a draft names a company
+    # you're applying to, and that doesn't belong in a git working tree.
+    path = config.STATE_DIR / "documents" / f"cover-letter-{date.today():%Y%m%d}-{slug}.md"
     path.write_text(
         f"# Cover letter draft\n\n"
         f"- Company: {company or '(unknown)'}\n"
