@@ -5,8 +5,8 @@
 # whole python invocation every time.
 #
 # WHY MAKE: It's already on every Mac and Linux machine, it needs no install,
-# and `make help` gives you a menu. On Windows, use the commands in the
-# right-hand column directly.
+# and `make help` gives you a menu. It's a shorthand, not the interface: on
+# Windows, run `python apply.py <command>` directly, as the README shows.
 
 PY := .venv/bin/python
 SHELL := /bin/bash

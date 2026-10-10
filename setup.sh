@@ -105,5 +105,6 @@ fi
 printf "\n%sDone.%s Next:\n\n" "$green" "$off"
 printf "  source .venv/bin/activate\n"
 printf "  python apply.py init       %s# write a blank profile outside the repo%s\n" "$dim" "$off"
-printf "  make check                 %s# see what's missing from your profile%s\n" "$dim" "$off"
-printf "  make fill URL=<posting>    %s# fill an application%s\n\n" "$dim" "$off"
+printf "  python apply.py check      %s# see what's missing from your profile%s\n" "$dim" "$off"
+printf "  python apply.py fill <url> %s# fill an application%s\n" "$dim" "$off"
+printf "\n  %s(or the shorthand: make check, make fill URL=<url> — see make help)%s\n\n" "$dim" "$off"

@@ -70,36 +70,51 @@ Override the location with `JOB_AGENT_HOME`, or point at a single file with
 
 ## 2. Setup
 
+Every command in this README is `python apply.py <command>`, run with the
+virtual environment active. That works the same on Windows, Mac and Linux.
+
+**Windows (PowerShell):**
+
+```powershell
+cd job-agent
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+playwright install chromium
+python apply.py init      # creates your profile outside the repo
+```
+
+Then set your API key from [console.anthropic.com](https://console.anthropic.com)
+so it survives new terminals: `setx ANTHROPIC_API_KEY sk-ant-...`.
+
+**Mac / Linux:**
+
 ```bash
 cd job-agent
 ./setup.sh
-python apply.py init     # creates your profile outside the repo
+source .venv/bin/activate
+python apply.py init      # creates your profile outside the repo
 ```
 
-That checks your Python version, creates an isolated environment, installs the
+`setup.sh` checks your Python version, creates the environment, installs the
 three libraries, downloads a private copy of Chrome, and tells you what's
-missing. Takes about two minutes, mostly the browser download.
-
-Then get an API key from [console.anthropic.com](https://console.anthropic.com)
-and add it to your shell profile (`~/.zshrc` on a Mac, `~/.bashrc` on Linux):
+missing. Then add your key to `~/.zshrc` (Mac) or `~/.bashrc` (Linux):
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Open a new terminal, then:
+Either way, open a new terminal, activate the environment, then:
 
 ```bash
-source .venv/bin/activate
-make doctor     # confirms everything is wired up
-make check      # confirms your profile is complete
+python apply.py doctor    # confirms everything is wired up
+python apply.py check     # confirms your profile is complete
 ```
 
-**Windows:** `make` and `setup.sh` won't run natively. Either use WSL, which is
-the easy path, or run the underlying commands directly — `python -m venv .venv`,
-`.venv\Scripts\activate`, `pip install -r requirements.txt`,
-`playwright install chromium`, then `python apply.py <command>` instead of
-`make <command>`.
+**Optional shorthand on Mac / Linux:** the `Makefile` wraps these — `make
+doctor`, `make check`, `make fill URL=...` — and calls the venv's Python
+directly, so you needn't activate it. It doesn't run on Windows; `make help`
+lists the rest.
 
 Cost, for planning: each application costs a few cents of API usage. A hundred
 applications is somewhere under five dollars.
@@ -109,14 +124,14 @@ applications is somewhere under five dollars.
 ## 3. Using it
 
 ```bash
-make dry URL=https://job-boards.greenhouse.io/company/jobs/1234
+python apply.py fill https://job-boards.greenhouse.io/company/jobs/1234 --dry-run
 ```
 
 Do this first, two or three times. A dry run reads the form and prints what it
 *would* enter without touching anything. It's how you build trust in it.
 
 ```bash
-make fill URL=https://job-boards.greenhouse.io/company/jobs/1234
+python apply.py fill https://job-boards.greenhouse.io/company/jobs/1234
 ```
 
 The real thing. A Chrome window opens, the agent works out which portal it's
@@ -127,13 +142,18 @@ items in the form and click Submit.
 Options:
 
 ```bash
-make fill URL=... RESUME=robotics    # use a resume variant
-make fill URL=... LETTER=1           # also draft a cover letter
-make list                            # everything you've applied to
-make list STATUS=submitted
-make followup DAYS=21                # who hasn't replied
-make help                            # the full menu
+python apply.py fill <url> --resume robotics   # use a resume variant
+python apply.py fill <url> --cover-letter      # also draft a cover letter
+python apply.py list                           # everything you've applied to
+python apply.py list --status submitted
+python apply.py status <url> submitted         # after you press Submit
+python apply.py followup --days 21             # who hasn't replied
+python apply.py --help                         # the full menu
 ```
+
+With `make`, the same things are `make dry URL=...`, `make fill URL=...
+RESUME=robotics LETTER=1`, `make list STATUS=submitted` and `make followup
+DAYS=21`.
 
 When something goes wrong — and it will, on Workday — the browser window stays
 open. Finish by hand, and note which selector failed so you can fix it.
@@ -152,8 +172,9 @@ from it, and nothing is ever invented that isn't written here.
 **`setup.sh`** (Bash) — Installs the whole toolchain in one command. Written in
 shell because it's pure orchestration and works before Python is set up.
 
-**`Makefile`** (Make) — Turns long commands into short ones. Not available on
-Windows; use `python apply.py <command>` instead.
+**`Makefile`** (Make) — Optional short names for `apply.py` commands on Mac
+and Linux. It hard-codes bash and `.venv/bin/python`, so it doesn't run on
+Windows and isn't meant to; `apply.py` is the real interface.
 
 **`apply.py`** (Python) — The command you run. It decides the order of
 operations, which matters: the resume uploads before text is typed, because
@@ -294,8 +315,8 @@ silently failed to fill. Fixed, with a comment explaining why at
 
 **Not yet tested:** real portals. Mock forms are well-behaved and Workday is
 not. Browser automation always needs a first session of fixing selectors
-against live pages, so start with `make dry` on a couple of real Greenhouse or
-Lever postings.
+against live pages, so start with `python apply.py fill <url> --dry-run` on a
+couple of real Greenhouse or Lever postings.
 
 The most likely thing to need work is `labelFor` in `extract.py` — that's what
 pairs a question with its input box, and it's where unusual portals break first.

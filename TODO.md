@@ -127,12 +127,12 @@
     `python tests/test_button_pairs.py` from anywhere). The original 20-field
     mock form from the first round wasn't recovered; only this one survived.
 
-14. **Decide whether `make` stays in the docs**
-    README and setup.sh both hand you `make check` / `make fill`, but the
-    Makefile hardcodes `.venv/bin/python`, which doesn't exist on Windows —
-    so every `make` example is dead on your own machine. Either teach the
-    Makefile to find `.venv/Scripts/python.exe` too, or drop `make` from the
-    docs and show `python apply.py` everywhere.
+14. ~~**Decide whether `make` stays in the docs**~~ DONE
+    It stays, as a Mac/Linux shorthand. README and setup.sh now lead with
+    `python apply.py <cmd>` everywhere, with a PowerShell setup block, and
+    mention `make` once as optional. The Makefile itself is unchanged apart
+    from its header comment — it hard-codes `SHELL := /bin/bash`, so making
+    it Windows-aware would be fighting it.
 
 15. ~~**`documents/README.txt` is untracked**~~ DONE
     Tracked now. The negation never worked: `.gitignore` excluded the folder
