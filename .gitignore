@@ -9,7 +9,7 @@ profile.yaml
 profile.local.yaml
 
 # Documents: resumes, transcripts, cover letter drafts.
-documents/
+documents/*
 !documents/README.txt
 
 # Anything the agent generates.

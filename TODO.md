@@ -134,8 +134,9 @@
     Makefile to find `.venv/Scripts/python.exe` too, or drop `make` from the
     docs and show `python apply.py` everywhere.
 
-15. **`documents/README.txt` is untracked**
-    `.gitignore` negates it (`!documents/README.txt`) but it was never added,
-    so a fresh clone gets no `documents/` at all and no explanation of the
-    fallback. Either `git add -f` it, or drop `ROOT / "documents"` from
-    `DOCUMENTS_DIRS` and make the private folder the only place documents live.
+15. ~~**`documents/README.txt` is untracked**~~ DONE
+    Tracked now. The negation never worked: `.gitignore` excluded the folder
+    itself (`documents/`), and git can't re-include a file whose parent
+    directory is excluded. It's `documents/*` now, so the README is visible
+    to git and every other file in there — subfolders included — is still
+    ignored. The in-repo fallback in `DOCUMENTS_DIRS` stays.
