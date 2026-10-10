@@ -24,10 +24,15 @@ if TYPE_CHECKING:
 # later even on sites (Workday) that regenerate their real IDs constantly.
 REF_ATTR = "data-ja-ref"
 
+# Ashby asks Yes/No questions as a pair of <button>s in this container, with
+# the real value in a hidden checkbox. Matched as a class token, not a
+# substring: the buttons themselves carry "...-input-yesno-option".
+BUTTON_GROUP = ".ashby-application-form-input-yesno"
+
 # --- the injected JavaScript -------------------------------------------------
 # This runs inside the page, in the browser, with full access to the DOM.
 _SCAN_JS = r"""
-() => {
+(GROUP) => {
   const REF = 'data-ja-ref';
   let counter = 0;
   const fields = [];
@@ -85,7 +90,50 @@ _SCAN_JS = r"""
   // Radio buttons come in groups; we collapse each group into one question.
   const seenGroups = new Set();
 
-  document.querySelectorAll('input, select, textarea').forEach(el => {
+  // A question answered by clicking one of several buttons. Its only input is
+  // a hidden checkbox, which isVisible rightly drops, so without this the
+  // whole question vanished from the field list instead of reaching you.
+  // Emitted as a radio group so the rest of the pipeline needs no new case;
+  // `widget` tells filler.py to click the button rather than check an input.
+  const buttonGroup = box => {
+    if (!isVisible(box)) return;
+    const optionText = b => (b.innerText || '').trim()
+                         || (b.getAttribute('data-option') || '').trim();
+    const buttons = [...box.querySelectorAll('button')]
+      .filter(b => isVisible(b) && optionText(b));
+    if (!buttons.length) return;
+
+    // Same order as radio groups below, for the same reason: options first,
+    // then the first option's tag doubles as the group's.
+    const optionRefs = buttons.map(b => stamp(b));
+
+    const title = box.closest('.ashby-application-form-field-entry')
+      ?.querySelector('.ashby-application-form-question-title');
+    const hidden = box.querySelector('input');
+    const pressed = buttons.find(b => b.getAttribute('aria-pressed') === 'true');
+
+    fields.push({
+      ref: optionRefs[0],
+      type: 'radio',
+      widget: 'buttons',
+      name: hidden?.name || '',
+      label: (title?.innerText || labelFor(box)).trim().slice(0, 300),
+      options: buttons.map(optionText),
+      option_refs: optionRefs,
+      // Ashby marks required on the question title's class, not the input.
+      required: /required/i.test(title?.className || '') || !!hidden?.required
+             || box.getAttribute('aria-required') === 'true',
+      help_text: helpFor(box),
+      current_value: pressed ? optionText(pressed) : '',
+    });
+  };
+
+  // GROUP is in this selector so a button group lands in page order: the
+  // container comes before the hidden checkbox inside it.
+  document.querySelectorAll(`input, select, textarea, ${GROUP}`).forEach(el => {
+    if (el.matches(GROUP)) { buttonGroup(el); return; }
+    if (el.closest(GROUP)) return;      // its hidden checkbox; the group covers it
+
     const type = (el.type || el.tagName).toLowerCase();
     if (['hidden','submit','button','reset','image'].includes(type)) return;
     if (el.disabled || el.readOnly || !isVisible(el)) return;
@@ -173,7 +221,7 @@ _NOISE = ("search", "cookie", "newsletter", "subscribe", "promo code",
 
 def extract_fields(page: "Page") -> list[dict]:
     """Return a tidy list of every fillable question on the page."""
-    fields = page.evaluate(_SCAN_JS)
+    fields = page.evaluate(_SCAN_JS, BUTTON_GROUP)
     return [
         f for f in fields
         if not any(word in f"{f.get('label','')} {f.get('name','')}".lower()
@@ -350,6 +398,8 @@ _SNAPSHOT_JS = r"""
     let v;
     if (t === 'checkbox' || t === 'radio') v = el.checked;
     else if (el.tagName === 'SELECT') v = el.selectedOptions[0]?.text.trim() ?? '';
+    // Before 'value': a <button> has one, and it's always empty.
+    else if (el.hasAttribute('aria-pressed')) v = el.getAttribute('aria-pressed') === 'true';
     else if ('value' in el) v = el.value;
     else v = el.innerText.trim();           // custom comboboxes
     return [el.getAttribute('data-ja-ref'), v];
