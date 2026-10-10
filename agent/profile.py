@@ -202,7 +202,10 @@ class Profile:
         if p.is_absolute():
             return p if p.exists() else None
 
-        roots = [self.path.parent] + list(config.DOCUMENTS_DIRS) + [config.ROOT]
+        # Not config.ROOT itself: a resume found there is one sitting loose in
+        # the working tree, where no ignore rule covers it. Failing to find it
+        # is the nudge to move it somewhere private.
+        roots = [self.path.parent] + list(config.DOCUMENTS_DIRS)
         for root in roots:
             for candidate in (root / p, root / p.name):
                 if candidate.exists():

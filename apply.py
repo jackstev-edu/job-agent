@@ -142,7 +142,7 @@ def cmd_doctor(args) -> None:
         print(f"        {AMBER}in the project folder — run `apply.py init --migrate`{OFF}")
     try:
         resume = Profile.load(args.profile).resume_path()
-        line(resume is not None, "resume file found", str(resume or "put a PDF in documents/"))
+        line(resume is not None, "resume file found", str(resume or f"put a PDF in {config.STATE_DIR / 'documents'}"))
     except Exception as e:
         line(False, "profile.yaml loads", str(e)[:80])
 
@@ -158,7 +158,8 @@ def cmd_check(args) -> None:
 
     print(f"\n{BOLD}Profile:{OFF} {prof.path}")
     resume = prof.resume_path()
-    print(f"{BOLD}Resume:{OFF}  {resume or RED + 'not found — put a PDF in documents/' + OFF}\n")
+    missing = f"{RED}not found — put a PDF in {config.STATE_DIR / 'documents'}{OFF}"
+    print(f"{BOLD}Resume:{OFF}  {resume or missing}\n")
 
     if audit["required"]:
         print(f"{RED}{BOLD}Must fill before this is useful ({len(audit['required'])}){OFF}")
