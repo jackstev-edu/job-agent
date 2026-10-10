@@ -49,8 +49,15 @@ CATALOG: dict[str, ATS] = {
     ),
     "ashby": ATS(
         "Ashby", "easy",
-        "Modern single-page app, but well built and uses real form elements.",
+        "Modern single-page app. Mostly real form elements, except Yes/No "
+        "questions, which are a pair of buttons over a hidden checkbox.",
         quirks=["Dropdowns are custom comboboxes, not <select> elements.",
+                "Yes/No questions are button pairs over a hidden checkbox; "
+                "answered by clicking, and a pressed one is left alone (a second "
+                "click toggles it off).",
+                "Those buttons are typeless, so inside a <form> they'd submit it. "
+                "No <form> seen so far; if one appears they're all refused and "
+                "the questions come to you.",
                 "The form is sometimes behind an 'Apply' button."],
     ),
     "workday": ATS(

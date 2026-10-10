@@ -30,6 +30,20 @@
 6. **Run it on a Greenhouse or Lever posting**
    Only tested against a bespoke portal so far.
 
+   Progress — Ashby, 9 Oct 2026: a live Ashby posting asked its Yes/No
+   questions (work authorization, sponsorship, commute) as a pair of
+   `<button>`s over a hidden checkbox. The scan dropped hidden inputs, so those
+   questions vanished from the field list entirely. `extract.py` now emits each
+   button group as a radio group with `widget: 'buttons'`, and `filler.py`
+   answers it by clicking — re-checking at click time that the button is still
+   in its group, can't submit a form, and doesn't read like Submit or I agree,
+   and leaving an already-pressed answer alone. Covered by
+   `tests/test_button_pairs.py`. Greenhouse and Lever still untested live.
+
+   If Ashby ever wraps these buttons in a `<form>`, the submit guard refuses
+   every one of them (they're typeless, so they'd submit it) and the questions
+   all come to you. That's deliberate — the safe failure. Don't loosen it.
+
 7. **Get past the account wall**
    Load a password manager extension into `chrome-profile` so registration and
    login are one click. Then confirm the agent resumes on post-login pages.
@@ -107,8 +121,11 @@
     profile.yaml". It also now tells you to run `init`, which nothing in the
     setup path mentioned.
 
-13. **Decide on the mock form as a test fixture**
-    Currently only in a Claude Code scratchpad.
+13. ~~**Decide on the mock form as a test fixture**~~ DONE
+    The Ashby button-pair form is now `tests/button_pairs.html`, driven by
+    `tests/test_button_pairs.py` (a plain script — 30 checks, run it with
+    `python tests/test_button_pairs.py` from anywhere). The original 20-field
+    mock form from the first round wasn't recovered; only this one survived.
 
 14. **Decide whether `make` stays in the docs**
     README and setup.sh both hand you `make check` / `make fill`, but the

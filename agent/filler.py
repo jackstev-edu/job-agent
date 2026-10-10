@@ -53,6 +53,9 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
     try:
         element.scroll_into_view_if_needed(timeout=4000)
 
+        if field_type == "radio" and field.get("widget") == "buttons":
+            return _press_option_button(page, field, str(value))
+
         if field_type == "radio":
             options = field.get("options", [])
             option_refs = field.get("option_refs", [])
@@ -160,6 +163,50 @@ def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool
     if how in ("exact", "normalized"):
         return True, f"selected '{choice}'"
     return True, f"selected '{choice}' — {how}{CONFIRM}"
+
+
+_BUTTON_FACTS_JS = r"""
+(el, group) => ({
+  text: (el.innerText || '').trim(),
+  inGroup: el.tagName === 'BUTTON' && !!el.parentElement?.closest(group),
+  // A <button> with no type attribute IS type=submit, and Ashby's have none.
+  // That only matters with a form to submit, so the test is both together.
+  submits: !!el.form && ['submit', 'image'].includes((el.type || '').toLowerCase()),
+  pressed: el.getAttribute('aria-pressed'),
+})
+"""
+
+
+def _press_option_button(page: "Page", field: dict, value: str) -> tuple[bool, str]:
+    """
+    Answer a button-pair question by clicking the matching button.
+
+    WHY SO MANY CHECKS: this is the one fill path that clicks a <button>, the
+    same kind of element as Submit. So the button must still sit inside the
+    group we scanned, must not be able to submit a form, and must not read
+    like Submit or I agree — checked again here, at click time, not trusted
+    from the scan. And a pressed button is left alone: clicking it again can
+    toggle the answer off.
+    """
+    options = field.get("options", [])
+    option_refs = field.get("option_refs", [])
+    if value not in options:
+        return False, f"'{value}' is not one of the options"
+
+    button = _element(page, option_refs[options.index(value)])
+    facts = button.evaluate(_BUTTON_FACTS_JS, extract.BUTTON_GROUP)
+    if not facts["inGroup"]:
+        return False, "refused — that button is no longer inside its question"
+    if facts["submits"] or is_forbidden_button(facts["text"]):
+        return False, f"refused — '{facts['text']}' could submit or agree to something"
+    if facts["pressed"] == "true":
+        return True, "already selected"
+
+    button.click(timeout=4000)
+    page.wait_for_timeout(150)
+    if facts["pressed"] is not None and button.get_attribute("aria-pressed") != "true":
+        return False, f"clicked '{value}' but the form didn't register it"
+    return True, "selected"
 
 
 def _abandon_combobox(page: "Page", element) -> None:
