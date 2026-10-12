@@ -109,6 +109,17 @@
    fields drop out of the diff, and you have to press Enter before Submit
    because the page navigates away afterwards.
 
+   Progress, 12 Oct 2026: a report-only `apply.py learn` exists (`agent/learn.py`).
+   It groups corrections that recur on 2+ postings by profile line, or by
+   question when no line is known. For each group it prints a suggested
+   profile edit, a profile addition, or a label→line alias. Eligibility, EEO
+   and compensation corrections are only flagged. It writes nothing. Each log
+   row now also records `profile_path` (the line's name, never a sensitive
+   value) and `logged_at`. Still open: collecting ~10 real applications, then
+   deciding which suggestions to act on. Classifier few-shot examples aren't
+   proposed yet. No real corrections exist yet, so it has only run on seeded
+   data.
+
 10. ~~**Resolve the four `# VERIFY` lines** in `~/.job-agent/profile.yaml`~~ DONE
     The current-status wording is copied verbatim onto forms. Confirmed
     12 Oct 2026: `check --verbose` lists no `# VERIFY` lines.

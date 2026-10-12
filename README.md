@@ -148,6 +148,7 @@ python apply.py list                           # everything you've applied to
 python apply.py list --status submitted
 python apply.py status <url> submitted         # after you press Submit
 python apply.py followup --days 21             # who hasn't replied
+python apply.py learn                          # profile fixes your corrections suggest
 python apply.py --help                         # the full menu
 ```
 

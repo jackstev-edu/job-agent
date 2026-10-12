@@ -19,7 +19,8 @@ import sys
 from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
-                   filler, letters, mapper, report, sensitive, template, tracker)
+                   filler, learn, letters, mapper, report, sensitive, template,
+                   tracker)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
@@ -405,12 +406,20 @@ def _log_corrections(page, url, fields, plan, categories) -> None:
         safe = (classify.action_for(cat) in ("autofill", "draft")
                 and not any(rx.search(sensitive._question_text(f))
                             for rx, _ in sensitive._STOPS))
+        # Which profile line the question belongs to: the one that filled it,
+        # else the one its wording maps to. Only the line's name is kept, never
+        # its value, so this is safe to log for sensitive questions too.
+        line = ((plan.get(f["ref"]) or {}).get("profile_path")
+                or next((p for rx, p in sensitive._PATHS
+                         if rx.search(sensitive._question_text(f))), None))
         rows.append({
             "url": url, "label": f.get("label"), "type": f.get("type"),
             "category": cat,
             "kind": "filled_blank" if norm(agent) == "" else "overwrote",
             "agent_value": agent if safe else None,
             "final_value": now if safe else None,
+            "profile_path": line,
+            "logged_at": tracker._timestamp(),
         })
 
     if rows:
@@ -466,6 +475,21 @@ def _print_flags(flags) -> None:
     for flag in flags:
         print(f"  · {flag['label']}")
         print(f"    {DIM}{flag['reason']}{OFF}")
+
+
+# ---------------------------------------------------------------------------
+#  learn — what your corrections keep saying (report only)
+# ---------------------------------------------------------------------------
+def cmd_learn(args) -> None:
+    # Report only: reads the log and the profile, writes nothing anywhere.
+    path = learn.corrections_path()
+    rows, bad = learn.load_rows(path)
+    try:
+        profile_data = Profile.load(args.profile).data
+    except FileNotFoundError:
+        profile_data = None
+        print(f"{DIM}No profile found; suggestions can't point at profile lines.{OFF}")
+    print(learn.render(rows, bad, learn.analyse(rows, profile_data), path))
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +549,9 @@ def main() -> None:
     p_fill.add_argument("--max-steps", type=int, default=6,
                         help="how many wizard pages to walk (default 6)")
     p_fill.set_defaults(fn=cmd_fill)
+
+    sub.add_parser("learn", help="suggest profile fixes from your logged corrections "
+                   "(changes nothing)").set_defaults(fn=cmd_learn)
 
     p_list = sub.add_parser("list", help="everything you've applied to")
     p_list.add_argument("--status", default=None)
