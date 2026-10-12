@@ -66,25 +66,41 @@ def find(url: str) -> dict | None:
         return dict(row) if row else None
 
 
+# Statuses that record what happened after you sent it. A --force rerun is
+# only refilling the form, so it must not knock one of these back to draft.
+PAST_DRAFT = ("submitted", "rejected", "interview", "offer")
+
+# In the upsert below: true when the row already logged is past draft.
+_SETTLED = "applications.status IN ({})".format(", ".join(f"'{s}'" for s in PAST_DRAFT))
+
+
+def _unless_settled(column: str) -> str:
+    return f"{column} = CASE WHEN {_SETTLED} THEN applications.{column} ELSE excluded.{column} END"
+
+
 def record(url: str, *, company="", role="", ats="", resume_used="",
            answers=None, flags=None, report_path="", status="draft") -> None:
-    """Insert, or update in place if this URL is already logged."""
+    """
+    Insert, or update in place if this URL is already logged.
+
+    A row past draft keeps its status, submitted_at, and what it was sent
+    with (company, role, ats, resume). Only the answers, flags and review
+    sheet are refreshed. A draft row is refreshed in full.
+    """
+    keep = ",\n                ".join(
+        _unless_settled(c) for c in ("company", "role", "ats", "resume_used", "status"))
     with _connect() as conn:
         conn.execute(
-            """
+            f"""
             INSERT INTO applications
                 (url, company, role, ats, status, resume_used,
                  answers_json, flags_json, report_path, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url) DO UPDATE SET
-                company      = excluded.company,
-                role         = excluded.role,
-                ats          = excluded.ats,
-                resume_used  = excluded.resume_used,
                 answers_json = excluded.answers_json,
                 flags_json   = excluded.flags_json,
                 report_path  = excluded.report_path,
-                status       = excluded.status
+                {keep}
             """,
             (url, company, role, ats, status, resume_used,
              json.dumps(answers or [], default=str),
