@@ -12,8 +12,10 @@ you'll want on hand the day someone calls about it.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
+from collections.abc import Iterator
 from datetime import datetime, timezone
 
 from . import config
@@ -39,12 +41,19 @@ CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
 """
 
 
-def _connect() -> sqlite3.Connection:
+@contextlib.contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
+    # sqlite3's own `with conn:` commits but never closes, and an open
+    # connection keeps the file locked on Windows until garbage collection.
     config.ensure_dirs()
     conn = sqlite3.connect(config.DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    return conn
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.executescript(SCHEMA)
+        with conn:                      # commit on success, roll back on error
+            yield conn
+    finally:
+        conn.close()
 
 
 def _timestamp() -> str:
@@ -70,6 +79,8 @@ def record(url: str, *, company="", role="", ats="", resume_used="",
             ON CONFLICT(url) DO UPDATE SET
                 company      = excluded.company,
                 role         = excluded.role,
+                ats          = excluded.ats,
+                resume_used  = excluded.resume_used,
                 answers_json = excluded.answers_json,
                 flags_json   = excluded.flags_json,
                 report_path  = excluded.report_path,
