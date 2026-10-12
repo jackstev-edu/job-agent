@@ -294,40 +294,59 @@ The adapters are honest stubs.
 
 ## 7. What's been tested, and what hasn't
 
-Run end to end against a mock application form with 20 fields — text inputs,
-dropdowns, radio groups, checkboxes, textareas, a file upload, and a decoy
-search box. Verified in the live DOM:
+### The test suite
 
-- every text field, dropdown and radio group received the right value
-- the resume uploaded
-- the search box was correctly ignored
-- **Desired Salary was left blank**, because it's blank in your profile
-- **"I certify the above is true and complete" was left unticked**
-- **"Have you previously been employed here?" was left blank**
-- "now or in the future require sponsorship" was answered from the *future*
-  field, not the *now* field — those are different questions and the rule order
-  in `sensitive.py` gets it right
+Each test drives a small mock form in headless Chromium, or the code directly.
+None of them needs an API key, the network, or your profile: they run against
+a throwaway `JOB_AGENT_HOME`, so `~/.job-agent` is never touched.
 
-That test caught one real bug on the first run: radio groups were overwriting
-their own reference tag, so every radio button on every form would have
-silently failed to fill. Fixed, with a comment explaining why at
-`extract.py`.
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt   # once
+.venv\Scripts\python.exe -m pytest tests/
+```
 
-**Not yet tested:** real portals. Mock forms are well-behaved and Workday is
-not. Browser automation always needs a first session of fixing selectors
-against live pages, so start with `python apply.py fill <url> --dry-run` on a
-couple of real Greenhouse or Lever postings.
+Every file also runs on its own as a script (`python tests/test_captcha.py`),
+printing each check as it goes.
 
-The most likely thing to need work is `labelFor` in `extract.py` — that's what
-pairs a question with its input box, and it's where unusual portals break first.
+| Fixture / test | What it pins down |
+| --- | --- |
+| `button_pairs.html` · `test_button_pairs.py` | Ashby's Yes/No questions asked as `<button>` pairs over a hidden checkbox, copied from a live posting: read as radio groups in page order, answered by clicking, an already-pressed answer left alone. The traps are an "I agree" option and a button inside a real `<form>`. Both are refused, and the form is never submitted. |
+| `greenhouse_select.html` · `test_greenhouse_select.py` | Greenhouse's react-select dropdowns. A required one renders a hidden `aria-hidden tabindex=-1` validation input; it must not come out as a second question. A styled radio group with opacity-0 inputs must still be read. |
+| `recaptcha.html` · `test_captcha.py` | Invisible reCAPTCHA's always-visible badge is not a challenge, so there's no pause. A revealed challenge frame, a checkbox reCAPTCHA, or any other captcha still stops the run. |
+| `test_api_key.py` | Against a local stub API: a 401 or a missing key stops `fill`, dry runs included, before the browser opens. Any other failure falls through to the classifier's fail-safe. |
+| `test_dry_run_and_tracker.py` | A null answer prints as a blank with the model's note, not `[ok] None`. A `--force` rerun updates every column of the log. |
+| `test_save_draft.py` | A cover-letter draft is written to the private documents folder, never the repo. |
+
+### Real portals
+
+- **A bespoke employer portal** (September 2026): the first live runs.
+- **Ashby** (October 2026): a live posting's Yes/No button pairs were
+  invisible to the scan; fixed, and copied into `button_pairs.html`.
+- **Greenhouse** (October 2026): a dry run on a live posting
+  (`job-boards.greenhouse.io`) completed. Greenhouse runs are also where two
+  problems turned up: every required dropdown appeared twice, and every run
+  paused for a CAPTCHA that wasn't there. Both are fixed and covered above.
+
+The very first mock form, a 20-field page, wasn't kept. It caught one real
+bug: radio groups were overwriting their own reference tag, so every radio
+button on every form would have silently failed to fill. The fix is
+explained in a comment in `extract.py`.
+
+**Not yet tested:** Lever, Workday, iCIMS, Taleo and SuccessFactors, and a
+full (non-dry) fill on Greenhouse. Mock forms are well-behaved and Workday is
+not, so start each new portal with `python apply.py fill <url> --dry-run`.
+
+The most likely thing to need work is `labelFor` in `extract.py`. That's what
+pairs a question with its input box, and it's where unusual portals break
+first.
 
 ---
 
 ## 8. Where to take it next
 
 1. Fill the profile gaps. Highest return per minute, by a wide margin.
-2. Three dry runs on real Greenhouse and Lever postings; fix what the extractor
-   misses.
+2. Dry runs on real Lever postings (Greenhouse and Ashby are done); fix what
+   the extractor misses.
 3. Finish the Workday adapter properly — step detection, the three-spinner date
    widget, and the account-creation handoff.
 4. A discovery feed: poll the public Greenhouse and Lever job APIs for your

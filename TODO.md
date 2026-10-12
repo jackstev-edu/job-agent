@@ -26,9 +26,11 @@
 
 5. **Write the `why_this_company` and `why_this_role` voice answers**
    Still blank. Drafted essays are built from them — blank in, generic out.
+   Re-checked 12 Oct 2026: `check --verbose` still lists both under "Worth
+   filling", so this stays open.
 
 6. **Run it on a Greenhouse or Lever posting**
-   Only tested against a bespoke portal so far.
+   First tested against a bespoke portal; progress on real ATSs below.
 
    Progress — Ashby, 9 Oct 2026: a live Ashby posting asked its Yes/No
    questions (work authorization, sponsorship, commute) as a pair of
@@ -38,7 +40,13 @@
    answers it by clicking — re-checking at click time that the button is still
    in its group, can't submit a form, and doesn't read like Submit or I agree,
    and leaving an already-pressed answer alone. Covered by
-   `tests/test_button_pairs.py`. Greenhouse and Lever still untested live.
+   `tests/test_button_pairs.py`.
+
+   Progress — Greenhouse, Oct 2026: a dry run on a live Greenhouse posting
+   completed. Greenhouse is also where two bugs showed up, both now fixed
+   (#16, #17): every required react-select dropdown came out twice, and
+   invisible reCAPTCHA's badge paused every run. A full (non-dry) Greenhouse
+   fill and anything on Lever are still untested live.
 
    If Ashby ever wraps these buttons in a `<form>`, the submit guard refuses
    every one of them (they're typeless, so they'd submit it) and the questions
@@ -101,8 +109,9 @@
    fields drop out of the diff, and you have to press Enter before Submit
    because the page navigates away afterwards.
 
-10. **Resolve the four `# VERIFY` lines** in `~/.job-agent/profile.yaml`
-    The current-status wording is copied verbatim onto forms.
+10. ~~**Resolve the four `# VERIFY` lines** in `~/.job-agent/profile.yaml`~~ DONE
+    The current-status wording is copied verbatim onto forms. Confirmed
+    12 Oct 2026: `check --verbose` lists no `# VERIFY` lines.
 
 11. ~~**Fix `letters.py` → `save_draft`**~~ DONE
     Now writes to `config.DOCUMENTS_DIRS[0]` — always the private
@@ -123,8 +132,8 @@
 
 13. ~~**Decide on the mock form as a test fixture**~~ DONE
     The Ashby button-pair form is now `tests/button_pairs.html`, driven by
-    `tests/test_button_pairs.py` (a plain script — 30 checks, run it with
-    `python tests/test_button_pairs.py` from anywhere). The original 20-field
+    `tests/test_button_pairs.py` (30 checks in four tests). Every test now
+    runs under `python -m pytest tests/`, and still runs alone as a script. The original 20-field
     mock form from the first round wasn't recovered; only this one survived.
 
 14. ~~**Decide whether `make` stays in the docs**~~ DONE
@@ -140,3 +149,27 @@
     directory is excluded. It's `documents/*` now, so the README is visible
     to git and every other file in there — subfolders included — is still
     ignored. The in-repo fallback in `DOCUMENTS_DIRS` stays.
+
+16. ~~**react-select dropdowns appear twice on Greenhouse**~~ DONE
+    react-select puts a hidden `<input required aria-hidden tabindex=-1>`
+    under each required dropdown, purely for form validation. It passed the
+    visibility test, so it was read as a second question. `extract.py` now
+    skips inputs that are both `aria-hidden` and `tabindex=-1`. It
+    deliberately doesn't check opacity, because styled radios hide their real
+    inputs that way. Covered by `tests/test_greenhouse_select.py`.
+
+17. ~~**reCAPTCHA false positive on every Greenhouse run**~~ DONE
+    Invisible reCAPTCHA's badge iframe is always on screen, so `detect_captcha`
+    paused every run. reCAPTCHA now counts only when something other than
+    that badge is visible: the challenge frame, a checkbox anchor, or any
+    other reCAPTCHA frame. The generic "bot check" no longer trips on the
+    badge's wrapper, and every match is checked, not just the first. Real
+    challenges still stop the run; nothing solves them. Covered by
+    `tests/test_captcha.py`.
+
+18. ~~**Fail fast on a bad API key**~~ DONE
+    `fill`, dry runs included, makes one free authenticated call before the
+    browser opens. On a 401, or with no key at all, it stops and says to set
+    a new `ANTHROPIC_API_KEY`. Any other error (offline, an outage) only warns,
+    and the classifier's fail-safe still covers the run. `doctor` now reports
+    "API key accepted" from the same call. Covered by `tests/test_api_key.py`.
