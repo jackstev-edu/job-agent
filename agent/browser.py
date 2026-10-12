@@ -3,13 +3,19 @@ browser.py — driving Chrome.
 
 WHAT THIS DOES: Opens a real Chrome window and remembers you between runs, so
 you sign in to a career portal once by hand and the agent inherits that
-session forever after. It also watches for CAPTCHAs and login walls and stops
-rather than trying to get around them.
+session forever after. It also watches for CAPTCHAs and login walls, and on a
+login wall lets the browser's own password manager sign you in, or stops.
+
+WHY IT MATTERS: The agent never reads, types, generates or stores a password.
+A login saved in Chrome's password manager, inside the agent's own profile,
+may fill the form; the agent only checks that the boxes are filled and
+presses a plainly named sign-in button.
 """
 
 from __future__ import annotations
 
 import contextlib
+import re
 from typing import TYPE_CHECKING
 
 from . import config
@@ -128,6 +134,107 @@ def detect_login_wall(page: "Page") -> bool:
     with contextlib.suppress(Exception):
         return page.locator("input[type=password]").first.is_visible(timeout=700)
     return False
+
+
+# The only buttons a saved login may press, matched against the whole label.
+# Whole-label on purpose: "Continue with Google" would sign a Google account
+# in, and "Sign in and apply" does more than sign in.
+SIGN_IN_BUTTON = re.compile(r"^(sign\s?in|log\s?in|login|continue)$", re.I)
+
+SIGN_IN_ATTR = "data-ja-signin"
+
+# Reads the login form's SHAPE, never its contents. "Filled" is judged by
+# Chrome's :autofill state or, failing that, by length alone, and only
+# booleans and the button's label ever come back to Python.
+_LOGIN_STATE_JS = r"""
+(args) => {
+  const [ATTR, BUTTON_RX] = args;
+  const buttonRx = new RegExp(BUTTON_RX, 'i');
+  const visible = el => {
+    const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const filled = el => {
+    for (const sel of [':autofill', ':-webkit-autofill']) {
+      try { if (el.matches(sel)) return true; } catch (e) {}
+    }
+    return el.value.length > 0;
+  };
+  const no = why => ({ready: false, final: true, why});
+
+  const passwords = [...document.querySelectorAll('input[type=password]')].filter(visible);
+  if (passwords.length === 0) return no('no password box on the page');
+  // Two password boxes is "choose one and confirm it": account creation.
+  if (passwords.length > 1) return no('more than one password box, which looks like account creation');
+  const pw = passwords[0];
+  if (/new-password/i.test(pw.getAttribute('autocomplete') || ''))
+    return no('the password box is for a new password, which is account creation');
+
+  const scope = pw.form || document;
+  const texty = [...scope.querySelectorAll('input')].filter(el => el !== pw && visible(el)
+      && ['', 'text', 'email', 'tel'].includes((el.getAttribute('type') || '').toLowerCase()));
+  const user = texty.find(el => /username|email/i.test(el.getAttribute('autocomplete') || ''))
+            || texty.find(el => (el.getAttribute('type') || '').toLowerCase() === 'email')
+            || texty.find(el => /user|email|login/i.test(`${el.name} ${el.id}`))
+            || texty.find(el => el.compareDocumentPosition(pw) & Node.DOCUMENT_POSITION_FOLLOWING);
+  if (!user) return no('no username box next to the password box');
+
+  const label = b => ((b.innerText || b.value || b.getAttribute('aria-label') || '')
+      .replace(/\s+/g, ' ').replace(/[\s\u2192\u203a>]+$/, '').trim());
+  const buttons = [...scope.querySelectorAll(
+      'button, input[type=submit], input[type=button], [role=button]')]
+      .filter(b => visible(b) && !b.disabled && buttonRx.test(label(b)));
+  document.querySelectorAll(`[${ATTR}]`).forEach(b => b.removeAttribute(ATTR));
+  if (buttons.length === 0) return no('no button labelled sign in, log in or continue');
+  if (buttons.length > 1) return no('more than one sign-in button; not guessing which');
+  buttons[0].setAttribute(ATTR, '1');
+
+  const userFilled = filled(user), passwordFilled = filled(pw);
+  return {ready: userFilled && passwordFilled, final: false, button: label(buttons[0]),
+          why: userFilled && passwordFilled ? '' :
+               'the browser did not fill ' + (userFilled ? 'the password' :
+               passwordFilled ? 'the username' : 'either box')};
+}
+"""
+
+
+def sign_in_with_saved_login(page: "Page", wait_ms: int = 5000) -> tuple[bool, str]:
+    """
+    Press sign-in if Chrome's password manager has filled the login form.
+
+    Waits up to `wait_ms` for autofill, then clicks only if the username and
+    the single password box are both filled and exactly one button reads
+    sign in / log in / continue (and passes is_forbidden_button). Types
+    nothing and never reads the password. Returns (signed_in, why_not).
+    Account creation (two password boxes, a new-password box) is always
+    left to you.
+    """
+    from .filler import is_forbidden_button   # filler imports nothing from here
+
+    waited, state = 0, {}
+    while True:
+        try:
+            state = page.evaluate(_LOGIN_STATE_JS, [SIGN_IN_ATTR, SIGN_IN_BUTTON.pattern])
+        except Exception as e:
+            return False, f"couldn't read the login form ({str(e)[:60]})"
+        if state.get("ready") or state.get("final") or waited >= wait_ms:
+            break
+        page.wait_for_timeout(250)
+        waited += 250
+    if not state.get("ready"):
+        return False, state.get("why") or "the login form wasn't filled"
+
+    text = state.get("button") or ""
+    if not SIGN_IN_BUTTON.match(text) or is_forbidden_button(text):
+        return False, f"refused to press '{text}'"
+    try:
+        page.locator(f"[{SIGN_IN_ATTR}='1']").first.click(timeout=4000)
+    except Exception as e:
+        return False, f"couldn't press '{text}' ({str(e)[:60]})"
+    settle(page)
+    if detect_login_wall(page):
+        return False, f"pressed '{text}' but the login page is still showing"
+    return True, f"pressed '{text}'"
 
 
 def active_frame(page: "Page", hint: str = ""):

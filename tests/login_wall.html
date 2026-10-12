@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mock - portal login wall</title></head>
+<body>
+<h1>Sign in to continue your application</h1>
+
+<!-- A plain login form. A page script stands in for Chrome's password
+     manager and fills both boxes a moment after load (real autofill can't
+     run in headless Chromium). The other buttons are decoys that must
+     never be pressed. -->
+<form id="login" onsubmit="window.__signedIn = (window.__signedIn || 0) + 1;
+      document.body.innerHTML = '<h1>Welcome back</h1>'; return false;">
+  <label for="email">Email</label>
+  <input id="email" name="email" type="email" autocomplete="username"><br>
+  <label for="pw">Password</label>
+  <input id="pw" name="password" type="password" autocomplete="current-password"><br>
+  <a href="#forgot">Forgot password?</a><br>
+  <button type="submit">Sign in</button>
+  <button type="button">Create account</button>
+  <button type="button">Continue with Google</button>
+</form>
+
+<script>
+  window.__clicks = [];
+  document.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (b) window.__clicks.push(b.innerText.trim());
+  }, true);
+  if (!location.hash.includes('nofill')) {
+    setTimeout(() => {
+      document.getElementById('email').value = 'test@example.invalid';
+      document.getElementById('pw').value = 'SENTINEL-PW-9';
+    }, 400);
+  }
+</script>
+</body></html>
