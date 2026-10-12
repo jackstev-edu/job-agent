@@ -159,6 +159,30 @@ DAYS=21`.
 When something goes wrong — and it will, on Workday — the browser window stays
 open. Finish by hand, and note which selector failed so you can fix it.
 
+### Saving a portal login once
+
+Portals like Workday want an account per employer. Do this once for each:
+
+1. Run `fill` on a posting. At the login wall the agent pauses and says
+   "This portal wants a login".
+2. In that Chrome window, sign in yourself. If you need an account, create it
+   yourself too: the terms checkbox, the verification code and the Create
+   Account button are always yours.
+3. When Chrome offers to save the password, click **Save**. It goes into
+   Chrome's password manager inside the agent's own profile,
+   `~/.job-agent/chrome-profile`, and nowhere else. Don't sign that profile in
+   to a Google account; the agent launches it with sync off, and saved logins
+   should stay on this machine.
+4. Press Enter in the terminal to carry on.
+
+On later runs, Chrome fills the login form by itself. The agent waits a few
+seconds for that, checks that both boxes are filled without reading what's in
+them, and presses the form's one **Sign in** / **Log in** / **Continue**
+button. If anything is off (nothing filled, a sign-up form, two candidate
+buttons, or only "Continue with Google"), it falls back to the pause in
+step 1. To forget a login, open `chrome://password-manager` in the agent's
+Chrome window.
+
 ---
 
 ## 4. What each piece does
@@ -206,8 +230,9 @@ model can add caution, never remove it.
 
 **`agent/browser.py`** (Playwright) — Opens a real Chrome window that remembers
 you between runs, so you log in to a portal once by hand and every future run
-inherits that session. It also spots CAPTCHAs and login walls and stops, rather
-than trying to get around them.
+inherits that session. It also spots CAPTCHAs and stops. On a login wall it
+presses Sign in only if Chrome's own password manager has filled the form;
+otherwise it stops and hands you the window.
 
 **`agent/extract.py`** (Python + injected JavaScript) — Runs a small script
 inside the page that walks the HTML and returns just the questions, throwing
@@ -263,8 +288,11 @@ of that without having to think about it each time.
 ## What it deliberately won't do
 
 - **Solve CAPTCHAs.** It detects them, names them, and hands you the browser.
-- **Enter passwords or create accounts.** You log in once by hand; the session
-  persists in `~/.job-agent/chrome-profile`.
+- **Read, type, generate or store a password.** The browser's own password
+  manager, inside the agent's Chrome profile, may fill a login you saved
+  (see "Saving a portal login once"). The agent then presses a plain Sign in
+  button and nothing else.
+- **Create accounts.** Terms, verification codes and Create Account are yours.
 - **Touch LinkedIn Easy Apply.** LinkedIn's terms prohibit automated access, and
   restrictions there are common and painful to reverse. Click those by hand.
 - **Answer eligibility, EEO, or criminal-history questions with a model.**

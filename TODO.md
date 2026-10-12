@@ -57,6 +57,19 @@
    login are one click. Then confirm the agent resumes on post-login pages.
    No plaintext credentials in profile.yaml.
 
+   Progress, 12 Oct 2026: no extension needed. Chrome's built-in password
+   manager works in Playwright's bundled Chromium on our persistent profile.
+   Checked in a throwaway profile against a local login page: it offers to
+   save, and on a fresh launch it autofills both boxes with no gesture. So the
+   launch stays on bundled Chromium, not `channel="chrome"`. On a login wall,
+   `browser.sign_in_with_saved_login` waits for autofill and presses one plain
+   Sign in / Log in / Continue button; otherwise it pauses for you as before.
+   The design rule in CLAUDE.md changed to match (the agent never reads,
+   types, generates or stores a password; the browser may fill one). Account
+   creation stays manual. Still open, and needs you: save a login on a real
+   portal (README, "Saving a portal login once") and confirm a later run gets
+   past the wall and resumes filling on the post-login page.
+
 8. ~~**Extend the EEO block for voluntary diversity questions**~~ DONE
    Four new lines in `agent/template.py`, all defaulting to "Prefer not to
    say": `sexual_orientation`, `transgender`, `first_generation`,

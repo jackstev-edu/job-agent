@@ -241,12 +241,21 @@ def cmd_fill(args) -> None:
             browser_mod.settle(page)
 
         if browser_mod.detect_login_wall(page):
-            print(f"\n{AMBER}This portal wants a login.{OFF}")
-            print("Sign in yourself in the browser window. The session is saved to")
-            print(f"{DIM}{config.CHROME_PROFILE_DIR}{OFF} and reused from now on.")
-            print("Press Enter when you're in.")
-            input()
-            browser_mod.settle(page)
+            # Chrome's own password manager may have filled the form; if so we
+            # press sign-in. We never type, read or store the password.
+            signed_in, detail = browser_mod.sign_in_with_saved_login(page)
+            if signed_in:
+                print(f"\n{GREEN}Signed in with the login saved in this browser "
+                      f"profile{OFF} {DIM}({detail}){OFF}")
+            else:
+                print(f"\n{AMBER}This portal wants a login.{OFF} {DIM}({detail}){OFF}")
+                print("Sign in, or create the account, yourself in the browser window.")
+                print("Let Chrome save the password when it offers, and later runs sign")
+                print(f"in by themselves. The session is saved to {DIM}"
+                      f"{config.CHROME_PROFILE_DIR}{OFF}.")
+                print("Press Enter when you're in.")
+                input()
+                browser_mod.settle(page)
 
         adapters.prepare(page, key)
 
