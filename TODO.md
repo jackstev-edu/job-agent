@@ -66,7 +66,9 @@
    Sign in / Log in / Continue button; otherwise it pauses for you as before.
    The design rule in CLAUDE.md changed to match (the agent never reads,
    types, generates or stores a password; the browser may fill one). Account
-   creation stays manual. Still open, and needs you: save a login on a real
+   creation stays manual. The check runs at the start, again after
+   `adapters.prepare()` (Workday shows its sign-in page only after Apply is
+   clicked), and before every wizard step. Still open, and needs you: save a login on a real
    portal (README, "Saving a portal login once") and confirm a later run gets
    past the wall and resumes filling on the post-login page.
 

@@ -1,0 +1,46 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mock - sign-in after Apply</title></head>
+<body>
+<!-- Workday-shaped: the posting has no login form. Only after the Apply
+     button (the one adapters.prepare clicks) does a sign-in page appear, and
+     only after signing in does the application form. A page script stands in
+     for Chrome's password manager filling the sign-in boxes. -->
+<main id="main">
+  <h1>Engineering Intern</h1>
+  <p>A mock posting.</p>
+  <a href="#" data-automation-id="adventureButton">Apply</a>
+</main>
+
+<script>
+  const main = document.getElementById('main');
+  window.__applyClicks = 0;
+  window.__signedIn = 0;
+
+  document.querySelector('[data-automation-id=adventureButton]').addEventListener('click', e => {
+    e.preventDefault();
+    window.__applyClicks++;
+    main.innerHTML = `
+      <h1>Sign In</h1>
+      <form id="signin">
+        <label for="em">Email Address</label>
+        <input id="em" type="email" autocomplete="username" data-automation-id="email">
+        <label for="pw">Password</label>
+        <input id="pw" type="password" autocomplete="current-password" data-automation-id="password">
+        <button type="submit" data-automation-id="signInSubmitButton">Sign In</button>
+        <button type="button">Create Account</button>
+      </form>`;
+    setTimeout(() => {
+      document.getElementById('em').value = 'test@example.invalid';
+      document.getElementById('pw').value = 'SENTINEL-PW-9';
+    }, 300);
+    document.getElementById('signin').addEventListener('submit', ev => {
+      ev.preventDefault();
+      window.__signedIn++;
+      main.innerHTML = `
+        <h1>My Information</h1>
+        <label for="phone">Phone Number</label>
+        <input id="phone" name="phone" data-automation-id="phone-number">`;
+    });
+  });
+</script>
+</body></html>
