@@ -55,6 +55,11 @@ CHROME_PROFILE_DIR = STATE_DIR / "chrome-profile"   # your saved logins
 DATABASE_PATH = STATE_DIR / "applications.db"       # your application log
 REPORTS_DIR = STATE_DIR / "reports"                 # the HTML review sheets
 
+# Both defaults below are legacy but active as of 12 Oct 2026; the current
+# models are claude-sonnet-5-5 and claude-haiku-5-5. Check the status table at
+# platform.claude.com/docs/en/about-claude/model-deprecations before relying
+# on either: a retired ID fails every request.
+#
 # Which Claude model does the field matching. Sonnet is the right balance of
 # speed and care here; override with JOB_AGENT_MODEL if you want to experiment.
 MODEL = os.environ.get("JOB_AGENT_MODEL", "claude-sonnet-5")
