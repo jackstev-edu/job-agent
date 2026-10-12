@@ -426,11 +426,20 @@ def _print_dry_run(fields, plan, flags) -> None:
     by_ref = {f["ref"]: f for f in fields}
     for ref, decision in plan.items():
         label = str(by_ref.get(ref, {}).get("label", "?"))[:52]
-        value = str(decision.get("value"))[:55]
-        mark = f"{AMBER}review{OFF}" if decision.get("needs_review") else f"{GREEN}ok{OFF}"
+        # A null is the model declining to guess. Printing it as "[ok] None"
+        # read like an answer of "None" — show the blank, and say why.
+        blank = decision.get("value") is None
+        value = "" if blank else str(decision.get("value"))[:55]
+        if blank:
+            mark = f"{AMBER}blank{OFF}"
+        elif decision.get("needs_review"):
+            mark = f"{AMBER}review{OFF}"
+        else:
+            mark = f"{GREEN}ok{OFF}"
         print(f"  [{mark}] {label:<54} {DIM}{value}{OFF}")
-        if decision.get("note"):
-            print(f"           {DIM}{decision['note']}{OFF}")
+        note = decision.get("note") or ("left for you — no answer given" if blank else "")
+        if note:
+            print(f"           {DIM}{note}{OFF}")
     _print_flags(flags)
 
 
