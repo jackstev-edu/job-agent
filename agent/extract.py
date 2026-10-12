@@ -137,6 +137,12 @@ _SCAN_JS = r"""
     const type = (el.type || el.tagName).toLowerCase();
     if (['hidden','submit','button','reset','image'].includes(type)) return;
     if (el.disabled || el.readOnly || !isVisible(el)) return;
+    // react-select (Greenhouse) renders an invisible <input required
+    // aria-hidden tabindex=-1> under each REQUIRED dropdown, purely for form
+    // validation. It isn't a question, and without this it appears twice.
+    // Deliberately not an opacity check: styled radios hide the real input
+    // with opacity 0, and those must still be read.
+    if (el.getAttribute('aria-hidden') === 'true' && el.tabIndex === -1) return;
 
     if (type === 'radio') {
       const groupKey = el.name || labelFor(el);
