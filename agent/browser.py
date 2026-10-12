@@ -75,18 +75,52 @@ def detect_captcha(page: "Page") -> str | None:
     We detect these to hand you the keyboard, not to solve them. Solving them
     is a losing arms race and the fastest way to get an account banned.
     """
+    if _recaptcha_challenge(page):
+        return "reCAPTCHA"
     markers = {
-        "reCAPTCHA": "iframe[src*='recaptcha']",
         "hCaptcha": "iframe[src*='hcaptcha']",
         "Cloudflare Turnstile": "iframe[src*='challenges.cloudflare.com']",
         "Cloudflare check": "#challenge-running, #cf-challenge-running",
-        "bot check": "[class*='captcha' i], [id*='captcha' i]",
+        # reCAPTCHA is excluded here only because _recaptcha_challenge has
+        # already judged it; its badge wrapper is .grecaptcha-badge, which
+        # would otherwise trip this on every Greenhouse page.
+        "bot check": "[class*='captcha' i]:not([class*='recaptcha' i]), "
+                     "[id*='captcha' i]:not([id*='recaptcha' i])",
     }
     for name, selector in markers.items():
-        with contextlib.suppress(Exception):
-            if page.locator(selector).first.is_visible(timeout=700):
-                return name
+        if _any_visible(page, selector):
+            return name
     return None
+
+
+def _any_visible(page: "Page", selector: str) -> bool:
+    # Every match, not .first: a hidden first match (a response textarea, a
+    # pre-rendered container) used to hide a visible challenge behind it.
+    with contextlib.suppress(Exception):
+        return any(el.is_visible() for el in page.locator(selector).all()[:25])
+    return False
+
+
+def _recaptcha_challenge(page: "Page") -> bool:
+    """
+    Is reCAPTCHA actually asking for something right now?
+
+    Invisible reCAPTCHA (Greenhouse loads it on every posting) keeps its anchor
+    iframe on screen as the corner badge, with size=invisible in its src, so
+    that iframe alone means nothing. A real challenge shows up as the bframe
+    iframe becoming visible, or, for the checkbox kind, as an anchor without
+    size=invisible. Anything else visible from reCAPTCHA counts too: only the
+    badge has been shown to be harmless, so only the badge is excused.
+    """
+    with contextlib.suppress(Exception):
+        for frame in page.locator("iframe[src*='recaptcha']").all()[:25]:
+            if not frame.is_visible():
+                continue
+            src = frame.get_attribute("src") or ""
+            if "/anchor" in src and "size=invisible" in src:
+                continue
+            return True
+    return False
 
 
 def detect_login_wall(page: "Page") -> bool:

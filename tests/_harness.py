@@ -34,15 +34,15 @@ class Checks:
 
 
 @contextmanager
-def mock_page(html: Path, route=None):
-    """A fresh headless page on a local mock form. `route` sees every request."""
+def mock_page(html: Path, routes: dict | None = None):
+    """A fresh headless page on a local mock form. `routes` maps URL glob -> handler."""
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
             page = browser.new_page()
-            if route:
-                page.route("**/*", route)
+            for pattern, handler in (routes or {}).items():
+                page.route(pattern, handler)
             page.goto(html.resolve().as_uri())
             yield page
         finally:
