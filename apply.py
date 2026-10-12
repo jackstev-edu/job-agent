@@ -95,7 +95,6 @@ def cmd_init(args) -> None:
 #  doctor — is this machine set up correctly?
 # ---------------------------------------------------------------------------
 def cmd_doctor(args) -> None:
-    import os
     import shutil
 
     ok = True
@@ -121,8 +120,14 @@ def cmd_doctor(args) -> None:
     except ImportError:
         line(False, "anthropic SDK installed", "run: pip install -r requirements.txt")
 
-    line(bool(os.environ.get("ANTHROPIC_API_KEY")), "ANTHROPIC_API_KEY set",
-         "" if os.environ.get("ANTHROPIC_API_KEY") else "export it in your shell profile")
+    # The same call `fill` makes first, so a key that's set but dead fails
+    # here rather than looking fine.
+    status, detail = config.check_api_key()
+    line(status == "ok", "API key accepted", {
+        "ok": "",
+        "rejected": "key rejected (401) — set a new ANTHROPIC_API_KEY",
+        "missing": "set ANTHROPIC_API_KEY in your shell profile",
+    }.get(status, f"couldn't check: {detail}"))
 
     # Ask Playwright where its browser is rather than guessing at a cache path —
     # PLAYWRIGHT_BROWSERS_PATH can move it anywhere.
@@ -204,6 +209,19 @@ def cmd_fill(args) -> None:
         print(f"{RED}{len(blocking)} required profile field(s) are blank.{OFF} "
               f"Run `make check` first, or --force past this.")
         return
+
+    # Before the browser opens. --force doesn't skip this: with no working
+    # key every field would come back "unknown" and the run is wasted.
+    status, detail = config.check_api_key()
+    if status in ("rejected", "missing"):
+        print(f"{RED}Anthropic API key {'rejected' if status == 'rejected' else 'not found'}"
+              f"{OFF} ({detail}).")
+        print("Set a new ANTHROPIC_API_KEY and try again — "
+              "`python apply.py doctor` re-checks it.")
+        sys.exit(1)
+    if status == "unchecked":
+        print(f"{AMBER}Couldn't check the API key ({detail}).{OFF} "
+              f"{DIM}Carrying on; if the API is unreachable, every field comes to you.{OFF}")
 
     with browser_mod.browser() as ctx:
         page = browser_mod.open_page(ctx, url)
