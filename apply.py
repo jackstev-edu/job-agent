@@ -240,24 +240,10 @@ def cmd_fill(args) -> None:
             input()
             browser_mod.settle(page)
 
-        if browser_mod.detect_login_wall(page):
-            # Chrome's own password manager may have filled the form; if so we
-            # press sign-in. We never type, read or store the password.
-            signed_in, detail = browser_mod.sign_in_with_saved_login(page)
-            if signed_in:
-                print(f"\n{GREEN}Signed in with the login saved in this browser "
-                      f"profile{OFF} {DIM}({detail}){OFF}")
-            else:
-                print(f"\n{AMBER}This portal wants a login.{OFF} {DIM}({detail}){OFF}")
-                print("Sign in, or create the account, yourself in the browser window.")
-                print("Let Chrome save the password when it offers, and later runs sign")
-                print(f"in by themselves. The session is saved to {DIM}"
-                      f"{config.CHROME_PROFILE_DIR}{OFF}.")
-                print("Press Enter when you're in.")
-                input()
-                browser_mod.settle(page)
-
+        _get_past_login_wall(page)
         adapters.prepare(page, key)
+        # Again: Workday only shows its sign-in page once Apply is clicked.
+        _get_past_login_wall(page)
 
         role, company = extract.guess_role_and_company(page)
 
@@ -271,6 +257,8 @@ def cmd_fill(args) -> None:
         for step in range(1, max_steps + 1):
             if step > 1:
                 print(f"\n{BOLD}Step {step}{OFF}")
+            # And before every step, since a wizard can ask you to sign in midway.
+            _get_past_login_wall(page)
 
             fields = extract.extract_fields(page)
             if not fields:
@@ -387,6 +375,34 @@ def cmd_fill(args) -> None:
         if input("Mark as submitted? [y/N] ").strip().lower().startswith("y"):
             tracker.mark_submitted(url)
             print(f"{GREEN}Logged.{OFF}")
+
+
+def _get_past_login_wall(page) -> None:
+    """
+    If the page is a login wall, sign in with the browser's saved login, or
+    pause for you.
+
+    Run at the start, after adapters.prepare(), and before each wizard step:
+    Workday only shows its sign-in page after prepare() clicks Apply, so a
+    check made once, up front, never saw it.
+    """
+    if not browser_mod.detect_login_wall(page):
+        return
+    # Chrome's own password manager may have filled the form; if so we
+    # press sign-in. We never type, read or store the password.
+    signed_in, detail = browser_mod.sign_in_with_saved_login(page)
+    if signed_in:
+        print(f"\n{GREEN}Signed in with the login saved in this browser "
+              f"profile{OFF} {DIM}({detail}){OFF}")
+        return
+    print(f"\n{AMBER}This portal wants a login.{OFF} {DIM}({detail}){OFF}")
+    print("Sign in, or create the account, yourself in the browser window.")
+    print("Let Chrome save the password when it offers, and later runs sign")
+    print(f"in by themselves. The session is saved to {DIM}"
+          f"{config.CHROME_PROFILE_DIR}{OFF}.")
+    print("Press Enter when you're in.")
+    input()
+    browser_mod.settle(page)
 
 
 def _log_corrections(page, url, fields, plan, categories) -> None:
