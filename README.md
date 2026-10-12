@@ -247,9 +247,8 @@ next to the form itself, which turns a ten-minute check into a one-minute one.
 Three reasons, and I'd argue against removing the gate.
 
 **Quality.** Applications sent by a bot read like applications sent by a bot.
-For the roles your background points at — robotics, autonomy, industrial ML —
-one considered application beats forty generic ones, and the review step is
-where "considered" happens.
+For specialised technical roles, one considered application beats forty
+generic ones, and the review step is where "considered" happens.
 
 **Accuracy.** An AI that invents a graduation date on a form you sign has made
 you misrepresent yourself. The review sheet is the last check before that
@@ -285,7 +284,7 @@ instead of `id` and will fill one step at a time. Roughly 40% of large-employer
 applications, so it's worth finishing properly.
 
 **iCIMS, Taleo, SuccessFactors** — old, iframe-heavy, session-timeout prone, and
-very common at exactly the industrial employers your Liebherr background suits.
+very common among large industrial employers.
 The adapters are honest stubs.
 
 **Anything else** falls through to the generic path and flags more for review.
@@ -354,7 +353,7 @@ first.
 
 Step 4 is where this stops being a utility and becomes a portfolio project. A
 retrieval-and-ranking pipeline over live postings with a human-in-the-loop
-execution layer is a reasonable thing to have on a CMU AI student's GitHub, and
+execution layer is a reasonable thing to have in a student's portfolio, and
 the guardrail design in `sensitive.py` is the part worth talking about in an
 interview — it's the same instinct as putting a hardware interlock outside the
 control loop rather than trusting the controller.
