@@ -72,6 +72,39 @@ HEADLESS = os.environ.get("JOB_AGENT_HEADLESS") == "1"
 SLOW_MO = int(os.environ.get("JOB_AGENT_SLOWMO", "120"))
 
 
+def check_api_key() -> tuple[str, str]:
+    """
+    One cheap authenticated call, made before any real work.
+
+    WHY: a rejected key used to surface as the classifier marking every field
+    "unknown" — safe, but it reads like a hard form rather than a bad key.
+    Returns (status, detail), status being one of:
+      ok         the API accepted the key
+      rejected   a 401: the key is wrong, revoked or expired
+      missing    no key or other credential to send at all
+      unchecked  anything else (offline, an outage). Not a verdict on the key;
+                 the classifier's own fail-safe still covers the run.
+    """
+    try:
+        import anthropic          # lazy — see the note in mapper.py
+    except ImportError:
+        return "unchecked", "anthropic SDK not installed"
+    try:
+        # Listing models is free and still needs a valid key.
+        anthropic.Anthropic(max_retries=0, timeout=15.0).models.list(limit=1)
+    except anthropic.AuthenticationError:
+        return "rejected", "the API returned 401 for this key"
+    except TypeError as e:
+        # The SDK raises this before sending anything when it finds no
+        # credential at all.
+        if "authentication" in str(e).lower():
+            return "missing", "no ANTHROPIC_API_KEY (or other credential) found"
+        return "unchecked", str(e)[:80]
+    except Exception as e:
+        return "unchecked", f"{type(e).__name__}: {str(e)[:80]}"
+    return "ok", ""
+
+
 def ensure_dirs() -> None:
     for d in (STATE_DIR, CHROME_PROFILE_DIR, REPORTS_DIR, STATE_DIR / "documents"):
         d.mkdir(parents=True, exist_ok=True)
