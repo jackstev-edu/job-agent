@@ -9,13 +9,27 @@ under pytest, each test_ function is still one clear pass or fail.
 """
 from __future__ import annotations
 
+import atexit
+import os
+import shutil
 import sys
+import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+
+# Every test gets a throwaway JOB_AGENT_HOME, never ~/.job-agent with your real
+# profile and log. config reads it once, at import, so this has to happen
+# before any agent module loads — conftest.py imports this file first.
+if "agent.config" in sys.modules:
+    raise RuntimeError("agent.config was imported before tests/_harness.py; "
+                       "it may be pointing at your real ~/.job-agent")
+TEST_HOME = Path(tempfile.mkdtemp(prefix="job-agent-test-"))
+os.environ["JOB_AGENT_HOME"] = str(TEST_HOME)
+atexit.register(shutil.rmtree, TEST_HOME, ignore_errors=True)
 
 
 class Checks:

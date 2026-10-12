@@ -1,0 +1,5 @@
+# Only needed to run the tests:  pip install -r requirements-dev.txt
+# Then:  python -m pytest tests/
+-r requirements.txt
+# pytest     — runs everything in tests/; each file also runs alone as a script
+pytest>=8

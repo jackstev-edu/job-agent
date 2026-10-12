@@ -1,42 +1,29 @@
 """
 test_save_draft.py — a cover-letter draft lands in the private folder.
 
-WHAT THIS DOES: Points JOB_AGENT_HOME at a temp folder, saves a draft, and
-checks the file exists there with the text in it — and nowhere in the repo.
+WHAT THIS DOES: Saves a draft with JOB_AGENT_HOME pointed at the harness's temp
+folder, and checks the file exists there with the text in it — and nowhere in
+the repo.
 WHY IT MATTERS: save_draft once failed on every run behind a generic "cover
 letter failed" message, and a draft names a company you're applying to.
 
 Run from anywhere:  .venv/Scripts/python.exe tests/test_save_draft.py
 """
-import os
-import sys
-import tempfile
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))
-
-failures = []
+from _harness import REPO, TEST_HOME, Checks, run_as_script
+from agent import config, letters
 
 
-def check(cond, what):
-    print(("  ok   " if cond else "  FAIL ") + what)
-    if not cond:
-        failures.append(what)
-
-
-with tempfile.TemporaryDirectory() as home:
-    # config reads JOB_AGENT_HOME at import, so this has to come first.
-    os.environ["JOB_AGENT_HOME"] = home
-    from agent import config, letters
-
+def test_draft_lands_in_private_folder():
+    check = Checks()
     repo_docs_before = set((REPO / "documents").glob("*"))
     path = letters.save_draft("Dear team,\n\nA test body.", "Acme Corp", "Test Engineer")
     print(f"  wrote {path}")
 
-    check(config.STATE_DIR == Path(home), "config picked up the temp JOB_AGENT_HOME")
+    check(config.STATE_DIR == TEST_HOME, "config picked up the temp JOB_AGENT_HOME")
     check(path.is_file(), "the draft file exists")
-    check(path.parent == Path(home) / "documents", "it's in <JOB_AGENT_HOME>/documents")
+    check(path.parent == TEST_HOME / "documents", "it's in <JOB_AGENT_HOME>/documents")
     check(REPO not in path.resolve().parents, "it's not inside the repo")
     text = path.read_text()
     check("A test body." in text and "Acme Corp" in text and "Test Engineer" in text,
@@ -44,6 +31,9 @@ with tempfile.TemporaryDirectory() as home:
     check(path.name.endswith("-acme-corp-test-engineer.md"), "filename slugs company and role")
     check(set((REPO / "documents").glob("*")) == repo_docs_before,
           "nothing new appeared in the repo's documents/")
+    check(Path.home() / ".job-agent" not in path.parents, "not in the real ~/.job-agent")
+    check.done()
 
-print(f"\n{'ALL PASSED' if not failures else f'{len(failures)} FAILED'}")
-sys.exit(1 if failures else 0)
+
+if __name__ == "__main__":
+    run_as_script(globals())
