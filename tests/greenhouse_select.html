@@ -1,0 +1,79 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mock - Greenhouse react-select</title>
+<style>
+  .field { margin: 14px 0; position: relative; width: 360px; }
+  .select__control { display: flex; border: 1px solid #888; }
+  .select__value-container { position: relative; flex: 1; }
+  .select__placeholder { position: absolute; color: #888; }
+  .select__input { border: 0; width: 100%; background: transparent; }
+  /* react-select's requiredInput: opacity 0 but full width and a real height,
+     so a size-based visibility test keeps it. That's what made it a duplicate. */
+  .requiredInput { opacity: 0; pointer-events: none; position: absolute;
+                   bottom: 0; left: 0; right: 0; width: 100%; }
+  /* A styled radio: the real input is invisible and a span draws the dot. */
+  .radio { position: relative; display: block; }
+  .radio input { opacity: 0; position: absolute; width: 16px; height: 16px; margin: 0; }
+  .radio .dot { display: inline-block; width: 16px; height: 16px;
+                border-radius: 50%; border: 1px solid #888; }
+</style></head>
+<body>
+<h1>Mock application (Greenhouse react-select regression)</h1>
+
+<!-- An ordinary control, so we know the plain path still works alongside. -->
+<div class="field">
+  <label id="first_name-label" for="first_name">First Name *</label>
+  <input id="first_name" name="first_name" type="text" required aria-required="true">
+</div>
+
+<!-- 1: REQUIRED react-select, shaped like the markup react-select renders on
+     job-boards.greenhouse.io: the visible combobox input, then the
+     requiredInput — <input required aria-hidden tabindex=-1> — that exists
+     only for browser form validation. Must come out as ONE field. -->
+<div class="field select__container">
+  <label id="question_1-label" for="question_1">Are you legally authorized to work in the United States? *</label>
+  <div class="select-shell">
+    <div class="select__control">
+      <div class="select__value-container">
+        <div class="select__placeholder" id="react-select-question_1-placeholder">Select...</div>
+        <div class="select__input-container" data-value="">
+          <input class="select__input" autocapitalize="none" autocomplete="off" autocorrect="off"
+                 id="question_1" spellcheck="false" tabindex="0" type="text"
+                 aria-autocomplete="list" aria-expanded="false" aria-haspopup="true"
+                 aria-labelledby="question_1-label" aria-required="true" role="combobox"
+                 aria-describedby="react-select-question_1-placeholder" value="">
+        </div>
+      </div>
+    </div>
+    <input required="" name="question_1" aria-hidden="true" tabindex="-1" class="requiredInput" value="">
+  </div>
+</div>
+
+<!-- 2: OPTIONAL react-select. react-select renders no requiredInput here. -->
+<div class="field select__container">
+  <label id="question_2-label" for="question_2">Pronouns</label>
+  <div class="select-shell">
+    <div class="select__control">
+      <div class="select__value-container">
+        <div class="select__placeholder" id="react-select-question_2-placeholder">Select...</div>
+        <div class="select__input-container" data-value="">
+          <input class="select__input" autocapitalize="none" autocomplete="off" autocorrect="off"
+                 id="question_2" spellcheck="false" tabindex="0" type="text"
+                 aria-autocomplete="list" aria-expanded="false" aria-haspopup="true"
+                 aria-labelledby="question_2-label" role="combobox"
+                 aria-describedby="react-select-question_2-placeholder" value="">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 3: styled radio group. Real inputs are opacity 0, and they use a roving
+     tabindex, so the unchecked ones are tabindex=-1 — just not aria-hidden.
+     The first input the scan meets is one of those. Must still be read. -->
+<fieldset class="field">
+  <legend>Preferred working arrangement</legend>
+  <label class="radio"><input type="radio" name="arrangement" value="remote" tabindex="-1"><span class="dot"></span> Remote</label>
+  <label class="radio"><input type="radio" name="arrangement" value="hybrid" tabindex="0" checked><span class="dot"></span> Hybrid</label>
+  <label class="radio"><input type="radio" name="arrangement" value="onsite" tabindex="-1"><span class="dot"></span> On-site</label>
+</fieldset>
+</body></html>
