@@ -24,10 +24,10 @@
    so the loop is still alive when it closes. `doctor` now runs clean — no
    `Task was destroyed` traceback.
 
-5. **Write the `why_this_company` and `why_this_role` voice answers**
-   Still blank. Drafted essays are built from them — blank in, generic out.
-   Re-checked 12 Oct 2026: `check --verbose` still lists both under "Worth
-   filling", so this stays open.
+5. ~~**Write the `why_this_company` and `why_this_role` voice answers**~~ DONE
+   Drafted essays are built from them — blank in, generic out. Both filled;
+   confirmed 12 Oct 2026: `check --verbose` no longer lists either under
+   "Worth filling".
 
 6. **Run it on a Greenhouse or Lever posting**
    First tested against a bespoke portal; progress on real ATSs below.
@@ -86,10 +86,10 @@
    "sexual orientation or gender identity" dropdown now fills the decline
    option instead of being handed back.
 
-   Still open, and yours to decide: `eeo.disability_status` is the boolean
-   `false` rather than a decline string, so unlike the other eight it makes the
-   tool actively select "No, I do not have a disability" on a form. Working as
-   written; flagged only because it reads differently from its neighbours.
+   Decided by you, 12 Oct 2026: `eeo.disability_status` stays the boolean
+   `false`. Unlike the other eight, which decline, it makes the tool actively
+   select "No, I do not have a disability" on a form. That's intended, not an
+   oversight. Don't "fix" it to a decline string.
 
 9. **Collect corrections, then write `learn`**
    Every `fill` now diffs the form at the "Press Enter" prompt and appends what
@@ -173,3 +173,14 @@
     a new `ANTHROPIC_API_KEY`. Any other error (offline, an outage) only warns,
     and the classifier's fail-safe still covers the run. `doctor` now reports
     "API key accepted" from the same call. Covered by `tests/test_api_key.py`.
+
+19. **Move the classifier to the current Haiku once Haiku 4.5 is deprecated**
+    `CLASSIFIER_MODEL` defaults to `claude-haiku-4-5-20251001`, which is legacy
+    but active. Its earliest possible retirement is 15 Oct 2026, and at least
+    60 days' notice is promised. When a deprecation notice for it appears at
+    platform.claude.com/docs/en/about-claude/model-deprecations, switch the
+    default to `claude-haiku-5-5`, keeping the `JOB_AGENT_CLASSIFIER_MODEL`
+    override. Then re-run the classifier against real forms. Haiku 5.5 has
+    thinking on by default, so the `max_tokens=4000` ceiling in `classify.py`
+    and the JSON-only reply can behave differently. Nothing in `tests/` calls
+    the real API, so this needs a live check, not just `pytest`.
