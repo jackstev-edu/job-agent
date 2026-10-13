@@ -146,6 +146,36 @@ class Profile:
         facts["current_employment"] = self.current_employment()
         return facts
 
+    # -- submit gate (shadow mode) -----------------------------------------
+    # Each returns the safe default for anything missing or malformed: an
+    # empty list or None never lets the gate pass something it shouldn't.
+
+    def autosubmit_portals(self) -> list[str]:
+        raw = self.data.get("autosubmit_portals")
+        if not isinstance(raw, list):
+            return []
+        return [p.strip().lower() for p in raw if isinstance(p, str) and p.strip()]
+
+    def daily_submit_cap(self) -> int | None:
+        raw = self.data.get("daily_submit_cap")
+        # bool is an int in Python; `true` is not a cap.
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+            return None
+        return raw
+
+    def consent_allowlist(self) -> list[str]:
+        raw = self.data.get("consent_allowlist")
+        if not isinstance(raw, list):
+            return []
+        return [c for c in raw if isinstance(c, str) and c.strip()]
+
+    def canned_answers(self) -> dict[str, str]:
+        raw = (self.data.get("voice") or {}).get("canned_answers")
+        if not isinstance(raw, dict):
+            return {}
+        return {k: v for k, v in raw.items()
+                if isinstance(v, str) and v.strip() not in _BLANK}
+
     # -- completeness ------------------------------------------------------
 
     def audit(self) -> dict[str, list[str]]:

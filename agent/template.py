@@ -223,4 +223,24 @@ voice:
     biggest_weakness:
     tell_me_about_yourself:
     leadership_example:
+
+# -----------------------------------------------------------------------------
+#  SUBMIT GATE - shadow mode only. The agent never submits for you. After a
+#  fill it logs whether it WOULD have submitted, so its calls can be scored
+#  against what you actually did. Blank means "no".
+# -----------------------------------------------------------------------------
+autosubmit_portals: []         # portal keys only: greenhouse, lever, ashby
+daily_submit_cap:              # a whole number; blank means no cap is set
+consent_allowlist: []          # checkbox labels you accept, copied exactly
+
+# Per-company questions (how you heard about us, previously employed here...).
+# Recorded for later: the agent does NOT fill these from here yet, and the
+# gate stops on any per-company question.
+per_company:
+  defaults:
+    referral_source:
+    previously_employed:       # true / false
+    previously_applied:        # true / false
+    relatives_at_company:      # true / false
+  overrides: {}                # "Exact Company Name": {referral_source: ...}
 """
