@@ -491,11 +491,17 @@ _CHECKBOX_CENSUS_JS = r"""
 }
 """
 
+# Invisible means zero-size, display:none or visibility:hidden, computed on
+# the frame element itself. Zero-size is judged on the computed content box
+# too: a width=0 height=0 iframe still draws its default border, so its
+# bounding box alone would call it a visible 4x4.
 _FRAMES_JS = r"""
 () => [...document.querySelectorAll('iframe, frame')].map(f => {
   const r = f.getBoundingClientRect(), s = getComputedStyle(f);
+  const sized = r.width > 0 && r.height > 0
+             && parseFloat(s.width) > 0 && parseFloat(s.height) > 0;
   return {src: f.getAttribute('src') || '',
-          visible: r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'};
+          visible: sized && s.visibility !== 'hidden' && s.display !== 'none'};
 })
 """
 

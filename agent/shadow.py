@@ -93,6 +93,12 @@ def build_record(page: "Page", *, url: str, portal: str, portal_method: str,
     final_url = read("the page address", lambda: page.url, "")
 
     events = list(events)
+    # Invisible frames (zero-size, display:none or visibility:hidden on the
+    # frame element) can't show you anything, so they don't stop the run, but
+    # each one is logged, by host only.
+    for fr in frames:
+        if not fr.get("visible"):
+            events.append({"kind": "hidden_iframe", "detail": _host(fr.get("src"))})
     start_host = (urlparse(url).hostname or "").lower()
     end_host = (urlparse(final_url).hostname or "").lower() if final_url else ""
     if end_host and start_host and end_host != start_host:
@@ -118,6 +124,10 @@ def build_record(page: "Page", *, url: str, portal: str, portal_method: str,
         "events": events,
         "errors": errors,
     }
+
+
+def _host(src: str | None) -> str:
+    return (urlparse(src or "").hostname or "(no host)").lower()
 
 
 def failed_record(url: str, portal: str, reason: str) -> dict:
@@ -156,6 +166,7 @@ def redacted(record: dict, result: dict) -> dict:
     fields keep only field, profile line, source and fit kind.
     """
     traced = {t.get("ref"): t for t in result.get("trace") or []}
+    consent = result.get("consent_actions") or {}
     plan = record.get("plan") or {}
     results = record.get("results")
     categories = record.get("categories") or {}
@@ -164,8 +175,12 @@ def redacted(record: dict, result: dict) -> dict:
         ref = f.get("ref")
         if ref in traced:
             t = traced[ref]
-            fields.append({k: t.get(k) for k in ("ref", "label", "category", "profile_path",
-                                                 "source", "fit")})
+            keys = ("ref", "label", "category", "profile_path", "source", "fit")
+            if "allowlist_index" in t:
+                keys += ("allowlist_index",)
+            fields.append({k: t.get(k) for k in keys})
+            if ref in consent:
+                fields[-1]["consent_action"] = consent[ref]
             continue
         d = plan.get(ref) or {}
         fields.append({
@@ -176,6 +191,8 @@ def redacted(record: dict, result: dict) -> dict:
             "answered": d.get("value") is not None if d else False,
             "filled": None if results is None else bool((results.get(ref) or {}).get("filled")),
         })
+        if ref in consent:
+            fields[-1]["consent_action"] = consent[ref]
     return {
         "record_version": record.get("record_version"),
         "url": record.get("url"), "final_url": record.get("final_url"),
@@ -184,6 +201,9 @@ def redacted(record: dict, result: dict) -> dict:
         "fields": fields,
         "flagged": [fl.get("ref") for fl in record.get("flags") or []],
         "census": [_redacted_box(b, traced) for b in record.get("census") or []],
-        "frames": record.get("frames"), "events": record.get("events"),
+        # Hosts only: a frame's full address can carry tokens.
+        "frames": [{"host": _host(fr.get("src")), "visible": fr.get("visible")}
+                   for fr in record.get("frames") or []],
+        "events": record.get("events"),
         "errors": record.get("errors"),
     }

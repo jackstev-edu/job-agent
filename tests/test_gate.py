@@ -303,5 +303,77 @@ def test_errors_and_unknowns_stop():
     check.done()
 
 
+# --- allowlisted consent checkboxes (5a) -------------------------------------
+CERTIFY = "I certify that the information above is true and complete"
+
+
+def with_consent(label, *, required=False, category="consent", **box_over):
+    """base() plus one checkbox field, handed to you as decide() would have."""
+    r = base()
+    r["fields"].append({"ref": "fc", "type": "checkbox", "label": label, "required": required})
+    r["categories"]["fc"] = category
+    r["flags"] = [{"ref": "fc", "label": label, "category": category, "reason": "yours"}]
+    r["snapshot"]["fc"] = False
+    b = box(label, **box_over)
+    b["ref"] = "fc"
+    r["census"].append(b)
+    return r
+
+
+def consent_profile():
+    return profile(consent_allowlist=[SMS, CERTIFY, "I have previously worked for Acme"])
+
+
+def test_5a_allowlisted_consent_checkboxes_pass():
+    check = Checks()
+    # Required, and the legal backstop matches "I certify": the allowlist
+    # entry stands in for a profile line.
+    r = with_consent(CERTIFY, required=True, category="legal_declaration")
+    v = run(r, consent_profile())
+    print(f"  certify: {v['content_verdict']} {v['content_reasons']} {v['consent_actions']}")
+    check(v["content_verdict"] == "would_submit", "required allowlisted 'I certify…' -> would_submit")
+    check(v["consent_actions"] == {"fc": "would_tick"}, "  ...planned would_tick (nothing is ticked)")
+    t = next((t for t in v["trace"] if t["ref"] == "fc"), {})
+    check(t.get("source") == "consent_allowlist" and t.get("allowlist_index") == 1
+          and t.get("profile_path") is None, "  ...traced to allowlist entry 1")
+
+    r = with_consent(SMS)
+    v = run(r, consent_profile())
+    check(v["content_verdict"] == "would_submit" and v["consent_actions"] == {"fc": "leave"},
+          "optional allowlisted SMS opt-in, unticked -> passes, planned leave")
+    check(not any(t["ref"] == "fc" for t in v["trace"]), "  ...and isn't a legal trace")
+    check.done()
+
+
+def test_5a_ineligible_consent_checkboxes_stop():
+    check = Checks()
+    p = consent_profile()
+    for source in ("none", "aria-labelledby", "self"):
+        stops(check, with_consent(SMS, label_source=source), "'I agree to receive SMS updates': left for you",
+              f"same label, sourced from {source}", prof=p)
+    stops(check, with_consent(SMS, described="Msg & data rates apply. See Terms."), "left for you",
+          "same label with aria-describedby text", prof=p)
+    stops(check, with_consent(SMS, label_content=SMS + " and to binding arbitration"), "left for you",
+          "same label, innerText != textContent", prof=p)
+    stops(check, with_consent("I have previously worked for Acme"), gate.PER_COMPANY_REASON,
+          "an allowlist match on a per-company-kind checkbox", prof=p)
+    for cat in ("unknown", "eeo"):
+        stops(check, with_consent(SMS, category=cat), "'I agree to receive SMS updates'",
+              f"allowlisted, but handed to you as {cat}", prof=p)
+    stops(check, with_consent("I agree to the arbitration agreement", required=True),
+          "'I agree to the arbitration agreement': left for you", "a required consent not on the list", prof=p)
+    v = run(with_consent("I agree to the arbitration agreement", required=True), p)
+    check(any("required, but empty" in r for r in v["content_reasons"]),
+          "  ...and, never ticked, its required box reads empty")
+    check.done()
+
+
+def test_hidden_iframes_are_logged_not_stopped_on():
+    check = Checks()
+    r = base(); r["events"] = [{"kind": "hidden_iframe", "detail": "tracker.example.com"}]
+    check(run(r)["content_verdict"] == "would_submit", "a hidden_iframe event doesn't stop the run")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())

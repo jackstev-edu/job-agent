@@ -37,6 +37,14 @@ STRICT_FITS = {"exact", "bool", "decline", "verbatim"}
 # pick up the wrong text, so a label it found isn't trusted here.
 EXPLICIT_LABEL_SOURCES = {"for", "wrap", "aria-label", "aria-labelledby", "self"}
 
+# A checkbox field may stand in for its own answer only with a label from a
+# real <label> element (for= or wrapping) or aria-label: stricter than the
+# census check below, which today also accepts aria-labelledby and own text.
+ALLOWLIST_LABEL_SOURCES = {"for", "wrap", "aria-label"}
+
+# Run events that are logged but never stop the run.
+INFORMATIONAL_EVENTS = {"hidden_iframe"}
+
 PER_COMPANY_REASON = "per-company question; profile answering not enabled"
 
 # Frames the gate knows are not part of the form (invisible reCAPTCHA).
@@ -79,13 +87,32 @@ def _present(value: Any) -> bool:
     return bool(str(value).strip())
 
 
+def _allowlist_index(box: dict | None, allow: list[str]) -> int | None:
+    """
+    The consent_allowlist entry a checkbox exactly matches, or None. Its label
+    must come from a <label> or aria-label, read the same rendered as written
+    (nothing hidden with CSS), carry no fine print, and normalise to exactly
+    one of your entries. No substring or model matching.
+    """
+    if not box or box.get("label_source") not in ALLOWLIST_LABEL_SOURCES:
+        return None
+    if normalize_label(box.get("label_inner")) != normalize_label(box.get("label_content")):
+        return None
+    if box.get("described"):
+        return None
+    label = normalize_label(box.get("label_inner"))
+    return next((i for i, entry in enumerate(allow) if normalize_label(entry) == label), None)
+
+
 def decide(record: dict, profile, *, agent_submissions_today: int = 0) -> dict:
     """
     Returns {
       "gate_version", "content_verdict", "content_reasons",
       "enablement": {"portal_allowlisted", "cap_remaining"}, "enablement_reasons",
-      "trace": [one entry per legal/eligibility/EEO/pay field: no answer values]
-    }. Any exception becomes would_stop with the reason.
+      "trace": [one entry per legal/eligibility/EEO/pay field: no answer values],
+      "consent_actions": {ref: "would_tick" | "leave"} for allowlisted consent boxes
+    }. Any exception becomes would_stop with the reason. Nothing is ever ticked:
+    a consent action is what the agent would do if it ever submitted for you.
     """
     try:
         return _decide(record, profile, agent_submissions_today)
@@ -93,7 +120,7 @@ def decide(record: dict, profile, *, agent_submissions_today: int = 0) -> dict:
         return {"gate_version": GATE_VERSION, "content_verdict": WOULD_STOP,
                 "content_reasons": [f"gate error: {type(e).__name__}"],
                 "enablement": {"portal_allowlisted": False, "cap_remaining": None},
-                "enablement_reasons": ["gate error"], "trace": []}
+                "enablement_reasons": ["gate error"], "trace": [], "consent_actions": {}}
 
 
 def _decide(record: dict, profile, agent_submissions_today: int) -> dict:
@@ -113,6 +140,9 @@ def _decide(record: dict, profile, agent_submissions_today: int) -> dict:
     snapshot: dict = record.get("snapshot") or {}
     dry = bool(record.get("dry_run"))
     canned = {re.sub(r"\s+", " ", v).strip() for v in profile.canned_answers().values()}
+    allow = profile.consent_allowlist()
+    census_by_ref = {b.get("ref"): b for b in (record.get("census") or []) if b.get("ref")}
+    consent_actions: dict[str, str] = {}
 
     for f in fields:
         ref, label = f.get("ref"), f.get("label") or f.get("name") or "(unlabelled)"
@@ -130,6 +160,26 @@ def _decide(record: dict, profile, agent_submissions_today: int) -> dict:
         if category == "per_company" or "per_company" in kinds:
             content.append(f"{name}: {PER_COMPANY_REASON}")
             continue
+
+        # An allowlisted consent checkbox: your exact entry in consent_allowlist
+        # answers it, the way a profile line answers an eligibility question.
+        # It's waived only when it was handed to you as consent (by category,
+        # or by the legal backstop on a consent/legal-declaration box). Any
+        # other reason it came to you still stops. Nothing is ticked: the
+        # action is recorded for scoring only.
+        if f.get("type") == "checkbox" and ref in flags:
+            idx = _allowlist_index(census_by_ref.get(ref), allow)
+            legal_hit = "legal" in kinds
+            consent_handoff = (category == "consent"
+                               or (legal_hit and category == "legal_declaration"))
+            if (idx is not None and consent_handoff and not kinds - {"legal"}
+                    and line is None):
+                if legal_hit or category in SENSITIVE_CATEGORIES:
+                    trace.append({"ref": ref, "label": label[:120], "category": category,
+                                  "profile_path": None, "source": "consent_allowlist",
+                                  "fit": "exact", "allowlist_index": idx})
+                consent_actions[ref] = "would_tick" if _is_required(f) else "leave"
+                continue
 
         # 2. legal / eligibility / EEO / pay: traced to a named profile line.
         # Only names and kinds are kept: never the answer itself.
@@ -188,7 +238,9 @@ def _decide(record: dict, profile, agent_submissions_today: int) -> dict:
         if not _is_required(f):
             continue
         ref = f.get("ref")
-        if dry:
+        if consent_actions.get(ref) == "would_tick":
+            filled = True        # the gate's plan ticks it; the agent never does
+        elif dry:
             filled = _present((plan.get(ref) or {}).get("value"))
         else:
             filled = _present(snapshot.get(ref))
@@ -220,6 +272,8 @@ def _decide(record: dict, profile, agent_submissions_today: int) -> dict:
 
     # 9. nothing unexpected along the way.
     for ev in record.get("events") or []:
+        if ev.get("kind") in INFORMATIONAL_EVENTS:
+            continue
         detail = f" ({ev.get('detail')})" if ev.get("detail") else ""
         content.append(f"run: {ev.get('kind', 'unknown event')}{detail}")
     if (record.get("steps") or 0) > 1:
@@ -253,4 +307,5 @@ def _decide(record: dict, profile, agent_submissions_today: int) -> dict:
             "content_reasons": content,
             "enablement": {"portal_allowlisted": allowlisted, "cap_remaining": cap_remaining},
             "enablement_reasons": enablement_reasons,
-            "trace": trace}
+            "trace": trace,
+            "consent_actions": consent_actions}

@@ -13,9 +13,10 @@ Run from anywhere:  .venv/Scripts/python.exe tests/test_gate_record.py
 """
 from pathlib import Path
 
-from _fill_run import run_fill
-from _harness import Checks, run_as_script
-from agent import shadow
+from _fill_run import PROFILE, run_fill
+from _harness import TEST_HOME, Checks, mock_page, run_as_script
+from agent import gate, shadow
+from agent.profile import Profile
 
 FORM = Path(__file__).parent / "gate_form.html"
 
@@ -89,6 +90,54 @@ def test_unreadable_page_is_an_error_not_an_empty_record():
     check(len(rec["errors"]) == 4, "checkboxes, iframes, values and address each recorded as unread")
     check(shadow.failed_record("u", "p", "boom")["errors"] == ["boom"],
           "a record that couldn't be built at all still carries the reason")
+    check.done()
+
+
+def test_clean_mock_form_would_submit():
+    # The whole pipeline, then the gate: every answer exact from the profile,
+    # the one checkbox an allowlisted, optional SMS opt-in left unticked.
+    check = Checks()
+    profile_yaml = PROFILE + """\
+consent_allowlist:
+  - I agree to receive SMS updates
+"""
+    form = TEST_HOME / "gate_clean_record.html"
+    form.write_text((Path(__file__).parent / "gate_clean.html").read_text(encoding="utf-8")
+                    .replace("GENDER_OPTION", "Decline to self-identify"), encoding="utf-8")
+    text, records, error = run_fill(form, dry_run=False, profile_yaml=profile_yaml)
+    check(error is None and len(records) == 1, f"the run finished with one record ({error})")
+    import yaml
+    prof = Profile(yaml.safe_load(profile_yaml), TEST_HOME / "fill-profile.yaml")
+    v = gate.decide(records[0], prof)
+    print(f"  {v['content_verdict']} {v['content_reasons']} {v['consent_actions']}")
+    check(v["content_verdict"] == "would_submit", "the clean mock form -> would_submit")
+    check(list(v["consent_actions"].values()) == ["leave"], "  ...its opt-in planned as leave")
+    check(records[0]["snapshot"].get(next(iter(v["consent_actions"]))) is False,
+          "  ...and the box really is still unticked")
+    check.done()
+
+
+def test_hidden_iframes_become_events_by_host():
+    check = Checks()
+    html = TEST_HOME / "frames.html"
+    html.write_text("""<!doctype html><body><input id=a>
+      <iframe src="https://tracker.example.com/p?token=SECRET123" style="display:none"></iframe>
+      <iframe src="https://ads.example.net/x" width="0" height="0"></iframe>
+      <iframe src="https://forms.example.org/f?k=SECRET456" style="visibility:hidden"></iframe>
+      </body>""", encoding="utf-8")
+    with mock_page(html) as page:
+        rec = shadow.build_record(page, url=html.resolve().as_uri(), portal="generic",
+                                  portal_method="default", company="", steps=[], events=[],
+                                  dry_run=False)
+    hidden = [e for e in rec["events"] if e["kind"] == "hidden_iframe"]
+    print(f"  {hidden}")
+    check([e["detail"] for e in hidden] == ["tracker.example.com", "ads.example.net",
+                                            "forms.example.org"],
+          "each invisible frame logged as an event, by host only")
+    stored = shadow.redacted(rec, {"trace": [], "consent_actions": {}})
+    check("SECRET" not in str(stored), "no frame's full address is stored")
+    check(not any("embedded frame" in r for r in gate.decide(rec, Profile({}, html))["content_reasons"]),
+          "and none of them counts against the verdict")
     check.done()
 
 
