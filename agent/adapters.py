@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field as dataclass_field
+from urllib.parse import urlparse
 
 from typing import TYPE_CHECKING
 
@@ -112,9 +113,22 @@ _URL_SIGNATURES = [
 
 def detect(url: str, page = None) -> tuple[str, ATS]:
     """Identify the system from the URL, falling back to the page markup."""
+    key, ats, _ = detect_with_method(url, page)
+    return key, ats
+
+
+def detect_with_method(url: str, page = None) -> tuple[str, ATS, str]:
+    """
+    detect(), plus how: "host", "url", "html" or "default". The submit gate
+    trusts only "host", a match on the hostname itself. "url" means the
+    pattern turned up elsewhere in the address (`?ref=greenhouse.io`), and the
+    HTML fallback reads page text, which is untrusted: any page can mention
+    "greenhouse".
+    """
+    host = (urlparse(url).hostname or "").lower()
     for pattern, key in _URL_SIGNATURES:
         if re.search(pattern, url, re.I):
-            return key, CATALOG[key]
+            return key, CATALOG[key], ("host" if re.search(pattern, host, re.I) else "url")
 
     # Many companies proxy the ATS behind their own domain, so check the HTML.
     if page is not None:
@@ -124,11 +138,11 @@ def detect(url: str, page = None) -> tuple[str, ATS]:
             html = ""
         for pattern, key in _URL_SIGNATURES:
             if re.search(pattern, html):
-                return key, CATALOG[key]
+                return key, CATALOG[key], "html"
         if "data-automation-id" in html:
-            return "workday", CATALOG["workday"]
+            return "workday", CATALOG["workday"], "html"
 
-    return "generic", CATALOG["generic"]
+    return "generic", CATALOG["generic"], "default"
 
 
 def prepare(page: "Page", key: str) -> None:

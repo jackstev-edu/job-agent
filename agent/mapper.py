@@ -186,6 +186,11 @@ def _double_check(item: dict, field: dict) -> dict:
     """
     value = item.get("value")
     options = field.get("options") or []
+    # Why needs_review got set, by name. The submit gate waives exactly one of
+    # these (a draft's), so it has to be able to tell them apart.
+    reasons = item.setdefault("review_reasons", [])
+    if item.get("needs_review"):
+        reasons.append("model")
 
     # An option that isn't on the list would silently fail or pick something
     # wrong. Try harder to recognise it, and blank it if we can't.
@@ -194,6 +199,7 @@ def _double_check(item: dict, field: dict) -> dict:
         if match is None:
             item["value"] = None
             item["needs_review"] = True
+            reasons.append("unmatched_option")
             item["note"] = (f"Model suggested '{value}', which isn't one of this "
                             f"form's options ({how}). Left blank for you.")
         elif how in ("exact", "normalized"):
@@ -203,6 +209,7 @@ def _double_check(item: dict, field: dict) -> dict:
             # of your degree, not a copy of it. You sign this, so you approve it.
             item["value"] = match
             item["needs_review"] = True
+            reasons.append("approximate_option")
             item["note"] = (f"Your profile says '{value}'. This form doesn't offer "
                             f"that, so I chose '{match}' — {how}. Check it.")
 
@@ -210,9 +217,11 @@ def _double_check(item: dict, field: dict) -> dict:
     limit = field.get("maxlength")
     if limit and isinstance(item.get("value"), str) and len(item["value"]) > limit:
         item["needs_review"] = True
+        reasons.append("too_long")
         item["note"] = f"{len(item['value'])} characters, but the field allows {limit}."
 
     if item.get("confidence") == "low":
         item["needs_review"] = True
+        reasons.append("low_confidence")
 
     return item

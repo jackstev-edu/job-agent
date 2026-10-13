@@ -185,13 +185,13 @@ def decide(field: dict, category: str, profile) -> dict:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"`{path}` is blank in profile.yaml. Fill it in and "
                               f"this stops being manual."}
-        value = fit_to_widget(raw, field)
+        value, fit = fit_with_kind(raw, field)
         if value is None:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"Your answer is '{raw}' but this form offers "
                               f"{field.get('options')}. Pick one yourself."}
         return {**base, "action": "fill", "value": value, "source": "profile",
-                "profile_path": path}
+                "profile_path": path, "fit": fit}
 
     # -- ordinary fields -----------------------------------------------------
     return {**base, "action": action, "value": None, "source": "model"}
@@ -203,38 +203,50 @@ def fit_to_widget(raw: Any, field: dict):
     in your file might arrive as radio buttons, a dropdown with oddly-worded
     options, or a checkbox. Returns None rather than forcing a bad match.
     """
+    return fit_with_kind(raw, field)[0]
+
+
+def fit_with_kind(raw: Any, field: dict) -> tuple[Any, str | None]:
+    """
+    fit_to_widget, plus HOW the value was fitted. The submit gate trusts only
+    the strict kinds for legal answers: "exact", "bool", "decline" and
+    "verbatim" (no options, the profile value as written). "bool_prefix" and
+    "substring" are looser guesses at which option you meant.
+    """
     options = field.get("options") or []
     ftype = (field.get("type") or "").lower()
 
     if ftype == "checkbox":
-        return bool(raw)
+        return bool(raw), "bool"
 
     if not options:
-        return ("Yes" if raw else "No") if isinstance(raw, bool) else str(raw)
+        if isinstance(raw, bool):
+            return ("Yes" if raw else "No"), "bool"
+        return str(raw), "verbatim"
 
     if isinstance(raw, bool):
         wanted = (("yes", "true", "y", "i am authorized", "authorized")
                   if raw else ("no", "false", "n", "not authorized"))
         for opt in options:
             if opt.strip().lower() in wanted:
-                return opt
+                return opt, "bool"
         for opt in options:
             low = opt.strip().lower()
             if (raw and low.startswith("yes")) or (not raw and low.startswith("no")):
-                return opt
-        return None
+                return opt, "bool_prefix"
+        return None, None
 
     target = str(raw).strip().lower()
     for opt in options:
         if opt.strip().lower() == target:
-            return opt
+            return opt, "exact"
     for opt in options:
         low = opt.strip().lower()
         if target and (target in low or low in target):
-            return opt
+            return opt, "substring"
 
     if _DECLINE.search(target):
         for opt in options:
             if _DECLINE.search(opt.lower()):
-                return opt
-    return None
+                return opt, "decline"
+    return None, None

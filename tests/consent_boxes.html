@@ -1,0 +1,35 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mock - consent checkboxes</title></head>
+<body>
+<h1>Mock application (checkbox census)</h1>
+<label for="fname">First name</label> <input id="fname" name="first_name">
+
+<!-- 1: plain consent, label by for= -->
+<input type="checkbox" id="sms"><label for="sms">I agree to receive SMS updates</label><br>
+
+<!-- 2: wrapping label with a clause hidden by CSS: innerText != textContent -->
+<label><input type="checkbox" id="hiddenclause"> I agree to receive SMS updates<span style="display:none"> and to binding arbitration</span></label><br>
+
+<!-- 3: arbitration, unticked -->
+<input type="checkbox" id="arb"><label for="arb">I agree to resolve disputes through binding arbitration</label><br>
+
+<!-- 4: a native checkbox hidden from view, with a label -->
+<input type="checkbox" id="bg" checked style="display:none"><label for="bg">I consent to a background check</label><br>
+
+<!-- 5: a custom role=checkbox, already ticked, named by its own text -->
+<div role="checkbox" aria-checked="true" tabindex="0" id="news">Subscribe to the newsletter</div>
+
+<!-- 6: no label at all -->
+<input type="checkbox" id="mystery"><br>
+
+<!-- 7: described-by text, the fine print -->
+<input type="checkbox" id="terms" aria-describedby="terms-help"><label for="terms">I agree</label>
+<p id="terms-help">By ticking this you accept the Terms of Service.</p>
+
+<!-- 8: an Ashby-style button pair; its hidden checkbox is the answer store -->
+<div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title">Are you willing to relocate?</label>
+<div class="ashby-application-form-input-yesno"><button aria-pressed="false">Yes</button><button aria-pressed="false">No</button><input type="checkbox" tabindex="-1" name="q-reloc" style="position:absolute;width:0;height:0;opacity:0"></div></div>
+
+<!-- 9: an embedded frame the gate can't see into -->
+<iframe src="about:blank" width="200" height="40" title="embedded"></iframe>
+</body></html>

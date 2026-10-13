@@ -320,6 +320,13 @@ def cmd_fill(args) -> None:
                     if next((f for f in for_model
                              if f["ref"] == ref and f.get("_draft")), None):
                         decision["needs_review"] = True
+                        decision["draft"] = True
+                        # The mapper prompt tells the model to flag every
+                        # draft, so its own flag on one is the draft's flag.
+                        # Flags raised in code (too long, approximate option,
+                        # low confidence) keep their own names.
+                        decision["review_reasons"] = ["draft"] + [
+                            r for r in decision.get("review_reasons", []) if r != "model"]
                     plan[ref] = decision
 
             if args.dry_run:

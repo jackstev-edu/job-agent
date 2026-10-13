@@ -434,3 +434,77 @@ def snapshot(page: "Page", fields: list[dict]) -> dict:
         elif f["ref"] in raw:
             out[f["ref"]] = raw[f["ref"]]
     return out
+
+
+# --- the checkbox census, for the submit gate --------------------------------
+# Every checkbox on the page, hidden ones included, with where its label came
+# from. Read-only: nothing here clicks or ticks. Unlike the scan, it keeps
+# hidden native checkboxes, because a consent box styled out of sight still
+# counts. Labels are reported twice, as rendered (innerText) and as written
+# (textContent), so text hidden with CSS shows up as a difference.
+_CHECKBOX_CENSUS_JS = r"""
+(GROUP) => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const visible = el => {
+    const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const texts = els => ({inner: els.map(e => e.innerText).join(' '),
+                         content: els.map(e => e.textContent).join(' ')});
+  const labelOf = el => {
+    const aria = el.getAttribute('aria-label');
+    if (aria && aria.trim()) return {source: 'aria-label', inner: aria, content: aria};
+    const ids = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+    const byId = ids.map(id => document.getElementById(id)).filter(Boolean);
+    if (byId.length) return {source: 'aria-labelledby', ...texts(byId)};
+    if (el.id) {
+      const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (l) return {source: 'for', ...texts([l])};
+    }
+    const wrap = el.closest('label');
+    if (wrap) return {source: 'wrap', ...texts([wrap])};
+    // A role=checkbox element is usually named by its own text.
+    if (el.tagName !== 'INPUT' && norm(el.textContent)) return {source: 'self', ...texts([el])};
+    return {source: 'none', inner: '', content: ''};
+  };
+  const described = el => (el.getAttribute('aria-describedby') || '').split(/\s+/)
+      .map(id => document.getElementById(id)?.textContent || '').join(' ');
+
+  return [...document.querySelectorAll('input[type=checkbox], [role=checkbox], [role=switch]')]
+    .map(el => {
+      const group = el.closest(GROUP);
+      const lab = labelOf(el);
+      return {
+        ref: el.getAttribute('data-ja-ref'),
+        checked: el.tagName === 'INPUT' ? !!el.checked : el.getAttribute('aria-checked') === 'true',
+        visible: visible(el),
+        label_source: lab.source,
+        label_inner: norm(lab.inner),
+        label_content: norm(lab.content),
+        described: norm(described(el)),
+        in_button_group: !!group,
+        // The Ashby button group's field ref is its first button's, as stamped
+        // by the scan, so the gate can find that question in the plan.
+        group_ref: group?.querySelector('button')?.getAttribute('data-ja-ref') || null,
+      };
+    });
+}
+"""
+
+_FRAMES_JS = r"""
+() => [...document.querySelectorAll('iframe, frame')].map(f => {
+  const r = f.getBoundingClientRect(), s = getComputedStyle(f);
+  return {src: f.getAttribute('src') || '',
+          visible: r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'};
+})
+"""
+
+
+def checkbox_census(page: "Page") -> list[dict]:
+    """Every checkbox on the page and its state. Raises if the page can't be read."""
+    return page.evaluate(_CHECKBOX_CENSUS_JS, BUTTON_GROUP)
+
+
+def frame_inventory(page: "Page") -> list[dict]:
+    """Every iframe's src and visibility: the gate can't see inside one."""
+    return page.evaluate(_FRAMES_JS)
