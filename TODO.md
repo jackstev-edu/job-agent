@@ -48,6 +48,12 @@
    invisible reCAPTCHA's badge paused every run. A full (non-dry) Greenhouse
    fill and anything on Lever are still untested live.
 
+   Status, 13 Oct 2026: still open. Dry runs passed on a real Greenhouse
+   posting, and a full fill ran on 13 Oct (logged as a draft, which only a
+   non-dry run writes). But no Greenhouse application is logged as
+   submitted, so the end-to-end path hasn't been closed. Done when one is
+   (`apply.py status <url> submitted` after you press Submit).
+
    If Ashby ever wraps these buttons in a `<form>`, the submit guard refuses
    every one of them (they're typeless, so they'd submit it) and the questions
    all come to you. That's deliberate — the safe failure. Don't loosen it.
