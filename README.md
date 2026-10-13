@@ -156,18 +156,30 @@ With `make`, the same things are `make dry URL=...`, `make fill URL=...
 RESUME=robotics LETTER=1`, `make list STATUS=submitted` and `make followup
 DAYS=21`.
 
-When something goes wrong — and it will, on Workday — the browser window stays
-open. Finish by hand, and note which selector failed so you can fix it.
+When something goes wrong, the browser window stays open while `fill` is
+waiting for you. Finish by hand, and note which selector failed so you can
+fix it. If `fill` exits instead (as it does after a Workday sign-in today),
+the window closes with it.
+
+**Use a second terminal for anything else.** While `fill` waits at a "Press
+Enter…" prompt, anything you type into its terminal is read as that Enter:
+the run carries on as if you'd finished, and your command never runs. Keep
+`fill` in one terminal and run other commands in another.
 
 ### Saving a portal login once
 
-Portals like Workday want an account per employer. Do this once for each:
+Some portals want an account per employer. Do this once for each (Workday
+support is deferred; see section 6):
 
 1. Run `fill` on a posting. At the login wall the agent pauses and says
    "This portal wants a login".
 2. In that Chrome window, sign in yourself. If you need an account, create it
    yourself too: the terms checkbox, the verification code and the Create
-   Account button are always yours.
+   Account button are always yours. Use the portal's own email and password.
+   "Sign in with Google" and other SSO buttons don't work here: Google blocks
+   automated browsers, and an SSO login leaves no saved password to fill.
+   Chrome won't suggest a generated password in this profile either (that
+   needs a Chrome sign-in), so choose your own.
 3. When Chrome offers to save the password, click **Save**. It goes into
    Chrome's password manager inside the agent's own profile,
    `~/.job-agent/chrome-profile`, and nowhere else. Don't sign that profile in
@@ -306,11 +318,16 @@ of that without having to think about it each time.
 gotcha already handled: its resume autoparse overwrites text fields, so upload
 happens first.
 
-**Workday** — where your evenings will go. Multi-step wizard, account required
-per employer, element IDs that regenerate between renders, dates split across
-three separate spinners. The adapter knows to key off `data-automation-id`
-instead of `id` and will fill one step at a time. Roughly 40% of large-employer
-applications, so it's worth finishing properly.
+**Workday** — support is **deferred**, and a run currently stops after
+sign-in. The agent gets through Apply and the login wall, but Workday's next
+page ("Autofill with Resume") has only buttons and a hidden file input. The
+scan finds no form fields, `fill` exits, and the browser closes with it.
+Making it work needs a Workday step handler; see "Deferred" in `TODO.md`.
+Beyond that page it's a multi-step wizard with an account per employer,
+element IDs that regenerate between renders, and dates split across three
+spinners. The adapter already keys off `data-automation-id`. Roughly 40% of
+large-employer applications, so it's worth finishing properly. Until then,
+apply on Workday by hand.
 
 **iCIMS, Taleo, SuccessFactors** — old, iframe-heavy, session-timeout prone, and
 very common among large industrial employers.

@@ -58,25 +58,7 @@
    every one of them (they're typeless, so they'd submit it) and the questions
    all come to you. That's deliberate — the safe failure. Don't loosen it.
 
-7. **Get past the account wall**
-   Load a password manager extension into `chrome-profile` so registration and
-   login are one click. Then confirm the agent resumes on post-login pages.
-   No plaintext credentials in profile.yaml.
-
-   Progress, 12 Oct 2026: no extension needed. Chrome's built-in password
-   manager works in Playwright's bundled Chromium on our persistent profile.
-   Checked in a throwaway profile against a local login page: it offers to
-   save, and on a fresh launch it autofills both boxes with no gesture. So the
-   launch stays on bundled Chromium, not `channel="chrome"`. On a login wall,
-   `browser.sign_in_with_saved_login` waits for autofill and presses one plain
-   Sign in / Log in / Continue button; otherwise it pauses for you as before.
-   The design rule in CLAUDE.md changed to match (the agent never reads,
-   types, generates or stores a password; the browser may fill one). Account
-   creation stays manual. The check runs at the start, again after
-   `adapters.prepare()` (Workday shows its sign-in page only after Apply is
-   clicked), and before every wizard step. Still open, and needs you: save a login on a real
-   portal (README, "Saving a portal login once") and confirm a later run gets
-   past the wall and resumes filling on the post-login page.
+7. *Deferred: Workday and the account wall. See "Deferred" at the end.*
 
 8. ~~**Extend the EEO block for voluntary diversity questions**~~ DONE
    Four new lines in `agent/template.py`, all defaulting to "Prefer not to
@@ -232,3 +214,48 @@
     thinking on by default, so the `max_tokens=4000` ceiling in `classify.py`
     and the JSON-only reply can behave differently. Nothing in `tests/` calls
     the real API, so this needs a live check, not just `pytest`.
+
+## Deferred
+
+Parked for after the MVP. Each one says what's known and what it needs.
+
+7. **Get past the account wall (Workday)**
+   Load a password manager extension into `chrome-profile` so registration and
+   login are one click. Then confirm the agent resumes on post-login pages.
+   No plaintext credentials in profile.yaml.
+
+   Progress, 12 Oct 2026: no extension needed. Chrome's built-in password
+   manager works in Playwright's bundled Chromium on our persistent profile.
+   Checked in a throwaway profile against a local login page: it offers to
+   save, and on a fresh launch it autofills both boxes with no gesture. So the
+   launch stays on bundled Chromium, not `channel="chrome"`. On a login wall,
+   `browser.sign_in_with_saved_login` waits for autofill and presses one plain
+   Sign in / Log in / Continue button; otherwise it pauses for you as before.
+   The design rule in CLAUDE.md changed to match (the agent never reads,
+   types, generates or stores a password; the browser may fill one). Account
+   creation stays manual. The check runs at the start, again after
+   `adapters.prepare()` (Workday shows its sign-in page only after Apply is
+   clicked), and before every wizard step. What it still needs: a later run
+   on a real portal that gets past the wall and resumes filling on the
+   post-login page. On Workday that's blocked by the step below.
+
+   Findings from a live Workday attempt, Oct 2026. These are why it's
+   deferred:
+   - **"Sign in with Google" / SSO isn't supported.** Google blocks sign-in
+     from automated browsers, and an SSO login leaves no saved password for
+     Chrome to autofill, so `sign_in_with_saved_login` has nothing to work
+     with. Use the portal's own email-and-password account.
+   - **Chrome's password generator isn't offered in the agent's profile.**
+     It needs a Chrome sign-in, and this profile is deliberately never signed
+     in. You have to choose your own password when creating the account.
+     Saving it when Chrome offers works.
+   - **After sign-in, the "Autofill with Resume" step stops the run.** That
+     page has only buttons and a hidden file input, so the scan reports "No
+     form fields found", `fill` exits, and exiting closes the browser. It
+     needs a Workday step handler that recognises this page (upload the
+     resume to the hidden input, or choose "Apply Manually") before scanning.
+   - **Gotcha: don't type commands into the terminal `fill` is waiting in.**
+     While `fill` sits at an `input()` prompt ("Press Enter when you're
+     in", "Press Enter when you've finished"), whatever you type there is
+     read as that Enter, and the command never runs. Run shell commands in a
+     second terminal. Documented in the README too.
