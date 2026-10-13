@@ -117,9 +117,23 @@ def mark_submitted(url: str, notes: str = "") -> None:
 
 
 def set_status(url: str, status: str) -> None:
-    """For statuses you set by hand: rejected, interview, offer."""
+    """
+    For statuses you set by hand: submitted, rejected, interview, offer.
+
+    "submitted" also records submitted_at, but only when it's empty. Without
+    it `followup` never lists the application; an existing date is the real
+    one and is never overwritten.
+    """
     with _connect() as conn:
-        conn.execute("UPDATE applications SET status=? WHERE url=?", (status, url))
+        conn.execute(
+            """
+            UPDATE applications SET
+                status = ?,
+                submitted_at = CASE
+                    WHEN ? = 'submitted' AND COALESCE(submitted_at, '') = '' THEN ?
+                    ELSE submitted_at END
+            WHERE url = ?
+            """, (status, status, _timestamp(), url))
 
 
 def all_applications(status: str | None = None) -> list[dict]:
@@ -135,8 +149,10 @@ def all_applications(status: str | None = None) -> list[dict]:
 
 def awaiting_reply(days: int = 14) -> list[dict]:
     """Submitted more than N days ago and still marked submitted."""
+    # datetime() on both sides: the stored stamp is ISO ("…T…+00:00") and
+    # SQLite's is "… …", and compared as text the T sorts after the space.
     with _connect() as conn:
         return [dict(r) for r in conn.execute(
             "SELECT * FROM applications WHERE status='submitted' "
-            "AND submitted_at <= datetime('now', ?) ORDER BY submitted_at",
+            "AND datetime(submitted_at) <= datetime('now', ?) ORDER BY submitted_at",
             (f"-{days} days",))]
