@@ -40,6 +40,45 @@ CREATE TABLE IF NOT EXISTS applications (
 CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
 """
 
+# Schema changes since the first release, applied in order to any database
+# whose PRAGMA user_version is below the number. Additive only: a migration
+# never rewrites or drops what's already logged.
+MIGRATIONS: list[tuple[int, str]] = [
+    (1, """
+    -- The submit gate in shadow mode: one row per fill run. Nothing is ever
+    -- submitted by the agent; agent_submitted stays 0 until something is.
+    CREATE TABLE IF NOT EXISTS gate_runs (
+      id               INTEGER PRIMARY KEY,
+      application_url  TEXT NOT NULL,
+      portal           TEXT,
+      portal_method    TEXT,
+      verdict          TEXT NOT NULL,     -- the content verdict only
+      reasons_json     TEXT,              -- content reasons
+      enablement_json  TEXT,              -- {portal_allowlisted, cap_remaining, reasons}
+      record_json      TEXT,              -- redacted: no answer values
+      gate_version     INTEGER,
+      agent_submitted  INTEGER NOT NULL DEFAULT 0,
+      human_submitted  TEXT NOT NULL DEFAULT 'unknown',   -- y / n / unknown
+      edits_json       TEXT,              -- which fields you changed
+      capture          TEXT,              -- exact / polled / none
+      success_signal   TEXT,
+      created_at       TEXT NOT NULL,
+      outcome_at       TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_gate_runs_portal ON gate_runs(portal, created_at);
+    """),
+]
+SCHEMA_VERSION = MIGRATIONS[-1][0]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    current = conn.execute("PRAGMA user_version").fetchone()[0]
+    for version, sql in MIGRATIONS:
+        if version > current:
+            conn.executescript(sql)
+            # PRAGMA takes no bound parameters; the version is our own int.
+            conn.execute(f"PRAGMA user_version = {int(version)}")
+
 
 @contextlib.contextmanager
 def _connect() -> Iterator[sqlite3.Connection]:
@@ -50,6 +89,7 @@ def _connect() -> Iterator[sqlite3.Connection]:
     try:
         conn.row_factory = sqlite3.Row
         conn.executescript(SCHEMA)
+        _migrate(conn)
         with conn:                      # commit on success, roll back on error
             yield conn
     finally:
@@ -156,3 +196,50 @@ def awaiting_reply(days: int = 14) -> list[dict]:
             "SELECT * FROM applications WHERE status='submitted' "
             "AND datetime(submitted_at) <= datetime('now', ?) ORDER BY submitted_at",
             (f"-{days} days",))]
+
+
+# --- the submit gate's shadow log ---------------------------------------------
+
+def record_gate_run(url: str, *, portal: str, portal_method: str, result: dict,
+                    record_json: dict) -> int:
+    """Log one gate verdict. Returns the row id, for the outcome to update later."""
+    enablement = {**(result.get("enablement") or {}),
+                  "reasons": result.get("enablement_reasons") or []}
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO gate_runs (application_url, portal, portal_method, verdict, "
+            "reasons_json, enablement_json, record_json, gate_version, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (url, portal, portal_method, result.get("content_verdict") or "would_stop",
+             json.dumps(result.get("content_reasons") or []), json.dumps(enablement),
+             json.dumps(record_json, default=str), result.get("gate_version"), _timestamp()))
+        return int(cur.lastrowid)
+
+
+def set_gate_outcome(run_id: int, *, human_submitted: str, edits: list | None,
+                     capture: str, success_signal: str = "") -> None:
+    """What you actually did after a run: y / n / unknown, and what you changed."""
+    if human_submitted not in ("y", "n", "unknown"):
+        human_submitted = "unknown"
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE gate_runs SET human_submitted=?, edits_json=?, capture=?, "
+            "success_signal=?, outcome_at=? WHERE id=?",
+            (human_submitted, None if edits is None else json.dumps(edits), capture,
+             success_signal, _timestamp(), run_id))
+
+
+def gate_runs(portal: str | None = None) -> list[dict]:
+    query, args = "SELECT * FROM gate_runs", ()
+    if portal:
+        query, args = query + " WHERE portal = ?", (portal,)
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(query + " ORDER BY created_at, id", args)]
+
+
+def agent_submissions_today() -> int:
+    """Applications the agent itself submitted today, by your local date. Zero for now."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM gate_runs WHERE agent_submitted = 1 AND "
+            "date(datetime(created_at), 'localtime') = date('now', 'localtime')").fetchone()[0]

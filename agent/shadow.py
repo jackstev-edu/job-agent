@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from . import extract
+from . import extract, sensitive
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -125,3 +125,65 @@ def failed_record(url: str, portal: str, reason: str) -> dict:
     return {"record_version": RECORD_VERSION, "url": url, "portal": portal,
             "errors": [reason]}
 
+
+
+_SENSITIVE_PREFIXES = ("eligibility.", "eeo.", "compensation.")
+
+
+def _redacted_box(box: dict, traced: dict) -> dict:
+    out = {k: box.get(k) for k in ("checked", "visible", "label_source", "label_inner",
+                                   "in_button_group", "group_ref")}
+    out["hidden_text"] = box.get("label_inner") != box.get("label_content")
+    out["fine_print"] = bool(box.get("described"))
+    # A checkbox that IS an EEO or eligibility question ("I identify as a
+    # protected veteran") answers it by being ticked, so its state is an
+    # answer value and isn't kept.
+    label = f"{box.get('label_inner') or ''} {box.get('label_content') or ''}"
+    if box.get("ref") in traced or box.get("group_ref") in traced or any(
+            rx.search(label) for rx, path in sensitive._PATHS
+            if path.startswith(_SENSITIVE_PREFIXES)):
+        out.pop("checked")
+        out["checked_withheld"] = True
+    return out
+
+
+def redacted(record: dict, result: dict) -> dict:
+    """
+    The record as stored in gate_runs.record_json: enough to explain a verdict
+    later, and no answer values for any field. Option lists, typed values, the
+    read-back and flag texts are all left out, because for an EEO or
+    eligibility question any of them can spell out your answer. Sensitive
+    fields keep only field, profile line, source and fit kind.
+    """
+    traced = {t.get("ref"): t for t in result.get("trace") or []}
+    plan = record.get("plan") or {}
+    results = record.get("results")
+    categories = record.get("categories") or {}
+    fields = []
+    for f in record.get("fields") or []:
+        ref = f.get("ref")
+        if ref in traced:
+            t = traced[ref]
+            fields.append({k: t.get(k) for k in ("ref", "label", "category", "profile_path",
+                                                 "source", "fit")})
+            continue
+        d = plan.get(ref) or {}
+        fields.append({
+            "ref": ref, "label": f.get("label"), "type": f.get("type"),
+            "required": f.get("required"), "category": categories.get(ref),
+            "source": d.get("source"), "confidence": d.get("confidence"),
+            "review_reasons": d.get("review_reasons"), "draft": d.get("draft"),
+            "answered": d.get("value") is not None if d else False,
+            "filled": None if results is None else bool((results.get(ref) or {}).get("filled")),
+        })
+    return {
+        "record_version": record.get("record_version"),
+        "url": record.get("url"), "final_url": record.get("final_url"),
+        "portal": record.get("portal"), "portal_method": record.get("portal_method"),
+        "dry_run": record.get("dry_run"), "steps": record.get("steps"),
+        "fields": fields,
+        "flagged": [fl.get("ref") for fl in record.get("flags") or []],
+        "census": [_redacted_box(b, traced) for b in record.get("census") or []],
+        "frames": record.get("frames"), "events": record.get("events"),
+        "errors": record.get("errors"),
+    }
