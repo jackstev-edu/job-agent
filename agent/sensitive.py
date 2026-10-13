@@ -88,32 +88,36 @@ PROFILE_PATHS: list[tuple[str, str]] = [
 #  decided. This layer does not depend on a model being available, correct,
 #  or even reachable.
 # ---------------------------------------------------------------------------
-HARD_STOPS: list[tuple[str, str]] = [
+# Each entry: (pattern, why it goes to you, kind). The kind is for the submit
+# gate, which treats per-company questions differently from legal ones; it
+# changes nothing about what is stopped here.
+HARD_STOPS: list[tuple[str, str, str]] = [
     (r"password|passcode|\bpin\b|security\s+question|secret\s+answer"
      r"|verification\s+code|one-?time\s+code|\b2fa\b|authenticator",
-     "Credential field. This tool never types passwords."),
+     "Credential field. This tool never types passwords.", "credential"),
 
     (r"convict|felon|misdemean|criminal|arrest|background\s+check"
      r"|drug\s+(test|screen)|substance\s+(abuse|test)",
-     "Legal declaration about your record. Never auto-filled."),
+     "Legal declaration about your record. Never auto-filled.", "legal"),
 
     (r"electronic\s+signature|\bi\s+certify|attest|acknowledg"
      r"|terms\s+(and|&)\s+conditions|privacy\s+(policy|notice)"
      r"|(agree|accept|consent|read).{0,40}(privacy|terms|policy)",
-     "You sign and consent to this, not a script."),
+     "You sign and consent to this, not a script.", "legal"),
 
     (r"(previously|ever|before|prior)\s+(\w+\s+){0,2}(work|appl|employ)"
      r"|former\s+employee|current(ly)?\s+employ\w*\s+(by|at|with)"
      r"|prior\s+employment",
-     "Depends on the specific company — only you know."),
+     "Depends on the specific company — only you know.", "per_company"),
 
     (r"referr?ed\s+by|how\s+did\s+you\s+(hear|learn|find)|referral\s+source"
      r"|source\s+of\s+application",
-     "Answer by hand — a real name here changes who reads your application."),
+     "Answer by hand — a real name here changes who reads your application.",
+     "per_company"),
 
     (r"relative|family\s+member.{0,30}employ|conflict\s+of\s+interest"
      r"|non-?compete|restrictive\s+covenant",
-     "Per-company relationship or contract question."),
+     "Per-company relationship or contract question.", "per_company"),
 ]
 
 # Every way a form writes "I would rather not answer". Matching this as a
@@ -133,7 +137,8 @@ _DECLINE = re.compile(
 )
 
 _PATHS = [(re.compile(p, re.I), path) for p, path in PROFILE_PATHS]
-_STOPS = [(re.compile(p, re.I), why) for p, why in HARD_STOPS]
+_STOPS = [(re.compile(p, re.I), why) for p, why, _ in HARD_STOPS]
+STOP_KINDS = [(re.compile(p, re.I), kind) for p, _, kind in HARD_STOPS]
 
 
 def _question_text(field: dict) -> str:
