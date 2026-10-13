@@ -273,6 +273,11 @@ this is the piece most likely to embarrass you if sent unread.
 applied, what you answered, and when. It lives outside the project folder so it
 can't end up in a git commit.
 
+**`agent/learn.py`** — Reads the corrections `fill` logs when you change its
+answers, and suggests profile fixes for the ones that recur across postings.
+It only reports: it never edits your profile or the code, and it only flags
+eligibility, EEO and pay answers.
+
 **`agent/report.py`** (HTML + CSS) — Writes the review sheet: one page listing
 every question, what went in, and where it came from, with the things needing
 your attention at the top. Written as HTML because you read it in a browser
@@ -356,30 +361,43 @@ printing each check as it goes.
 | Fixture / test | What it pins down |
 | --- | --- |
 | `button_pairs.html` · `test_button_pairs.py` | Ashby's Yes/No questions asked as `<button>` pairs over a hidden checkbox, copied from a live posting: read as radio groups in page order, answered by clicking, an already-pressed answer left alone. The traps are an "I agree" option and a button inside a real `<form>`. Both are refused, and the form is never submitted. |
-| `greenhouse_select.html` · `test_greenhouse_select.py` | Greenhouse's react-select dropdowns. A required one renders a hidden `aria-hidden tabindex=-1` validation input; it must not come out as a second question. A styled radio group with opacity-0 inputs must still be read. |
+| `greenhouse_select.html` · `test_greenhouse_select.py` | Greenhouse's react-select dropdowns. A required one renders a hidden `aria-hidden tabindex=-1` validation input; it must not come out as a second question. A styled radio group with opacity-0 inputs must still be read. After a choice, the snapshot reads the option the dropdown displays, not its empty search box. |
 | `recaptcha.html` · `test_captcha.py` | Invisible reCAPTCHA's always-visible badge is not a challenge, so there's no pause. A revealed challenge frame, a checkbox reCAPTCHA, or any other captcha still stops the run. |
 | `test_api_key.py` | Against a local stub API: a 401 or a missing key stops `fill`, dry runs included, before the browser opens. Any other failure falls through to the classifier's fail-safe. |
-| `test_dry_run_and_tracker.py` | A null answer prints as a blank with the model's note, not `[ok] None`. A `--force` rerun updates every column of the log. |
+| `test_dry_run_and_tracker.py` | A null answer prints as a blank with the model's note, not `[ok] None`. A `--force` rerun refreshes a draft in full, but never knocks a submitted, rejected, interview or offer row back to draft. |
 | `test_save_draft.py` | A cover-letter draft is written to the private documents folder, never the repo. |
+| `test_learn.py` | `apply.py learn` on a seeded log: each kind of suggestion, eligibility/EEO/compensation flagged only, one-offs ignored, nothing written. Anonymised rows shaped like the first real log check that false corrections (unreadable dropdowns, a reformatted phone number) are set aside, and that the logger doesn't record them. |
+| `login_wall.html` · `test_saved_login.py` | A browser-filled login gets one click on a plain "Sign in", and the password never reaches Python. Account creation, "Continue with Google", look-alike or duplicate buttons, and unfilled forms are left to you. `fill_one` still refuses a password box. |
+| `apply_then_login.html` · `test_login_after_apply.py` | The real `fill --dry-run` on a Workday-shaped mock whose sign-in page appears only after the Apply click: it signs in there and scans the form behind it, not the login boxes. |
 
 ### Real portals
 
 - **A bespoke employer portal** (September 2026): the first live runs.
 - **Ashby** (October 2026): a live posting's Yes/No button pairs were
   invisible to the scan; fixed, and copied into `button_pairs.html`.
-- **Greenhouse** (October 2026): a dry run on a live posting
-  (`job-boards.greenhouse.io`) completed. Greenhouse runs are also where two
-  problems turned up: every required dropdown appeared twice, and every run
-  paused for a CAPTCHA that wasn't there. Both are fixed and covered above.
+- **Greenhouse** (October 2026): dry runs on a live posting completed, and a
+  full fill ran too (logged as a draft). Greenhouse is where three problems
+  turned up, all fixed and covered above: every required dropdown appeared
+  twice, every run paused for a CAPTCHA that wasn't there, and the first real
+  corrections log was entirely false corrections (answered dropdowns read
+  back as blank, and a phone number the page had reformatted).
+- **Workday** (October 2026): got through Apply and sign-in, then stopped at
+  "Autofill with Resume", a page with no form fields. Deferred; see section
+  6 and `TODO.md`.
 
 The very first mock form, a 20-field page, wasn't kept. It caught one real
 bug: radio groups were overwriting their own reference tag, so every radio
 button on every form would have silently failed to fill. The fix is
 explained in a comment in `extract.py`.
 
-**Not yet tested:** Lever, Workday, iCIMS, Taleo and SuccessFactors, and a
-full (non-dry) fill on Greenhouse. Mock forms are well-behaved and Workday is
-not, so start each new portal with `python apply.py fill <url> --dry-run`.
+**Not yet tested:**
+- a Greenhouse application taken all the way to submitted;
+- a later run signing in on a real portal with a login Chrome saved;
+- Workday past sign-in;
+- Lever, iCIMS, Taleo and SuccessFactors.
+
+Mock forms are well-behaved and real portals aren't, so start each new portal
+with `python apply.py fill <url> --dry-run`.
 
 The most likely thing to need work is `labelFor` in `extract.py`. That's what
 pairs a question with its input box, and it's where unusual portals break
