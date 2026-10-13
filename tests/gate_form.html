@@ -1,0 +1,34 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Engineer - Acme</title></head>
+<body>
+<h1>Apply: Engineer at Acme (mock)</h1>
+<form id="application" onsubmit="window.__submitted = (window.__submitted || 0) + 1; return false;">
+  <label for="first_name">First Name *</label>
+  <input id="first_name" name="first_name" required><br>
+
+  <label for="email">Email *</label>
+  <input id="email" name="email" type="email" required><br>
+
+  <fieldset><legend>Are you legally authorized to work in the United States? *</legend>
+    <label><input type="radio" name="auth" value="yes" required> Yes</label>
+    <label><input type="radio" name="auth" value="no"> No</label>
+  </fieldset>
+
+  <label for="gender">Gender</label>
+  <select id="gender" name="gender">
+    <option value="">Select...</option>
+    <option>Male</option><option>Female</option><option>Decline to self-identify</option>
+  </select><br>
+
+  <label for="why">Why do you want to work here?</label>
+  <textarea id="why" name="why"></textarea><br>
+
+  <label for="hear">How did you hear about us?</label>
+  <input id="hear" name="hear"><br>
+
+  <input type="checkbox" id="sms" name="sms"><label for="sms">I agree to receive SMS updates</label><br>
+  <input type="checkbox" id="arb" name="arb"><label for="arb">I agree to resolve disputes through binding arbitration</label><br>
+
+  <button type="submit" id="submit">Submit Application</button>
+</form>
+</body></html>

@@ -19,8 +19,8 @@ import sys
 from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
-                   filler, learn, letters, mapper, report, sensitive, template,
-                   tracker)
+                   filler, learn, letters, mapper, report, sensitive, shadow,
+                   template, tracker)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
@@ -227,23 +227,30 @@ def cmd_fill(args) -> None:
     with browser_mod.browser() as ctx:
         page = browser_mod.open_page(ctx, url)
 
-        key, ats = adapters.detect(url, page)
+        key, ats, detected_by = adapters.detect_with_method(url, page)
         print(f"\n{BOLD}{ats.name}{OFF} {DIM}({ats.difficulty}){OFF}")
         print(f"{DIM}{ats.summary}{OFF}")
         for quirk in ats.quirks:
             print(f"{DIM}  · {quirk}{OFF}")
 
+        # What happened along the way, for the submit gate's record. The gate
+        # stops on any CAPTCHA or login wall, even one that was got past.
+        events: list[dict] = []
+
         # -- pause for anything we refuse to handle automatically ------------
         if found := browser_mod.detect_captcha(page):
+            events.append({"kind": "captcha", "detail": found})
             print(f"\n{AMBER}{found} on the page.{OFF} Solve it in the browser window, "
                   f"then press Enter here.")
             input()
             browser_mod.settle(page)
 
-        _get_past_login_wall(page)
+        if _get_past_login_wall(page):
+            events.append({"kind": "login_wall", "detail": "before Apply"})
         adapters.prepare(page, key)
         # Again: Workday only shows its sign-in page once Apply is clicked.
-        _get_past_login_wall(page)
+        if _get_past_login_wall(page):
+            events.append({"kind": "login_wall", "detail": "after Apply"})
 
         role, company = extract.guess_role_and_company(page)
 
@@ -251,6 +258,7 @@ def cmd_fill(args) -> None:
         # classifies, fills, then looks for a Continue button — never a Submit.
         all_rows: list[dict] = []
         all_flags: list[dict] = []
+        steps: list[dict] = []
         resume = prof.resume_path(args.resume)
         max_steps = 1 if args.dry_run else args.max_steps
 
@@ -258,10 +266,12 @@ def cmd_fill(args) -> None:
             if step > 1:
                 print(f"\n{BOLD}Step {step}{OFF}")
             # And before every step, since a wizard can ask you to sign in midway.
-            _get_past_login_wall(page)
+            if _get_past_login_wall(page):
+                events.append({"kind": "login_wall", "detail": f"step {step}"})
 
             fields = extract.extract_fields(page)
             if not fields:
+                events.append({"kind": "no_fields", "detail": f"step {step}"})
                 if step == 1:
                     print(f"\n{RED}No form fields found.{OFF} The form is probably "
                           f"behind another click, or inside an iframe.")
@@ -278,6 +288,8 @@ def cmd_fill(args) -> None:
             if step == 1 and uploads and resume and not args.dry_run:
                 worked, detail = filler.upload_file(page, uploads[0]["ref"], resume)
                 print(f"  {GREEN if worked else RED}{detail}{OFF}")
+                if not worked:
+                    events.append({"kind": "upload_failed", "detail": detail})
                 browser_mod.settle(page, 2500)
                 fields = extract.enrich_comboboxes(
                     page, extract.extract_fields(page))
@@ -298,7 +310,7 @@ def cmd_fill(args) -> None:
                 verdict = sensitive.decide(
                     field, categories.get(field["ref"], "unknown"), prof)
                 if verdict["action"] == "human":
-                    flags.append(verdict)
+                    flags.append({**verdict, "ref": field["ref"]})
                 elif verdict["action"] == "fill":
                     plan[field["ref"]] = verdict
                 else:
@@ -330,10 +342,15 @@ def cmd_fill(args) -> None:
                     plan[ref] = decision
 
             if args.dry_run:
+                steps.append(shadow.step_entry(fields, categories, plan, flags, None))
+                _build_record(page, url, key, detected_by, company, steps, events,
+                              dry_run=True)
                 _print_dry_run(fields, plan, flags)
                 return
 
-            all_rows += filler.run_plan(page, fields, plan)
+            step_rows = filler.run_plan(page, fields, plan)
+            steps.append(shadow.step_entry(fields, categories, plan, flags, step_rows))
+            all_rows += step_rows
             all_flags += flags
             _print_summary(all_rows[-len(plan):], flags)
 
@@ -345,9 +362,14 @@ def cmd_fill(args) -> None:
                 break
             if not adapters.next_step(page, key):
                 break
+            events.append({"kind": "advanced", "detail": f"to step {step + 1}"})
             print(f"{DIM}  advanced to the next step{OFF}")
 
         rows, flags = all_rows, all_flags
+        # Read before the review sheet opens and you start editing: this is
+        # the form as the agent left it.
+        _build_record(page, url, key, detected_by, company, steps, events,
+                      dry_run=False)
 
         # -- 5. optional cover letter ----------------------------------------
         if args.cover_letter:
@@ -384,24 +406,35 @@ def cmd_fill(args) -> None:
             print(f"{GREEN}Logged.{OFF}")
 
 
-def _get_past_login_wall(page) -> None:
+def _build_record(page, url, portal, detected_by, company, steps, events, *,
+                  dry_run: bool) -> dict:
+    """The submit gate's record of this run; a failed build is itself a record."""
+    try:
+        return shadow.build_record(page, url=url, portal=portal, portal_method=detected_by,
+                                   company=company, steps=steps, events=events,
+                                   dry_run=dry_run)
+    except Exception as e:
+        return shadow.failed_record(url, portal, f"record not built: {type(e).__name__}")
+
+
+def _get_past_login_wall(page) -> bool:
     """
     If the page is a login wall, sign in with the browser's saved login, or
-    pause for you.
+    pause for you. Returns whether there was a wall at all.
 
     Run at the start, after adapters.prepare(), and before each wizard step:
     Workday only shows its sign-in page after prepare() clicks Apply, so a
     check made once, up front, never saw it.
     """
     if not browser_mod.detect_login_wall(page):
-        return
+        return False
     # Chrome's own password manager may have filled the form; if so we
     # press sign-in. We never type, read or store the password.
     signed_in, detail = browser_mod.sign_in_with_saved_login(page)
     if signed_in:
         print(f"\n{GREEN}Signed in with the login saved in this browser "
               f"profile{OFF} {DIM}({detail}){OFF}")
-        return
+        return True
     print(f"\n{AMBER}This portal wants a login.{OFF} {DIM}({detail}){OFF}")
     print("Sign in, or create the account, yourself in the browser window.")
     print("Let Chrome save the password when it offers, and later runs sign")
@@ -410,6 +443,7 @@ def _get_past_login_wall(page) -> None:
     print("Press Enter when you're in.")
     input()
     browser_mod.settle(page)
+    return True
 
 
 def _log_corrections(page, url, fields, plan, categories) -> None:
