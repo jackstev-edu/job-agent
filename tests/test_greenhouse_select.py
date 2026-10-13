@@ -64,5 +64,26 @@ def test_styled_radio_still_read():
     check.done()
 
 
+def test_snapshot_reads_the_chosen_option():
+    # What react-select renders once an option is picked: the choice in a
+    # single-value div, the input's own value left empty.
+    check = Checks()
+    with mock_page(FORM) as page:
+        fields = extract.extract_fields(page)
+        auth = next(f for f in fields if f["label"].startswith("Are you legally authorized"))
+        pronouns = next(f for f in fields if f["label"].startswith("Pronouns"))
+        page.evaluate("""() => {
+            const box = document.getElementById('question_1')
+                .closest('.select__value-container');
+            box.querySelector('.select__placeholder').remove();
+            box.insertAdjacentHTML('afterbegin', '<div class="select__single-value">Yes</div>');
+        }""")
+        snap = extract.snapshot(page, fields)
+    print(f"  snapshot: {snap}")
+    check(snap.get(auth["ref"]) == "Yes", "chosen option read from what the dropdown shows")
+    check(snap.get(pronouns["ref"]) == "", "an untouched dropdown still reads blank")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())

@@ -26,6 +26,11 @@ from . import config, sensitive
 # anything beyond "that one form was odd".
 MIN_POSTINGS = 2
 
+# The corrections log's format. Version 2 reads custom dropdowns from what
+# they display, and stops logging diffs that are only formatting or an
+# unreadable blank. Rows without a version are version 1.
+LOG_VERSION = 2
+
 # Answers learn only ever flags. Matched on the classifier's category, on the
 # profile line, and on the wording, so a mis-classified field is still caught.
 SENSITIVE_CATEGORIES = {"work_authorization", "eeo", "compensation"}
@@ -63,6 +68,47 @@ def load_rows(path: Path) -> tuple[list[dict], int]:
 
 def _norm(value: Any) -> str:
     return re.sub(r"\s+", " ", "" if value in (None, False) else str(value)).strip()
+
+
+def same_answer(agent: Any, final: Any, field_type: str | None) -> bool:
+    """
+    The same answer written differently: case and spacing, or for a phone
+    number the same digits. A page's input mask reformats a typed phone
+    number, and that isn't you correcting it.
+    """
+    a, f = _norm(agent).casefold(), _norm(final).casefold()
+    if a == f:
+        return True
+    if (field_type or "").lower() == "tel":
+        da, df = re.sub(r"\D", "", a), re.sub(r"\D", "", f)
+        # A country code added or dropped is still the same number.
+        return min(len(da), len(df)) >= 7 and (da.endswith(df) or df.endswith(da))
+    return False
+
+
+def unreadable(agent: Any, final: Any, field_type: str | None) -> bool:
+    """
+    A custom dropdown that reads back blank after the agent answered it. That's
+    far more often a widget hiding its value from us than you clearing it.
+    """
+    return (field_type or "").lower() == "combobox" and bool(_norm(agent)) and not _norm(final)
+
+
+def set_aside_reason(row: dict) -> str | None:
+    """Why a logged row can't be trusted as a real correction, or None."""
+    if int(row.get("log_version") or 1) < 2 and row.get("type") == "combobox":
+        # Version 1 read react-select's search box, which is empty once an
+        # option is chosen, so these were logged whether or not you changed
+        # anything. Sensitive ones have no values to re-check, so all go.
+        return "custom dropdown logged before its value could be read back"
+    agent, final, ftype = row.get("agent_value"), row.get("final_value"), row.get("type")
+    if agent is None and final is None:
+        return None                     # a sensitive row; nothing to re-check
+    if unreadable(agent, final, ftype):
+        return "custom dropdown read back blank"
+    if same_answer(agent, final, ftype):
+        return "same answer, formatted differently"
+    return None
 
 
 def _norm_label(label: Any) -> str:
@@ -166,9 +212,19 @@ def analyse(rows: list[dict], profile_data: dict | None) -> dict:
     Group recurring corrections. Returns {"by_line": [...], "by_question": [...]}.
 
     Each correction lands in exactly one group: under its profile line when
-    one is known, otherwise under its question's wording.
+    one is known, otherwise under its question's wording. Rows that can't be
+    trusted as real corrections are counted in "set_aside" and go no further.
     """
     facts = profile_facts(profile_data)
+    set_aside: dict[str, int] = defaultdict(int)
+    kept = []
+    for row in rows:
+        reason = set_aside_reason(row)
+        if reason:
+            set_aside[reason] += 1
+        else:
+            kept.append(row)
+    rows = kept
     by_line: dict[str, list[dict]] = defaultdict(list)
     how_known: dict[str, str] = {}
     by_question: dict[str, list[dict]] = defaultdict(list)
@@ -208,7 +264,8 @@ def analyse(rows: list[dict], profile_data: dict | None) -> dict:
         else:
             question_out.append(entry(label, group, False,
                                       _suggest_for_question(label, group, facts)))
-    return {"by_line": line_out, "by_question": question_out}
+    return {"by_line": line_out, "by_question": question_out,
+            "set_aside": dict(set_aside)}
 
 
 def render(rows: list[dict], bad: int, result: dict, path: Path) -> str:
@@ -219,6 +276,12 @@ def render(rows: list[dict], bad: int, result: dict, path: Path) -> str:
         out.append("\nNothing logged yet. Corrections are recorded after a real `fill`, "
                    "when you press Enter before submitting.")
         return "\n".join(out)
+
+    set_aside = result.get("set_aside") or {}
+    if set_aside:
+        out.append(f"\nSet aside {sum(set_aside.values())} that aren't real corrections:")
+        for reason, n in sorted(set_aside.items()):
+            out.append(f"  {n}: {reason}")
 
     def section(title, entries, quote_name):
         if not entries:

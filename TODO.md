@@ -106,7 +106,23 @@
    select "No, I do not have a disability" on a form. That's intended, not an
    oversight. Don't "fix" it to a decline string.
 
-9. **Collect corrections, then write `learn`**
+9. ~~**Collect corrections, then write `learn`**~~ DONE — verified on 1 real
+   application; rerun after ~10.
+
+   Verified 13 Oct 2026 against the real log: 6 rows from one Greenhouse
+   application. All 6 turned out to be false corrections, and `learn` now sets
+   them aside, so no suggestion has been exercised on real data yet. Five were
+   react-select dropdowns: the snapshot read the widget's search box, which
+   is empty once an option is chosen, so every answered dropdown looked
+   cleared (four were EEO or work-authorization questions). One was a phone
+   number the page's input mask had reformatted. Fixed at three levels:
+   - the snapshot reads what a react-select dropdown displays;
+   - the logger skips formatting-only diffs and dropdowns that read back
+     blank, and stamps rows `log_version: 2`;
+   - `learn` sets such rows aside (all version-1 dropdown rows included) and
+     says how many and why.
+   Covered by tests with anonymised rows in the same shape. The real log is
+   left as it is.
    Every `fill` now diffs the form at the "Press Enter" prompt and appends what
    you changed to `~/.job-agent/corrections.jsonl`. Values are kept only for
    ordinary fields; sensitive ones record THAT you answered, not what. Gather

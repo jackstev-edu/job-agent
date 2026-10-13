@@ -425,6 +425,12 @@ def _log_corrections(page, url, fields, plan, categories) -> None:
         now = final.get(f["ref"])
         if norm(agent) == norm(now):
             continue
+        # Judged on the real values, before sensitive ones are dropped: a
+        # reformatted phone number or a dropdown that reads back blank isn't
+        # you correcting anything, and logging it teaches learn the wrong thing.
+        if (learn.same_answer(agent, now, f.get("type"))
+                or learn.unreadable(agent, now, f.get("type"))):
+            continue
         cat = categories.get(f["ref"], "unknown")
         # Values are only kept for fields both layers agreed were ordinary --
         # the same test that let the model near them in the first place.
@@ -445,6 +451,7 @@ def _log_corrections(page, url, fields, plan, categories) -> None:
             "final_value": now if safe else None,
             "profile_path": line,
             "logged_at": tracker._timestamp(),
+            "log_version": learn.LOG_VERSION,
         })
 
     if rows:
