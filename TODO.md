@@ -29,7 +29,9 @@
    confirmed 12 Oct 2026: `check --verbose` no longer lists either under
    "Worth filling".
 
-6. **Run it on a Greenhouse or Lever posting**
+6. ~~**Run it on a Greenhouse or Lever posting**~~ DONE — a Greenhouse
+   application was filled by the agent, reviewed, and submitted by you on
+   13 Oct 2026; it's logged as submitted. Lever is still untested live.
    First tested against a bespoke portal; progress on real ATSs below.
 
    Progress — Ashby, 9 Oct 2026: a live Ashby posting asked its Yes/No
@@ -48,11 +50,9 @@
    invisible reCAPTCHA's badge paused every run. A full (non-dry) Greenhouse
    fill and anything on Lever are still untested live.
 
-   Status, 13 Oct 2026: still open. Dry runs passed on a real Greenhouse
-   posting, and a full fill ran on 13 Oct (logged as a draft, which only a
-   non-dry run writes). But no Greenhouse application is logged as
-   submitted, so the end-to-end path hasn't been closed. Done when one is
-   (`apply.py status <url> submitted` after you press Submit).
+   Closed, 13 Oct 2026: dry runs passed on a real Greenhouse posting, a full
+   fill ran, and after your review the application was submitted and
+   logged with `apply.py status <url> submitted`.
 
    If Ashby ever wraps these buttons in a `<form>`, the submit guard refuses
    every one of them (they're typeless, so they'd submit it) and the questions

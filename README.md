@@ -376,7 +376,8 @@ printing each check as it goes.
 - **Ashby** (October 2026): a live posting's Yes/No button pairs were
   invisible to the scan; fixed, and copied into `button_pairs.html`.
 - **Greenhouse** (October 2026): dry runs on a live posting completed, and a
-  full fill ran too (logged as a draft). Greenhouse is where three problems
+  full fill ran, and after review that application was submitted, the
+  first one end to end on a major ATS. Greenhouse is where three problems
   turned up, all fixed and covered above: every required dropdown appeared
   twice, every run paused for a CAPTCHA that wasn't there, and the first real
   corrections log was entirely false corrections (answered dropdowns read
@@ -391,7 +392,6 @@ button on every form would have silently failed to fill. The fix is
 explained in a comment in `extract.py`.
 
 **Not yet tested:**
-- a Greenhouse application taken all the way to submitted;
 - a later run signing in on a real portal with a login Chrome saved;
 - Workday past sign-in;
 - Lever, iCIMS, Taleo and SuccessFactors.
