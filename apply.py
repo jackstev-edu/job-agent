@@ -19,8 +19,8 @@ import sys
 from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
-                   filler, learn, letters, mapper, report, sensitive, shadow,
-                   template, tracker)
+                   filler, gate, learn, letters, mapper, report, sensitive,
+                   shadow, template, tracker)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
@@ -343,9 +343,10 @@ def cmd_fill(args) -> None:
 
             if args.dry_run:
                 steps.append(shadow.step_entry(fields, categories, plan, flags, None))
-                _build_record(page, url, key, detected_by, company, steps, events,
-                              dry_run=True)
+                record = _build_record(page, url, key, detected_by, company, steps,
+                                       events, dry_run=True)
                 _print_dry_run(fields, plan, flags)
+                _shadow_gate(record, prof, url, key, detected_by, dry_run=True)
                 return
 
             step_rows = filler.run_plan(page, fields, plan)
@@ -368,8 +369,8 @@ def cmd_fill(args) -> None:
         rows, flags = all_rows, all_flags
         # Read before the review sheet opens and you start editing: this is
         # the form as the agent left it.
-        _build_record(page, url, key, detected_by, company, steps, events,
-                      dry_run=False)
+        record = _build_record(page, url, key, detected_by, company, steps, events,
+                               dry_run=False)
 
         # -- 5. optional cover letter ----------------------------------------
         if args.cover_letter:
@@ -396,6 +397,7 @@ def cmd_fill(args) -> None:
         if all_flags:
             print(f"{AMBER}{len(all_flags)} question(s) are waiting for you — see "
                   f"the top of the review sheet.{OFF}")
+        _shadow_gate(record, prof, url, key, detected_by, dry_run=False)
         print(f"\n{DIM}Press Enter when you've finished with the form "
               f"(before you click Submit).{OFF}")
         input()
@@ -404,6 +406,45 @@ def cmd_fill(args) -> None:
         if input("Mark as submitted? [y/N] ").strip().lower().startswith("y"):
             tracker.mark_submitted(url)
             print(f"{GREEN}Logged.{OFF}")
+
+
+def _shadow_gate(record, prof, url, portal, detected_by, *, dry_run: bool) -> int | None:
+    """
+    Shadow mode: print what the submit gate would have done, and log it. It
+    only ever reports. Submit stays yours, and nothing here can fail a run.
+    A dry run's verdict is printed but not logged, so it's never scored.
+    Returns the gate_runs row id, or None.
+    """
+    try:
+        submitted_today = tracker.agent_submissions_today()
+    except Exception:
+        submitted_today = 0
+    result = gate.decide(record, prof, agent_submissions_today=submitted_today)
+    verdict = result["content_verdict"]
+    colour = GREEN if verdict == gate.WOULD_SUBMIT else AMBER
+    print(f"\n{BOLD}Shadow gate:{OFF} {colour}{verdict}{OFF}"
+          f"{' (dry run, not logged)' if dry_run else ''} — Submit is still yours.")
+    for reason in result["content_reasons"][:15]:
+        print(f"  · {reason}")
+    if len(result["content_reasons"]) > 15:
+        print(f"  {DIM}…and {len(result['content_reasons']) - 15} more{OFF}")
+    ena = result["enablement"]
+    cap = ena["cap_remaining"]
+    print(f"{DIM}  enablement: portal allowlisted {'yes' if ena['portal_allowlisted'] else 'no'}"
+          f" · cap remaining {'not set' if cap is None else cap}{OFF}")
+    actions = list(result.get("consent_actions", {}).values())
+    if actions:
+        print(f"{DIM}  allowlisted consent boxes: {actions.count('would_tick')} would be ticked, "
+              f"{actions.count('leave')} left; the agent ticked none{OFF}")
+    if dry_run:
+        return None
+    try:
+        return tracker.record_gate_run(url, portal=portal, portal_method=detected_by,
+                                       result=result,
+                                       record_json=shadow.redacted(record, result))
+    except Exception as e:
+        print(f"{DIM}  couldn't log the gate's verdict ({type(e).__name__}){OFF}")
+        return None
 
 
 def _build_record(page, url, portal, detected_by, company, steps, events, *,
