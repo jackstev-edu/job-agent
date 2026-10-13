@@ -115,5 +115,53 @@ def test_rerun_never_downgrades_status():
     check.done()
 
 
+def test_status_submitted_records_the_date_once():
+    import apply
+    from argparse import Namespace
+
+    check = Checks()
+
+    def status(url, new):
+        with redirect_stdout(io.StringIO()):
+            apply.cmd_status(Namespace(url=url, new_status=new))
+        return tracker.find(url)
+
+    with temp_log():
+        url = "https://example.invalid/job/status"
+        tracker.record(url, company="Acme", role="Engineer", ats="Greenhouse")
+        check(tracker.find(url)["submitted_at"] is None, "a fresh draft has no date")
+
+        row = status(url, "submitted")
+        first = row["submitted_at"]
+        print(f"  after `status submitted`: {row['status']!r} at {first!r}")
+        check(row["status"] == "submitted" and first, "`status submitted` records the date")
+        check(any(r["url"] == url for r in tracker.awaiting_reply(days=0)),
+              "so `followup` can now list it")
+
+        row = status(url, "submitted")
+        check(row["submitted_at"] == first, "running it again keeps the first date")
+        row = status(url, "interview")
+        check(row["status"] == "interview" and row["submitted_at"] == first,
+              "a later status keeps the date")
+
+        # A date that came from fill's "Mark as submitted?" prompt is the real
+        # one, so it must survive a `status submitted` run afterwards.
+        url2 = "https://example.invalid/job/marked"
+        tracker.record(url2)
+        tracker.mark_submitted(url2)
+        with tracker._connect() as conn:
+            conn.execute("UPDATE applications SET submitted_at = '2026-01-02T03:04:05+00:00' "
+                         "WHERE url = ?", (url2,))
+        row = status(url2, "submitted")
+        check(row["submitted_at"] == "2026-01-02T03:04:05+00:00",
+              "an existing date is never overwritten")
+
+        url3 = "https://example.invalid/job/rejected"
+        tracker.record(url3)
+        row = status(url3, "rejected")
+        check(row["submitted_at"] is None, "other statuses don't invent a submission date")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())
