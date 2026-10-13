@@ -406,7 +406,17 @@ _SNAPSHOT_JS = r"""
     else if (el.tagName === 'SELECT') v = el.selectedOptions[0]?.text.trim() ?? '';
     // Before 'value': a <button> has one, and it's always empty.
     else if (el.hasAttribute('aria-pressed')) v = el.getAttribute('aria-pressed') === 'true';
-    else if ('value' in el) v = el.value;
+    else if ('value' in el) {
+      v = el.value;
+      // react-select (Greenhouse) shows the chosen option in a sibling; its
+      // own <input> holds only the search text, empty once a choice is made.
+      // Reading the input logged every answered dropdown as "you cleared it".
+      if (!v && el.getAttribute('role') === 'combobox') {
+        const shown = el.closest('[class*="control"]')
+          ?.querySelector('[class*="single-value"], [class*="singleValue"]');
+        if (shown) v = shown.innerText.trim();
+      }
+    }
     else v = el.innerText.trim();           // custom comboboxes
     return [el.getAttribute('data-ja-ref'), v];
   }))
