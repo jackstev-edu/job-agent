@@ -196,6 +196,37 @@ def test_4_checkboxes_exactly_on_the_allowlist():
     check.done()
 
 
+def test_4_census_only_checkboxes():
+    # Boxes the scan doesn't list as fields (custom role=checkbox / switch,
+    # hidden native boxes) meet the same label rule as checkbox fields:
+    # a <label> or aria-label, nothing else.
+    check = Checks()
+    custom = dict(ref=None, label_source="aria-labelledby")
+    r = base(); r["census"][0].update(custom)
+    stops(check, r, "label not explicit (aria-labelledby)",
+          "an aria-labelledby label matching an allowlist entry")
+    r = base(); r["census"][0].update(ref=None, label_source="self")
+    stops(check, r, "label not explicit (self)", "a custom box named by its own text")
+    r = base(); r["census"][0].update(ref=None, label_source="aria-label", checked=True,
+                                      visible=False)
+    stops(check, r, "hidden, and ticked", "a hidden pre-ticked box with an allowlisted aria-label")
+    r = base(); r["census"][0].update(ref=None, label_source="aria-label", visible=False)
+    check(run(r)["content_verdict"] == "would_submit",
+          "a hidden unticked box with an allowlisted aria-label passes")
+    r = base(); r["census"][0].update(ref=None, label_source="aria-label", checked=True)
+    check(run(r)["content_verdict"] == "would_submit",
+          "a visible ticked box with an allowlisted aria-label passes")
+    r = base(); r["census"][0].update(checked=True); del r["census"][0]["visible"]
+    stops(check, r, "hidden, and ticked", "a ticked box whose visibility wasn't read counts as hidden")
+    r = base(); r["census"].append(box("Anything at all", ref=None, label_source="none",
+                                       checked=True, visible=False))
+    v = run(r)
+    check(any("hidden, and ticked" in x for x in v["content_reasons"]),
+          "a hidden ticked box stops whatever its label")
+    check(run(base())["gate_version"] == gate.GATE_VERSION == 2, "gate_version bumped to 2")
+    check.done()
+
+
 def test_4_ashby_button_pairs():
     check = Checks()
     pair = box("Preferred working arrangement", in_button_group=True, group_ref="f10",
@@ -207,6 +238,8 @@ def test_4_ashby_button_pairs():
     r["plan"]["f10"] = {"value": "Hybrid", "source": "model", "confidence": "high"}
     r["results"]["f10"] = {"filled": True}
     check(run(r)["content_verdict"] == "would_submit", "an answered button pair is exempt from the allowlist")
+    r5 = copy.deepcopy(r); r5["census"][-1]["checked"] = True
+    stops(check, r5, "hidden, and ticked", "a button pair's hidden box, ticked, still stops")
     r2 = copy.deepcopy(r); del r2["plan"]["f10"]
     stops(check, r2, "button-pair question not answered", "a button pair with no plan entry")
     r3 = copy.deepcopy(r); r3["plan"]["f10"]["value"] = None

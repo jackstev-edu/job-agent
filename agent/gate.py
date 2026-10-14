@@ -21,7 +21,8 @@ from typing import Any
 
 from . import sensitive
 
-GATE_VERSION = 1
+# 2: census checkboxes need a <label> or aria-label; a hidden ticked box stops.
+GATE_VERSION = 2
 
 WOULD_SUBMIT, WOULD_STOP = "would_submit", "would_stop"
 
@@ -33,13 +34,12 @@ SENSITIVE_PREFIXES = ("eligibility.", "eeo.", "compensation.")
 # count as yours, as written. "bool_prefix" and "substring" are guesses.
 STRICT_FITS = {"exact", "bool", "decline", "verbatim"}
 
-# Where a checkbox's label may come from. The scan's nearby-text fallback can
-# pick up the wrong text, so a label it found isn't trusted here.
-EXPLICIT_LABEL_SOURCES = {"for", "wrap", "aria-label", "aria-labelledby", "self"}
-
-# A checkbox field may stand in for its own answer only with a label from a
-# real <label> element (for= or wrapping) or aria-label: stricter than the
-# census check below, which today also accepts aria-labelledby and own text.
+# Where a checkbox's label must come from for consent_allowlist to cover it:
+# a real <label> element (for= or wrapping) or aria-label. One rule for
+# checkbox fields and for every box in the census (custom role=checkbox or
+# switch, hidden native boxes). aria-labelledby can point at any text on the
+# page and a custom box's own text can be anything, so neither qualifies;
+# nor does the scan's nearby-text fallback.
 ALLOWLIST_LABEL_SOURCES = {"for", "wrap", "aria-label"}
 
 # Run events that are logged but never stop the run.
@@ -299,6 +299,12 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
     for box in record.get("census") or []:
         shown = box.get("label_inner") or box.get("label_content") or "(unlabelled)"
         name = f"checkbox '{shown[:80]}'"
+        # A box you can't see, already ticked, is something you'd be sending
+        # without having seen it. No label clears that, an allowlisted one
+        # included, and neither does sitting under a button pair. Visibility
+        # not read counts as hidden.
+        if box.get("checked") and box.get("visible") is not True:
+            content.append(f"{name}: hidden, and ticked")
         if box.get("in_button_group"):
             # An Ashby button pair's hidden checkbox stores the answer to a
             # question. It's exempt only if that question was planned and
@@ -307,7 +313,7 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             if not group or group.get("value") is None:
                 content.append(f"{name}: button-pair question not answered")
             continue
-        if box.get("label_source") not in EXPLICIT_LABEL_SOURCES:
+        if box.get("label_source") not in ALLOWLIST_LABEL_SOURCES:
             content.append(f"{name}: label not explicit ({box.get('label_source')})")
         elif not _same_text(box.get("label_inner"), box.get("label_content")):
             content.append(f"{name}: label contains hidden text")

@@ -240,9 +240,9 @@
     runs per portal before changing a rule. Open questions for then:
     - per-company answering from `per_company` (it would mean relaxing
       HARD_STOPS and ticking boxes);
-    - whether census-only checkboxes (custom `role=checkbox`, hidden native
-      boxes) should also need a `<label>` or `aria-label`, as checkbox fields
-      do. Today they also accept `aria-labelledby` and their own text;
+    - ~~whether census-only checkboxes should also need a `<label>` or
+      `aria-label`~~ decided in fix round 13 (gate_version 2): they do, and
+      any hidden ticked box stops, Ashby button-pair boxes included;
     - whether a false stop should break a portal's streak. Today only a
       false submit resets it.
     Needs you.

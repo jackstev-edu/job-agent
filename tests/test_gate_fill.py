@@ -60,6 +60,8 @@ def test_clean_form_would_submit_and_is_logged():
     check(len(rows) == 1 and rows[0]["verdict"] == "would_submit"
           and rows[0]["agent_submitted"] == 0, "logged once, as not agent-submitted")
     check("Submit Application" not in json.dumps(rows), "nothing about pressing Submit is logged")
+    check(rows and rows[0]["gate_version"] == 2,
+          "the clean mock form still gets would_submit under gate_version 2")
     check.done()
 
 

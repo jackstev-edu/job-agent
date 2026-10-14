@@ -193,8 +193,11 @@ page access. It says `would_submit` only if all of these hold, and otherwise
    confidence.
 4. Every checkbox on the page, ticked or not, has a real `<label>` (or
    `aria-label`), no hidden text, no fine print, and its label is *exactly*
-   one of your `consent_allowlist` entries. A required allowlisted box counts
-   as one the gate *would* tick. The agent still ticks nothing.
+   one of your `consent_allowlist` entries. That holds for custom
+   (`role=checkbox`, `role=switch`) and hidden boxes too; `aria-labelledby`
+   and a box's own text don't count. Any hidden box that's already ticked
+   stops it, whatever its label. A required allowlisted box counts as one
+   the gate *would* tick. The agent still ticks nothing.
 5. There are no per-company questions (how you heard about us, previously
    employed here). Answering those from the profile isn't enabled.
 6. Free text is one of your `voice.canned_answers`, word for word.
