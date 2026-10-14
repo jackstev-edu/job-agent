@@ -33,32 +33,38 @@ def _edits(row: dict) -> list[dict] | None:
 def score_run(row: dict) -> str:
     """
     One run, scored:
-      would_submit -> match only if you submitted, with zero edits, read at
-                      submit time ("exact"); false_submit if you didn't
-                      submit or changed anything that could be read.
+      would_submit -> false_submit if you changed anything that could be read
+                      (whether or not you submitted, and even if other fields
+                      couldn't be read), or if you didn't submit; match only
+                      if you submitted, with zero edits, read at submit time
+                      ("exact").
       would_stop   -> match if you changed something or didn't submit;
                       false_stop if you submitted with zero edits, read at
                       submit time.
-    Unreadable fields aren't edits, but they stop zero edits being claimed.
+    Edits are checked before your answer: an edit is evidence on its own, so
+    an unknown answer can't hide a false submit. Unreadable fields aren't
+    edits, but they stop zero edits being claimed.
     """
     if not row.get("outcome_at"):
         return PENDING
-    submitted = row.get("human_submitted")
-    if submitted not in ("y", "n"):
-        return UNKNOWN
     edits = _edits(row)
     real = [e for e in edits or [] if e.get("kind") != "unreadable"]
     unreadable = any(e.get("kind") == "unreadable" for e in edits or [])
     zero_proven = (edits is not None and not edits and not unreadable
                    and row.get("capture") == "exact")
+    submitted = row.get("human_submitted")
     verdict = row.get("verdict")
     if verdict == "would_submit":
-        if submitted == "n" or real:
+        if real or submitted == "n":
             return FALSE_SUBMIT
+        if submitted != "y":
+            return UNKNOWN
         return MATCH if zero_proven else UNKNOWN
     if verdict == "would_stop":
-        if submitted == "n" or real:
+        if real or submitted == "n":
             return MATCH
+        if submitted != "y":
+            return UNKNOWN
         return FALSE_STOP if zero_proven else UNKNOWN
     return UNKNOWN
 

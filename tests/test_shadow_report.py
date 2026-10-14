@@ -49,6 +49,17 @@ def test_scoring_rules():
         (row("would_stop", "y", []), "false_stop", "stop, but you sent it untouched"),
         (row("would_stop", "y", [], capture="polled"), "unknown", "untouched, but only polled"),
         (row("would_stop", "y", UNREAD), "unknown", "stop, a field unreadable"),
+        # An edit is checked before your answer, so it can't hide behind an unknown one.
+        (row("would_submit", "unknown", EDIT), "false_submit", "unknown answer, but you edited"),
+        (row("would_submit", "y", UNREAD + EDIT), "false_submit",
+         "a field unreadable, but another one edited"),
+        (row("would_submit", "unknown", UNREAD + EDIT), "false_submit",
+         "unknown answer, unreadable field, and an edit"),
+        (row("would_submit", "y", UNREAD, capture="polled"), "unknown",
+         "a field unreadable, no edit"),
+        (row("would_submit", "unknown", UNREAD), "unknown", "unknown answer, unreadable, no edit"),
+        (row("would_stop", "unknown", EDIT), "match", "stop, unknown answer, but you edited"),
+        (row("would_stop", "unknown", []), "unknown", "stop, unknown answer, no edit"),
     ]
     for r, want, what in cases:
         got = score.score_run(r)
@@ -77,6 +88,21 @@ def test_streaks_per_portal():
     check(lv["streak"] == 1 and lv["runs"] == 1, "each portal keeps its own streak")
     upto = score.by_portal(seq[:5])["greenhouse"]
     check(upto["streak"] == 3, "a false stop and an unknown neither add to nor reset the streak")
+
+    # Every false_submit case resets the streak, including the ones an unknown
+    # answer or an unreadable field used to hide.
+    built = [row("would_submit", "y", [], when="2026-10-01"),
+             row("would_stop", "n", [], when="2026-10-02")]
+    for bad, what in [
+            (row("would_submit", "unknown", EDIT, when="2026-10-03"), "unknown answer + edit"),
+            (row("would_submit", "y", UNREAD + EDIT, when="2026-10-03"), "unreadable + edit"),
+            (row("would_submit", "unknown", UNREAD + EDIT, when="2026-10-03"),
+             "unknown answer + unreadable + edit"),
+            (row("would_submit", "y", EDIT, when="2026-10-03"), "submitted + edit"),
+            (row("would_submit", "n", [], when="2026-10-03"), "not submitted")]:
+        s = score.by_portal(built + [bad])["greenhouse"]
+        check(s["streak"] == 0 and s["false_submit"] == 1,
+              f"streak of 2 reset by a false submit: {what} (streak {s['streak']})")
     check.done()
 
 
