@@ -95,11 +95,22 @@ def _headless():
             browser.close()
 
 
-def run_fill(form: Path, *, dry_run: bool, answers=("", "n"), profile_yaml: str = PROFILE,
+class EnterAlreadyPressed:
+    """Stands in for the terminal: you pressed Enter as soon as the watch began."""
+
+    def pressed(self):
+        return True
+
+    def wait(self):
+        pass
+
+
+def run_fill(form: Path, *, dry_run: bool, answers=("n",), profile_yaml: str = PROFILE,
              classify=classify_by_label, map_fields=map_from_profile, patches=()):
     """
     Run cmd_fill on `form`. Returns (printed text, records built, error or None).
-    `answers` are what you'd type at each terminal prompt, in order.
+    `answers` are what you'd type at each terminal prompt, in order; by
+    default just "n" at "Did you submit it?".
     """
     import apply
     from agent import shadow
@@ -127,6 +138,7 @@ def run_fill(form: Path, *, dry_run: bool, answers=("", "n"), profile_yaml: str 
                 (apply.report, "open_in_browser", lambda path: None),
                 (apply.shadow, "build_record", keep),
                 (apply, "input", lambda *a: next(replies)),
+                (apply, "_EnterWatcher", EnterAlreadyPressed),
                 *patches):
             stack.enter_context(mock.patch.object(target, name, value, create=True))
         try:

@@ -394,13 +394,19 @@ def enrich_comboboxes(page: "Page", fields: list[dict]) -> list[dict]:
 
 
 # --- reading the form back, after you've corrected it ------------------------
-# Deliberately narrower than the scan above: it only reads elements we already
-# stamped, and it refuses password inputs outright, the same as filler.py does.
+# Deliberately narrower than the scan above. It reads only the refs it's
+# given, which are the fields the scan saw as anything but a password box.
+# At read time it also skips, without touching the value, any element that
+# is now type=password (a "show password" toggle flips it back and forth) or
+# has a password autocomplete hint. Same refusal as filler.py.
 _SNAPSHOT_JS = r"""
-() => Object.fromEntries([...document.querySelectorAll('[data-ja-ref]')]
-  .filter(el => (el.type || '').toLowerCase() !== 'password')
-  .map(el => {
+(refs) => {
+  const out = {};
+  for (const ref of refs) {
+    const el = document.querySelector(`[data-ja-ref="${CSS.escape(ref)}"]`);
+    if (!el) continue;
     const t = (el.type || '').toLowerCase();
+    if (t === 'password' || /password/i.test(el.getAttribute('autocomplete') || '')) continue;
     let v;
     if (t === 'checkbox' || t === 'radio') v = el.checked;
     else if (el.tagName === 'SELECT') v = el.selectedOptions[0]?.text.trim() ?? '';
@@ -418,14 +424,30 @@ _SNAPSHOT_JS = r"""
       }
     }
     else v = el.innerText.trim();           // custom comboboxes
-    return [el.getAttribute('data-ja-ref'), v];
-  }))
+    out[ref] = v;
+  }
+  return out;
+}
 """
+
+
+def readable_refs(fields: list[dict]) -> list[str]:
+    """The refs a snapshot may read: never a field the scan saw as a password."""
+    refs: list[str] = []
+    for f in fields:
+        if (f.get("type") or "").lower() == "password":
+            continue
+        refs += f.get("option_refs") or [f["ref"]]
+    return refs
 
 
 def snapshot(page: "Page", fields: list[dict]) -> dict:
     """What's in each box right now, keyed by ref. Never reads password inputs."""
-    raw = page.evaluate(_SNAPSHOT_JS)
+    return snapshot_from_raw(fields, page.evaluate(_SNAPSHOT_JS, readable_refs(fields)))
+
+
+def snapshot_from_raw(fields: list[dict], raw: dict) -> dict:
+    """Turn the in-page read (one entry per element) into one value per field."""
     out = {}
     for f in fields:
         if f.get("type") == "radio":

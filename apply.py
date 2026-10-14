@@ -16,11 +16,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
-                   filler, gate, learn, letters, mapper, report, sensitive,
-                   shadow, template, tracker)
+                   filler, gate, learn, letters, mapper, outcome, report,
+                   sensitive, shadow, template, tracker)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
@@ -397,23 +398,92 @@ def cmd_fill(args) -> None:
         if all_flags:
             print(f"{AMBER}{len(all_flags)} question(s) are waiting for you — see "
                   f"the top of the review sheet.{OFF}")
-        _shadow_gate(record, prof, url, key, detected_by, dry_run=False)
-        print(f"\n{DIM}Press Enter when you've finished with the form "
-              f"(before you click Submit).{OFF}")
-        input()
-        _log_corrections(page, url, fields, plan, categories)
+        run_id, gate_result = _shadow_gate(record, prof, url, key, detected_by,
+                                           dry_run=False)
 
-        if input("Mark as submitted? [y/N] ").strip().lower().startswith("y"):
+        # -- 7. watch, don't touch: what you actually did ---------------------
+        print(f"\nReview and submit in the browser as you normally would. I'm only "
+              f"watching this tab")
+        print("for the portal's confirmation page, and I won't click anything.")
+        print(f"{DIM}Press Enter here when you're done, submitted or not.{OFF}")
+        enter = _EnterWatcher()
+        watched = outcome.watch(page, record=record, stop_requested=enter.pressed)
+        if not enter.pressed():
+            print(f"\n{_WATCH_ENDED.get(watched['ended'], 'Stopped watching.')} "
+                  f"Press Enter to continue.")
+            enter.wait()
+        _log_corrections(page, url, fields, plan, categories, final=watched["final"])
+
+        answer = _ask_submitted()
+        if answer == "y":
             tracker.mark_submitted(url)
             print(f"{GREEN}Logged.{OFF}")
+        _record_outcome(run_id, key, record, gate_result, watched, answer)
 
 
-def _shadow_gate(record, prof, url, portal, detected_by, *, dry_run: bool) -> int | None:
+_WATCH_ENDED = {
+    "success": "The portal's confirmation page appeared.",
+    "tab_closed": "The tab closed.",
+    "timeout": "Stopped watching after 30 minutes.",
+}
+
+
+class _EnterWatcher:
+    """
+    Notices Enter in this terminal without blocking the watch. A background
+    thread only reads one line of input; every browser call stays on the main
+    thread, where Playwright needs it.
+    """
+
+    def __init__(self):
+        self._done = threading.Event()
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        try:
+            sys.stdin.readline()
+        finally:
+            self._done.set()
+
+    def pressed(self) -> bool:
+        return self._done.is_set()
+
+    def wait(self) -> None:
+        self._done.wait()
+
+
+def _ask_submitted() -> str | None:
+    """y, n, or None if you'd rather not say. Your answer is the ground truth."""
+    reply = input("Did you submit it? [y/n, Enter to skip] ").strip().lower()
+    return "y" if reply.startswith("y") else "n" if reply.startswith("n") else None
+
+
+def _record_outcome(run_id, portal, record, gate_result, watched, answer) -> None:
+    """Store what you did against the gate's call. Never fails the run."""
+    if run_id is None:
+        return
+    try:
+        verified = outcome.signature_verified(portal, tracker.gate_runs(portal))
+        result = outcome.human_submitted(detected=watched["detection"]["result"],
+                                         answer=answer, signature_verified=verified)
+        edits = outcome.compute_edits(record, gate_result, watched["final"])
+        tracker.set_gate_outcome(run_id, human_submitted=result, edits=edits,
+                                 capture=watched["capture"],
+                                 success_signal=outcome.success_signal(watched, answer))
+        changed = "unknown" if edits is None else len(edits)
+        print(f"{DIM}  shadow outcome: submitted {result} · fields changed {changed} · "
+              f"read {watched['capture']}{OFF}")
+    except Exception as e:
+        print(f"{DIM}  couldn't record the outcome ({type(e).__name__}){OFF}")
+
+
+def _shadow_gate(record, prof, url, portal, detected_by, *,
+                 dry_run: bool) -> tuple[int | None, dict]:
     """
     Shadow mode: print what the submit gate would have done, and log it. It
     only ever reports. Submit stays yours, and nothing here can fail a run.
     A dry run's verdict is printed but not logged, so it's never scored.
-    Returns the gate_runs row id, or None.
+    Returns (the gate_runs row id or None, the gate's result).
     """
     try:
         submitted_today = tracker.agent_submissions_today()
@@ -437,14 +507,14 @@ def _shadow_gate(record, prof, url, portal, detected_by, *, dry_run: bool) -> in
         print(f"{DIM}  allowlisted consent boxes: {actions.count('would_tick')} would be ticked, "
               f"{actions.count('leave')} left; the agent ticked none{OFF}")
     if dry_run:
-        return None
+        return None, result
     try:
         return tracker.record_gate_run(url, portal=portal, portal_method=detected_by,
                                        result=result,
-                                       record_json=shadow.redacted(record, result))
+                                       record_json=shadow.redacted(record, result)), result
     except Exception as e:
         print(f"{DIM}  couldn't log the gate's verdict ({type(e).__name__}){OFF}")
-        return None
+        return None, result
 
 
 def _build_record(page, url, portal, detected_by, company, steps, events, *,
@@ -487,22 +557,27 @@ def _get_past_login_wall(page) -> bool:
     return True
 
 
-def _log_corrections(page, url, fields, plan, categories) -> None:
+def _log_corrections(page, url, fields, plan, categories, final=None) -> None:
     """
     Record what you changed after the agent finished. Values are kept only for
     ordinary fields; for anything sensitive we log THAT you answered, not WHAT.
+    `final` is the watcher's last read of the form, taken before it was
+    submitted away; without one, the page is read now.
     """
-    try:
-        final = extract.snapshot(page, fields)
-    except Exception as e:
-        print(f"{DIM}  couldn't read the final form ({str(e)[:60]}){OFF}")
-        return
+    if final is None:
+        try:
+            final = extract.snapshot(page, fields)
+        except Exception as e:
+            print(f"{DIM}  couldn't read the final form ({str(e)[:60]}){OFF}")
+            return
 
     norm = lambda v: "" if v in (None, False) else str(v).strip()
     rows = []
     for f in fields:
         if f.get("type") in ("file", "password"):
             continue
+        if f["ref"] not in final:
+            continue        # not read back; logging it as cleared would be false
         agent = (plan.get(f["ref"]) or {}).get("value")
         now = final.get(f["ref"])
         if norm(agent) == norm(now):
