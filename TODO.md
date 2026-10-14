@@ -232,6 +232,11 @@
     `success_signal` in `gate_runs`: a "match" you answered y confirms that
     signature, and a miss means the pattern needs fixing. Needs you: real
     submissions.
+    - Also unconfirmed: Ashby ticks a button pair's hidden checkbox only for
+      "Yes" (and leaves it unticked otherwise). The gate's one button-pair
+      exemption rests on it; it comes from `tests/button_pairs.html`, not a
+      live page. Check the box's state after answering Yes and No on a real
+      Ashby posting. If it's wrong, the gate stops more, never less.
 
 22. **Collect shadow data before deciding anything**
     The gate is strict by design. Optional fields left blank stop it, as do
@@ -243,8 +248,11 @@
     - ~~whether census-only checkboxes should also need a `<label>` or
       `aria-label`~~ decided in fix round 13 (gate_version 2): they do, and
       any hidden ticked box stops. Since gate_version 3 an unread tick counts
-      as ticked, and an Ashby button pair's hidden box is exempt only when
-      it's ticked as the group's planned answer says;
+      as ticked. Since gate_version 4 the only exemption is an Ashby button
+      pair's own box: the group's only box, hidden, read unticked before the
+      fill and ticked after it, for a planned "Yes". Every other box in a
+      group, a pair answered "No" included, meets the label and allowlist
+      checks, so it stops;
     - whether a false stop should break a portal's streak. Today only a
       false submit resets it.
     Needs you.

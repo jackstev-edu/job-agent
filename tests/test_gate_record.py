@@ -58,6 +58,36 @@ def test_fill_builds_a_record():
                      "I agree to resolve disputes through binding arbitration": False},
           "both checkboxes counted, neither ticked")
     check(rec["events"] == [], "no CAPTCHA, login wall or extra step")
+    pre = {c["label_content"]: c["checked"] for c in rec.get("prefill_census") or []}
+    check(pre == labels, "the pre-fill census was read before filling: same boxes, same state")
+    check.done()
+
+
+def test_prefill_census_is_read_before_the_fill_and_unreadable_is_none():
+    import apply
+    from agent import extract, filler
+    check = Checks()
+    order = []
+    real_census, real_run = extract.checkbox_census, filler.run_plan
+
+    def census(page):
+        order.append("census")
+        return real_census(page)
+
+    def run_plan(*a, **k):
+        order.append("fill")
+        return real_run(*a, **k)
+    text, records, error = run_fill(FORM, dry_run=False, patches=(
+        (apply.extract, "checkbox_census", census), (apply.filler, "run_plan", run_plan)))
+    check(error is None and order[:2] == ["census", "fill"],
+          f"the census is read before the agent fills anything ({order})")
+
+    def broken(page):
+        raise RuntimeError("page gone")
+    text, records, error = run_fill(FORM, dry_run=True, patches=(
+        (apply.extract, "checkbox_census", broken),))
+    check(error is None and records and records[0]["prefill_census"] is None,
+          "an unreadable pre-fill census is recorded as None, never as empty")
     check.done()
 
 

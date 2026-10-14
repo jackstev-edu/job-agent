@@ -354,8 +354,14 @@ def cmd_fill(args) -> None:
                             r for r in decision.get("review_reasons", []) if r != "model"]
                     plan[ref] = decision
 
+            # The checkboxes as they stand before the agent answers anything on
+            # this step, so the gate can tell a box the agent's answer ticked
+            # from one that came ticked. A read only, like the census itself.
+            prefill = _prefill_census(page)
+
             if args.dry_run:
-                steps.append(shadow.step_entry(fields, categories, plan, flags, None))
+                steps.append(shadow.step_entry(fields, categories, plan, flags, None,
+                                               prefill_census=prefill))
                 record = _build_record(page, url, key, detected_by, company, steps,
                                        events, dry_run=True, uploads=uploaded)
                 _print_dry_run(fields, plan, flags)
@@ -363,7 +369,8 @@ def cmd_fill(args) -> None:
                 return
 
             step_rows = filler.run_plan(page, fields, plan)
-            steps.append(shadow.step_entry(fields, categories, plan, flags, step_rows))
+            steps.append(shadow.step_entry(fields, categories, plan, flags, step_rows,
+                                           prefill_census=prefill))
             all_rows += step_rows
             all_flags += flags
             _print_summary(all_rows[-len(plan):], flags)
@@ -526,6 +533,14 @@ def _shadow_gate(record, prof, url, portal, detected_by, *,
     except Exception as e:
         print(f"{DIM}  couldn't log the gate's verdict ({type(e).__name__}){OFF}")
         return None, result
+
+
+def _prefill_census(page) -> list[dict] | None:
+    """The checkbox census before filling; None if unreadable, which the gate never exempts."""
+    try:
+        return extract.checkbox_census(page)
+    except Exception:
+        return None
 
 
 def _build_record(page, url, portal, detected_by, company, steps, events, *,

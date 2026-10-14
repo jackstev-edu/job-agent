@@ -227,51 +227,80 @@ def test_4_census_only_checkboxes():
     stops(check, r, "hidden, and ticked", "a hidden box whose tick wasn't read counts as ticked")
     r = base(); r["census"][0].update(visible=False, checked=None)
     stops(check, r, "hidden, and ticked", "a hidden box whose tick reads as null counts as ticked")
-    check(run(base())["gate_version"] == gate.GATE_VERSION == 3, "gate_version bumped to 3")
+    check(run(base())["gate_version"] == gate.GATE_VERSION, "the result carries the gate version")
     check.done()
+
+
+def _pair(planned="Yes", before=False, after=True, visible=False, label="Do you enjoy working outdoors?"):
+    """A record with one Ashby button pair, its hidden box read before and after the fill."""
+    r = base()
+    box_after = box(label, ref=None, in_button_group=True, group_ref="f10",
+                    label_source="none", visible=visible, checked=after)
+    r["census"].append(box_after)
+    r["prefill_census"] = copy.deepcopy(r["census"])
+    r["prefill_census"][-1]["checked"] = before
+    r["fields"].append({"ref": "f10", "type": "radio", "widget": "buttons",
+                        "label": label, "options": ["Yes", "No"]})
+    r["categories"]["f10"] = "preference"
+    r["plan"]["f10"] = {"value": planned, "source": "model", "confidence": "high"}
+    r["results"]["f10"] = {"filled": True}
+    return r
 
 
 def test_4_ashby_button_pairs():
     check = Checks()
-    pair = box("Preferred working arrangement", in_button_group=True, group_ref="f10",
-               label_source="none", visible=False)
-    r = base(); r["census"].append(pair)
-    r["fields"].append({"ref": "f10", "type": "radio", "widget": "buttons",
-                        "label": "Preferred working arrangement", "options": ["Remote", "Hybrid"]})
-    r["categories"]["f10"] = "preference"
-    r["plan"]["f10"] = {"value": "Hybrid", "source": "model", "confidence": "high"}
-    r["results"]["f10"] = {"filled": True}
-    check(run(r)["content_verdict"] == "would_submit", "an answered button pair is exempt from the allowlist")
-    # Ashby mirrors a "Yes" into the pair's hidden box. Ticked is exempt from
-    # the hidden-and-ticked stop only when it matches the planned answer.
-    yes = copy.deepcopy(r)
-    yes["fields"][-1].update(label="Do you enjoy working outdoors?", options=["Yes", "No"])
-    yes["plan"]["f10"]["value"] = "Yes"; yes["census"][-1]["checked"] = True
-    check(run(yes)["content_verdict"] == "would_submit",
-          "a pair's hidden box ticked, planned answer Yes -> passes")
-    no = copy.deepcopy(yes); no["plan"]["f10"]["value"] = "No"
-    stops(check, no, "hidden, and ticked", "ticked, but the planned answer is No (mismatch)")
-    other = copy.deepcopy(r); other["census"][-1]["checked"] = True
-    stops(check, other, "hidden, and ticked", "ticked, but the planned answer is Hybrid (mismatch)")
-    unplanned = copy.deepcopy(yes); del unplanned["plan"]["f10"]
-    stops(check, unplanned, "hidden, and ticked", "ticked, but the group has no planned answer")
-    null = copy.deepcopy(yes); null["plan"]["f10"]["value"] = None
-    stops(check, null, "hidden, and ticked", "ticked, but the group's planned answer is null")
-    no_ref = copy.deepcopy(yes); no_ref["census"][-1]["group_ref"] = None
+    # The true mirror: the group's only box, hidden, unticked before the fill,
+    # ticked after it, for a planned Yes. The one case that passes.
+    mirror = _pair()
+    check(run(mirror)["content_verdict"] == "would_submit",
+          "the true mirror (single, hidden, unticked -> ticked, planned Yes) passes")
+
+    two = _pair()
+    second = box("I agree to binding arbitration", ref=None, in_button_group=True,
+                  group_ref="f10", label_source="none", visible=False, checked=True)
+    two["census"].append(second)
+    two["prefill_census"].append(dict(second, checked=False))
+    stops(check, two, "hidden, and ticked", "two hidden ticked boxes sharing one group_ref, planned Yes")
+
+    stops(check, _pair(before=True), "hidden, and ticked",
+          "a single hidden box already ticked before the fill, planned Yes")
+    stops(check, _pair(before=None), "hidden, and ticked",
+          "a single hidden box whose pre-fill tick wasn't read")
+
+    visible = _pair(visible=True)
+    stops(check, visible, "label not explicit (none)",
+          "a visible ticked box in a group, label not allowlisted")
+
+    outside = _pair(); outside["census"][-1]["in_button_group"] = False
+    outside["prefill_census"][-1]["in_button_group"] = False
+    stops(check, outside, "hidden, and ticked", "in_button_group False with group_ref set, planned Yes")
+
+    no_pre = _pair(); del no_pre["prefill_census"]
+    stops(check, no_pre, "hidden, and ticked", "no pre-fill census for the run")
+    none_pre = _pair(); none_pre["prefill_census"] = None
+    stops(check, none_pre, "hidden, and ticked", "a pre-fill census that couldn't be read")
+
+    for planned, what in (("No", "planned No"), ("Hybrid", "planned Hybrid"),
+                          ("Yes, absolutely", "a planned answer that only starts with Yes")):
+        stops(check, _pair(planned=planned), "hidden, and ticked", f"ticked, but {what}")
+    unplanned = _pair(); del unplanned["plan"]["f10"]
+    stops(check, unplanned, "button-pair question not answered", "ticked, group not planned")
+    null = _pair(); null["plan"]["f10"]["value"] = None
+    stops(check, null, "button-pair question not answered", "ticked, group answered null")
+    no_ref = _pair(); no_ref["census"][-1]["group_ref"] = None
     stops(check, no_ref, "hidden, and ticked", "ticked, but the box has no group_ref")
-    unread = copy.deepcopy(yes); unread["census"][-1]["checked"] = None
-    stops(check, unread, "hidden, and ticked", "planned Yes, but the tick wasn't read")
-    loose = copy.deepcopy(yes); loose["plan"]["f10"]["value"] = "Yes, absolutely"
-    stops(check, loose, "hidden, and ticked", "a planned answer that only starts with Yes")
-    r2 = copy.deepcopy(r); del r2["plan"]["f10"]
-    stops(check, r2, "button-pair question not answered", "a button pair with no plan entry")
-    r3 = copy.deepcopy(r); r3["plan"]["f10"]["value"] = None
-    stops(check, r3, "button-pair question not answered", "a button pair answered null")
-    # Exempt from the allowlist isn't exempt from condition 2: an eligibility
-    # question asked as a button pair still needs its profile line.
-    r4 = copy.deepcopy(r); r4["fields"][-1]["label"] = "Are you willing to relocate?"
-    stops(check, r4, "'Are you willing to relocate?': legal/eligibility/EEO/pay answer not traced",
+    unread = _pair(after=None)
+    stops(check, unread, "hidden, and ticked", "planned Yes, but the tick after the fill wasn't read")
+
+    # Not exempt means the ordinary label checks: a pair answered No leaves its
+    # hidden box unticked, and that box has no <label> or aria-label.
+    stops(check, _pair(planned="No", after=False), "label not explicit (none)",
+          "a pair answered No: its unticked box gets no exemption")
+    # The question itself still needs its profile line when it's an eligibility one.
+    elig = _pair(label="Are you willing to relocate?")
+    stops(check, elig, "'Are you willing to relocate?': legal/eligibility/EEO/pay answer not traced",
           "a model-answered eligibility button pair")
+    check(run(mirror)["gate_version"] == gate.GATE_VERSION == 4, "gate_version bumped to 4")
     check.done()
 
 

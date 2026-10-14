@@ -33,12 +33,13 @@ _DECISION_KEYS = ("value", "source", "profile_path", "fit", "confidence", "needs
 
 
 def step_entry(fields: list[dict], categories: dict, plan: dict, flags: list[dict],
-               rows: list[dict] | None) -> dict:
+               rows: list[dict] | None, prefill_census: list[dict] | None = None) -> dict:
     """
     One wizard step's worth of the run. `rows` is filler.run_plan's report, or
     None on a dry run. run_plan writes one row per plan entry whose field it
     found, in plan order, and carries no ref, so the refs are matched back
-    here in that same order.
+    here in that same order. `prefill_census` is the checkbox census read
+    just before the agent filled this step, or None if it couldn't be read.
     """
     by_ref = {f["ref"]: f for f in fields}
     results = None
@@ -53,6 +54,7 @@ def step_entry(fields: list[dict], categories: dict, plan: dict, flags: list[dic
         "flags": [{"ref": fl.get("ref"), "label": fl.get("label"), "category": fl.get("category"),
                    "reason": fl.get("reason")} for fl in flags],
         "results": results,
+        "prefill_census": prefill_census,
     }
 
 
@@ -60,7 +62,9 @@ def build_record(page: "Page", *, url: str, portal: str, portal_method: str,
                  company: str, steps: list[dict], events: list[dict],
                  dry_run: bool, uploads: dict[str, list[str]] | None = None) -> dict:
     """
-    Merge the steps into one record and read the page's final state.
+    Merge the steps into one record and read the page's final state. The
+    pre-fill census kept is the last step's: its refs come from the same
+    scan as the census read here, so the two can be compared box by box.
 
     `uploads` is {file box ref: [names of the files the agent put there]},
     the baseline for spotting a file you swapped; None if that isn't known.
@@ -128,6 +132,7 @@ def build_record(page: "Page", *, url: str, portal: str, portal_method: str,
         "events": events,
         "errors": errors,
         "uploads": uploads,
+        "prefill_census": steps[-1].get("prefill_census") if steps else None,
     }
 
 
