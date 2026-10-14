@@ -139,6 +139,12 @@ looking at, uploads your resume, fills the form, and stops. A review sheet
 opens in your browser listing what it did and what needs you. You fix those
 items in the form and click Submit.
 
+After filling, `fill` prints the **shadow gate**'s call (whether it *would*
+have submitted unattended, and why not) and then just watches its own tab.
+Review and submit as normal; it never clicks anything. Press Enter in the
+terminal when you're done, submitted or not, and answer "Did you submit it?".
+See "The submit gate (shadow mode)" below.
+
 Options:
 
 ```bash
@@ -149,6 +155,7 @@ python apply.py list --status submitted
 python apply.py status <url> submitted         # after you press Submit
 python apply.py followup --days 21             # who hasn't replied
 python apply.py learn                          # profile fixes your corrections suggest
+python apply.py shadow-report                  # the gate's calls scored against yours
 python apply.py --help                         # the full menu
 ```
 
@@ -165,6 +172,60 @@ the window closes with it.
 Enter…" prompt, anything you type into its terminal is read as that Enter:
 the run carries on as if you'd finished, and your command never runs. Keep
 `fill` in one terminal and run other commands in another.
+
+### The submit gate (shadow mode)
+
+The agent still never submits. But after each real fill it works out whether
+it *would* have been safe to submit unattended, logs that call, and later
+scores it against what you actually did, per portal. Nothing acts on the
+call; it's evidence, collected for later.
+
+**The call (`agent/gate.py`)** is a pure function of the run: no model, no
+page access. It says `would_submit` only if all of these hold, and otherwise
+`would_stop` with every reason named:
+
+1. Every required field is filled.
+2. Every eligibility, EEO, pay or legal answer came from a named profile
+   line, matched to the form's options exactly (a "close enough" option
+   stops).
+3. Nothing was handed to you, left blank (optional fields included), failed,
+   flagged for review, or answered by the model with less than high
+   confidence.
+4. Every checkbox on the page, ticked or not, has a real `<label>` (or
+   `aria-label`), no hidden text, no fine print, and its label is *exactly*
+   one of your `consent_allowlist` entries. A required allowlisted box counts
+   as one the gate *would* tick. The agent still ticks nothing.
+5. There are no per-company questions (how you heard about us, previously
+   employed here). Answering those from the profile isn't enabled.
+6. Free text is one of your `voice.canned_answers`, word for word.
+7. Nothing unexpected happened: no CAPTCHA, no login wall (even one signed
+   past automatically), one wizard step only, no visible embedded frame.
+
+Separately, it notes whether the portal is on `autosubmit_portals` and how
+much of `daily_submit_cap` is left. That's never part of the call and never
+scored.
+
+**What you did (`agent/outcome.py`).** It watches the tab and reads the form
+as you go and at the moment you submit (never a password box). It spots the
+portal's confirmation page and asks whether you submitted; your answer
+decides. The confirmation signatures (Greenhouse, Lever, Ashby) haven't been
+checked against real pages yet, so until one matches a submission you
+confirmed, it's only a suggestion. All of this runs in the page's own
+JavaScript, so it's only as trustworthy as the page. The scores are advice.
+
+**The scores (`apply.py shadow-report`)**, per portal:
+- `would_submit` matches only if you submitted with zero edits, read at the
+  moment you submitted;
+- `would_stop` matches if you changed something or didn't submit;
+- anything uncertain is unknown.
+
+A false `would_submit` resets the portal's streak of consecutive matches.
+
+**Profile keys.** All of these start blank, and blank means "no":
+- `autosubmit_portals`: a list of portals;
+- `daily_submit_cap`: a whole number;
+- `consent_allowlist`: checkbox labels copied exactly;
+- `per_company`: recorded for later; nothing fills from it yet.
 
 ### Saving a portal login once
 
@@ -369,6 +430,12 @@ printing each check as it goes.
 | `test_learn.py` | `apply.py learn` on a seeded log: each kind of suggestion, eligibility/EEO/compensation flagged only, one-offs ignored, nothing written. Anonymised rows shaped like the first real log check that false corrections (unreadable dropdowns, a reformatted phone number) are set aside, and that the logger doesn't record them. |
 | `login_wall.html` · `test_saved_login.py` | A browser-filled login gets one click on a plain "Sign in", and the password never reaches Python. Account creation, "Continue with Google", look-alike or duplicate buttons, and unfilled forms are left to you. `fill_one` still refuses a password box. |
 | `apply_then_login.html` · `test_login_after_apply.py` | The real `fill --dry-run` on a Workday-shaped mock whose sign-in page appears only after the Apply click: it signs in there and scans the form behind it, not the login boxes. |
+| `test_gate.py` | The submit gate, one condition at a time from a passing record: an arbitration box, a substring trap, CSS-hidden text, fine print, an injected instruction, a missing EEO profile line, a loose option fit, the free-text waiver, Ashby button pairs, allowlisted consent boxes (would_tick / leave), enablement kept apart, and stopping on any error. |
+| `consent_boxes.html` · `test_gate_data.py` · `test_gate_profile.py` | The gate's inputs: every checkbox (hidden, custom, Ashby) and where its label came from, iframes, how profile answers were fitted, host-only portal detection, named review reasons, and the blank, safely-read profile keys. |
+| `gate_form.html` · `gate_clean.html` · `test_gate_record.py` · `test_gate_fill.py` | The real `fill` builds the gate's record and prints and logs its call: the clean form would submit, the fuller one stops with its reasons named, dry runs aren't logged, and an EEO answer seeded as a sentinel never reaches the log. |
+| `test_gate_tracker.py` | `gate_runs` is added to an old database without touching it, and no answer value reaches it, in any column or anywhere in the file. |
+| `test_outcome.py` | Watching what you do: the would_tick/leave edit baselines both ways, your answer against the confirmation page, signatures on pages at real-looking hosts, and a scripted submit with a password typed and shown as text that never reaches Python. |
+| `test_shadow_report.py` | Every scoring rule, the per-portal streak, and the report itself. |
 
 ### Real portals
 

@@ -215,6 +215,38 @@
     and the JSON-only reply can behave differently. Nothing in `tests/` calls
     the real API, so this needs a live check, not just `pytest`.
 
+20. ~~**Submit gate, shadow mode**~~ DONE (gate phases 1-9)
+    After every real fill the gate logs would_submit / would_stop with named
+    reasons, apart from enablement. `fill` then watches the tab, never
+    clicking, records your outcome and edits, and `apply.py shadow-report`
+    scores the calls per portal. Nothing auto-submits; no new click, tick or
+    submit path; fill-time routing unchanged. See README, "The submit gate
+    (shadow mode)".
+
+21. **Confirm the success signatures on real portals**
+    The Greenhouse (`/confirmation` + "Thank you for applying"), Lever
+    (`/thanks` + "Application submitted") and Ashby (form gone + text, same
+    host) signatures are my understanding, not checked against real pages.
+    Each run logs which signals held and the URL shape. After your next
+    real submission on each portal, run `shadow-report` and check
+    `success_signal` in `gate_runs`: a "match" you answered y confirms that
+    signature, and a miss means the pattern needs fixing. Needs you: real
+    submissions.
+
+22. **Collect shadow data before deciding anything**
+    The gate is strict by design. Optional fields left blank stop it, as do
+    any per-company question, any login wall, and loose option fits. Expect
+    mostly would_stop at first. Let `shadow-report` gather a few weeks of
+    runs per portal before changing a rule. Open questions for then:
+    - per-company answering from `per_company` (it would mean relaxing
+      HARD_STOPS and ticking boxes);
+    - whether census-only checkboxes (custom `role=checkbox`, hidden native
+      boxes) should also need a `<label>` or `aria-label`, as checkbox fields
+      do. Today they also accept `aria-labelledby` and their own text;
+    - whether a false stop should break a portal's streak. Today only a
+      false submit resets it.
+    Needs you.
+
 ## Deferred
 
 Parked for after the MVP. Each one says what's known and what it needs.
