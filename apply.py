@@ -20,7 +20,7 @@ import threading
 from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
-                   filler, gate, learn, letters, mapper, outcome, report,
+                   filler, gate, learn, letters, mapper, outcome, report, score,
                    sensitive, shadow, template, tracker)
 from agent.profile import Profile
 
@@ -682,6 +682,69 @@ def cmd_learn(args) -> None:
 
 
 # ---------------------------------------------------------------------------
+#  shadow-report — the gate's calls against what you actually did
+# ---------------------------------------------------------------------------
+def cmd_shadow_report(args) -> None:
+    rows = tracker.gate_runs()
+    print(f"\n{BOLD}Shadow gate report{OFF} {DIM}— content verdicts only. The agent has "
+          f"submitted nothing; every Submit was yours.{OFF}")
+    if not rows:
+        print("\nNo gate runs logged yet. Each real `fill` adds one.")
+        return
+    try:
+        prof = Profile.load(args.profile)
+    except FileNotFoundError:
+        prof = None
+    try:
+        submitted_today = tracker.agent_submissions_today()
+    except Exception:
+        submitted_today = 0
+
+    portals = score.by_portal(rows)
+    for portal, s in portals.items():
+        if prof is None:
+            enabled = "unknown (no profile)"
+        else:
+            listed = portal in prof.autosubmit_portals()
+            cap = prof.daily_submit_cap()
+            left = "not set" if cap is None else max(cap - submitted_today, 0)
+            enabled = f"{'on' if listed else 'not on'} autosubmit_portals · cap remaining {left}"
+        print(f"\n{BOLD}{portal}{OFF}  {DIM}enablement now: {enabled}{OFF}")
+        print(f"  runs {s['runs']} · scored {s['scored']} · {GREEN}matches {s['match']}{OFF} · "
+              f"{RED}false submits {s['false_submit']}{OFF} · false stops {s['false_stop']} · "
+              f"unknown {s['unknown']} · pending {s['pending']} · "
+              f"{BOLD}consecutive matches {s['streak']}{OFF}")
+
+    mismatches = [m for s in portals.values() for m in s["mismatches"]]
+    print(f"\n{BOLD}Mismatches ({len(mismatches)}){OFF}")
+    if not mismatches:
+        print(f"{DIM}  none{OFF}")
+    for m in mismatches:
+        row = m["row"]
+        label = ("would_submit, but it shouldn't have" if m["result"] == score.FALSE_SUBMIT
+                 else "would_stop, but you sent it untouched")
+        print(f"  {(row.get('created_at') or '')[:10]}  {row.get('portal')}  "
+              f"{RED if m['result'] == score.FALSE_SUBMIT else AMBER}{label}{OFF}")
+        print(f"    {DIM}{row.get('application_url')}{OFF}")
+        try:
+            reasons = json.loads(row.get("reasons_json") or "[]")
+        except ValueError:
+            reasons = []
+        if reasons:
+            for r in reasons[:8]:
+                print(f"    · {r}")
+            if len(reasons) > 8:
+                print(f"    {DIM}…and {len(reasons) - 8} more{OFF}")
+        else:
+            print(f"    {DIM}· the gate found nothing to stop on{OFF}")
+        print(f"    {score.describe_outcome(row)}")
+    print(f"\n{DIM}Scoring: would_submit is a match only if you submitted with zero edits, "
+          f"read at the moment you submitted. would_stop is a match if you changed "
+          f"something or didn't submit. A false submit resets the streak; a false stop "
+          f"doesn't add to it. Unknown and pending runs don't count.{OFF}")
+
+
+# ---------------------------------------------------------------------------
 #  log commands
 # ---------------------------------------------------------------------------
 def cmd_list(args) -> None:
@@ -741,6 +804,9 @@ def main() -> None:
 
     sub.add_parser("learn", help="suggest profile fixes from your logged corrections "
                    "(changes nothing)").set_defaults(fn=cmd_learn)
+
+    sub.add_parser("shadow-report", help="the submit gate's calls scored against yours, "
+                   "per portal").set_defaults(fn=cmd_shadow_report)
 
     p_list = sub.add_parser("list", help="everything you've applied to")
     p_list.add_argument("--status", default=None)
