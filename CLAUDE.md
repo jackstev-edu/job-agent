@@ -71,6 +71,18 @@ sends them personally. Windows, PowerShell, venv at `.venv`, run as
 - Comments explain why, not what.
 - Test against a local mock form before a real portal.
 
+## Workflow
+
+- After each commit, and before reporting to Jack, run the rule-reviewer
+  subagent with that commit's hash and the item it implements.
+- Put its VERDICT and FINDINGS in your report unedited. You may add your own
+  response under them, but you may not drop or reword a finding.
+- On BLOCK: do not start the next item. Stop and wait for Jack.
+- On FLAG: continue only if Jack's prompt said to run several items in a
+  row; otherwise stop.
+- The reviewer is read-only. Fixes are made by the main session as a new
+  commit, which is then reviewed again.
+
 ## Current work
 
 See `TODO.md`.
