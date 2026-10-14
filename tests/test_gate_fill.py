@@ -17,7 +17,7 @@ from pathlib import Path
 
 from _fill_run import PROFILE, run_fill
 from _harness import TEST_HOME, Checks, run_as_script
-from agent import tracker
+from agent import gate, tracker
 
 HERE = Path(__file__).parent
 CLEAN_PROFILE = PROFILE + """\
@@ -60,8 +60,8 @@ def test_clean_form_would_submit_and_is_logged():
     check(len(rows) == 1 and rows[0]["verdict"] == "would_submit"
           and rows[0]["agent_submitted"] == 0, "logged once, as not agent-submitted")
     check("Submit Application" not in json.dumps(rows), "nothing about pressing Submit is logged")
-    check(rows and rows[0]["gate_version"] == 2,
-          "the clean mock form still gets would_submit under gate_version 2")
+    check(rows and rows[0]["gate_version"] == gate.GATE_VERSION,
+          f"the clean mock form still gets would_submit under gate_version {gate.GATE_VERSION}")
     check.done()
 
 

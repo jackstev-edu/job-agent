@@ -223,7 +223,11 @@ def test_4_census_only_checkboxes():
     v = run(r)
     check(any("hidden, and ticked" in x for x in v["content_reasons"]),
           "a hidden ticked box stops whatever its label")
-    check(run(base())["gate_version"] == gate.GATE_VERSION == 2, "gate_version bumped to 2")
+    r = base(); r["census"][0].update(visible=False); del r["census"][0]["checked"]
+    stops(check, r, "hidden, and ticked", "a hidden box whose tick wasn't read counts as ticked")
+    r = base(); r["census"][0].update(visible=False, checked=None)
+    stops(check, r, "hidden, and ticked", "a hidden box whose tick reads as null counts as ticked")
+    check(run(base())["gate_version"] == gate.GATE_VERSION == 3, "gate_version bumped to 3")
     check.done()
 
 
@@ -238,8 +242,27 @@ def test_4_ashby_button_pairs():
     r["plan"]["f10"] = {"value": "Hybrid", "source": "model", "confidence": "high"}
     r["results"]["f10"] = {"filled": True}
     check(run(r)["content_verdict"] == "would_submit", "an answered button pair is exempt from the allowlist")
-    r5 = copy.deepcopy(r); r5["census"][-1]["checked"] = True
-    stops(check, r5, "hidden, and ticked", "a button pair's hidden box, ticked, still stops")
+    # Ashby mirrors a "Yes" into the pair's hidden box. Ticked is exempt from
+    # the hidden-and-ticked stop only when it matches the planned answer.
+    yes = copy.deepcopy(r)
+    yes["fields"][-1].update(label="Do you enjoy working outdoors?", options=["Yes", "No"])
+    yes["plan"]["f10"]["value"] = "Yes"; yes["census"][-1]["checked"] = True
+    check(run(yes)["content_verdict"] == "would_submit",
+          "a pair's hidden box ticked, planned answer Yes -> passes")
+    no = copy.deepcopy(yes); no["plan"]["f10"]["value"] = "No"
+    stops(check, no, "hidden, and ticked", "ticked, but the planned answer is No (mismatch)")
+    other = copy.deepcopy(r); other["census"][-1]["checked"] = True
+    stops(check, other, "hidden, and ticked", "ticked, but the planned answer is Hybrid (mismatch)")
+    unplanned = copy.deepcopy(yes); del unplanned["plan"]["f10"]
+    stops(check, unplanned, "hidden, and ticked", "ticked, but the group has no planned answer")
+    null = copy.deepcopy(yes); null["plan"]["f10"]["value"] = None
+    stops(check, null, "hidden, and ticked", "ticked, but the group's planned answer is null")
+    no_ref = copy.deepcopy(yes); no_ref["census"][-1]["group_ref"] = None
+    stops(check, no_ref, "hidden, and ticked", "ticked, but the box has no group_ref")
+    unread = copy.deepcopy(yes); unread["census"][-1]["checked"] = None
+    stops(check, unread, "hidden, and ticked", "planned Yes, but the tick wasn't read")
+    loose = copy.deepcopy(yes); loose["plan"]["f10"]["value"] = "Yes, absolutely"
+    stops(check, loose, "hidden, and ticked", "a planned answer that only starts with Yes")
     r2 = copy.deepcopy(r); del r2["plan"]["f10"]
     stops(check, r2, "button-pair question not answered", "a button pair with no plan entry")
     r3 = copy.deepcopy(r); r3["plan"]["f10"]["value"] = None

@@ -22,7 +22,9 @@ from typing import Any
 from . import sensitive
 
 # 2: census checkboxes need a <label> or aria-label; a hidden ticked box stops.
-GATE_VERSION = 2
+# 3: an unread tick counts as ticked; a button pair's hidden box is exempt only
+#    when its tick matches the group's planned answer.
+GATE_VERSION = 3
 
 WOULD_SUBMIT, WOULD_STOP = "would_submit", "would_stop"
 
@@ -148,6 +150,23 @@ def cap_text(ena: dict, reasons: list[str]) -> str:
     if ena.get("cap_remaining") is None:
         return "not set"
     return str(ena["cap_remaining"])
+
+
+def _button_pair_tick_matches(box: dict, plan: dict) -> bool:
+    """
+    Is this hidden box an Ashby button pair's, ticked exactly as the group's
+    planned answer says? Ashby mirrors the pressed button into the box:
+    ticked for "Yes", unticked for anything else (as tests/button_pairs.html
+    imitates it). So a tick matches only a planned "Yes". A missing
+    group_ref, an unplanned or null answer, an unread tick, or any other
+    answer is a mismatch.
+    """
+    if not box.get("in_button_group") or not box.get("group_ref"):
+        return False
+    group = plan.get(box["group_ref"])
+    if not group or group.get("value") is None:
+        return False
+    return box.get("checked") is True and normalize_label(group["value"]) == "yes"
 
 
 def decide(record: dict, profile, *, agent_submissions_today: int | None = 0) -> dict:
@@ -301,9 +320,11 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         name = f"checkbox '{shown[:80]}'"
         # A box you can't see, already ticked, is something you'd be sending
         # without having seen it. No label clears that, an allowlisted one
-        # included, and neither does sitting under a button pair. Visibility
-        # not read counts as hidden.
-        if box.get("checked") and box.get("visible") is not True:
+        # included. Visibility or tick state not read counts as hidden and
+        # ticked. The one exemption is a button pair's own box, ticked exactly
+        # as the planned answer says (see _button_pair_tick_matches).
+        if (box.get("checked") is not False and box.get("visible") is not True
+                and not _button_pair_tick_matches(box, plan)):
             content.append(f"{name}: hidden, and ticked")
         if box.get("in_button_group"):
             # An Ashby button pair's hidden checkbox stores the answer to a

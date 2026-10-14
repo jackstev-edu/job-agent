@@ -242,10 +242,66 @@
       HARD_STOPS and ticking boxes);
     - ~~whether census-only checkboxes should also need a `<label>` or
       `aria-label`~~ decided in fix round 13 (gate_version 2): they do, and
-      any hidden ticked box stops, Ashby button-pair boxes included;
+      any hidden ticked box stops. Since gate_version 3 an unread tick counts
+      as ticked, and an Ashby button pair's hidden box is exempt only when
+      it's ticked as the group's planned answer says;
     - whether a false stop should break a portal's streak. Today only a
       false submit resets it.
     Needs you.
+
+23. **Fix-round follow-ups (deferred from the rule-reviewer, round 10-13)**
+    Not started. One line each, with the reviewer's smallest fix.
+    - Item 14a: `score._edits` crashes on an `edits_json` entry that isn't a
+      dict. Fix: return None unless every element is a dict.
+    - Item 14b: `shadow-report` dies on a malformed profile. Fix: catch
+      YAML errors and ValueError on profile load and show enablement "unknown".
+    - Item 14c: page-derived text (gate reasons, labels) is printed raw. Fix:
+      strip control characters, ANSI and other escape sequences before
+      printing.
+    - Item 15: CLAUDE.md Workflow. Fix: add "After each review, run git status
+      and confirm the tree is unchanged. If the reviewer changed anything,
+      stop and tell Jack.", and a trailing newline.
+    - eb900c6: a would_stop with an unknown answer and any edit (which the
+      page itself can cause) adds to the streak. Fix: count it as a match,
+      but don't add to the streak when human_submitted isn't y/n.
+    - eb900c6: the "a field unreadable, no edit" scoring case also uses
+      capture="polled", so it proves nothing about the unreadable field.
+      Fix: drop `capture="polled"`, or relabel it.
+    - eb900c6: no would_stop + UNREAD + EDIT -> match case. Fix: add one
+      case row.
+    - 7b29c3d: the upload baseline is assumed, not read back. A portal that
+      clears its native input logs file_removed every run. Fix: after
+      `upload_ref`, read the box with `extract.snapshot`, and set
+      `uploaded = None` unless it equals `[Path(resume).name]`.
+    - 7b29c3d: the file-box test never runs the apply.py upload path. Fix:
+      drive `filler.upload_file` in the test, and add a failed-upload case
+      asserting every file box comes out "unreadable".
+    - 7b29c3d: `outcome._accept` takes a list for any known ref. Fix: pass
+      the file-field refs in and reject a list for any other ref.
+    - 7b29c3d: a re-saved resume with the same name counts as no edit. Fix,
+      if wanted: also compare `f.size` / `f.lastModified` (metadata, not
+      contents); otherwise leave as specified.
+    - 7b29c3d: nothing pins `uploads` (it holds the resume's file name) out
+      of gate_runs. Fix: a test asserting "uploads" and the name are absent
+      from `json.dumps(shadow.redacted(record, result))`.
+    - c8f7f57: `gate.decide` defaults `agent_submissions_today` to 0, so a
+      caller that leaves it out gets a full cap. Fix: default to None.
+    - c8f7f57: on a gate error, `cap_text` prints "not set" even with a cap
+      set. Fix: return "unknown" when "gate error" is in the reasons, or add
+      CAP_COUNT_UNKNOWN to the fallback's enablement_reasons.
+    - c8f7f57: the report's enablement line uses the latest run's detection
+      method. The reviewer says no fix is needed, since it errs toward "not
+      enabled"; noted so you know where the line comes from.
+    - c8f7f57: the parity test's closing `check(True, ...)` always passes.
+      Fix: count the combinations compared and assert there are 96.
+    - 7619f96: the census misses other ways of hiding a box (opacity 0,
+      off-screen, clip / clip-path, a 1x1 sr-only rect). Fix: treat those
+      as not visible in `extract.py`'s census.
+    - 7619f96: scoring ignores gate_version, so v1 would_submits that v2+
+      would stop still count toward a streak. Fix: count only rows with the
+      current gate_version toward a streak, or show runs per version.
+    - 7619f96: no test combines aria-labelledby with a hidden unticked
+      native box. Fix: add `visible=False` to the aria-labelledby case.
 
 ## Deferred
 
