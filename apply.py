@@ -500,7 +500,7 @@ def _shadow_gate(record, prof, url, portal, detected_by, *,
     try:
         submitted_today = tracker.agent_submissions_today()
     except Exception:
-        submitted_today = 0
+        submitted_today = None          # unknown: never read as none used
     result = gate.decide(record, prof, agent_submissions_today=submitted_today)
     verdict = result["content_verdict"]
     colour = GREEN if verdict == gate.WOULD_SUBMIT else AMBER
@@ -511,9 +511,8 @@ def _shadow_gate(record, prof, url, portal, detected_by, *,
     if len(result["content_reasons"]) > 15:
         print(f"  {DIM}…and {len(result['content_reasons']) - 15} more{OFF}")
     ena = result["enablement"]
-    cap = ena["cap_remaining"]
     print(f"{DIM}  enablement: portal allowlisted {'yes' if ena['portal_allowlisted'] else 'no'}"
-          f" · cap remaining {'not set' if cap is None else cap}{OFF}")
+          f" · cap remaining: {gate.cap_text(ena, result['enablement_reasons'])}{OFF}")
     actions = list(result.get("consent_actions", {}).values())
     if actions:
         print(f"{DIM}  allowlisted consent boxes: {actions.count('would_tick')} would be ticked, "
@@ -696,6 +695,22 @@ def cmd_learn(args) -> None:
 # ---------------------------------------------------------------------------
 #  shadow-report — the gate's calls against what you actually did
 # ---------------------------------------------------------------------------
+def _enablement_now(prof, portal: str, method: str, submitted_today: int | None) -> str:
+    """
+    The report's enablement line, from the gate's own rule (gate.enablement),
+    so the two can't disagree. `method` is how the portal's latest run was
+    detected; a portal found any way but by its host is never enabled.
+    """
+    ena, reasons = gate.enablement(portal, method, prof, submitted_today)
+    if ena["portal_allowlisted"]:
+        listed = "on autosubmit_portals"
+    elif method != "host":
+        listed = f"not enabled: detected by {method or 'nothing'}, not by its host"
+    else:
+        listed = "not on autosubmit_portals"
+    return f"{listed} · cap remaining: {gate.cap_text(ena, reasons)}"
+
+
 def cmd_shadow_report(args) -> None:
     rows = tracker.gate_runs()
     print(f"\n{BOLD}Shadow gate report{OFF} {DIM}— content verdicts only. The agent has "
@@ -710,22 +725,18 @@ def cmd_shadow_report(args) -> None:
     try:
         submitted_today = tracker.agent_submissions_today()
     except Exception:
-        submitted_today = 0
+        submitted_today = None          # unknown: never read as none used
 
     portals = score.by_portal(rows)
     for portal, s in portals.items():
-        if prof is None:
-            enabled = "unknown (no profile)"
-        else:
-            listed = portal in prof.autosubmit_portals()
-            cap = prof.daily_submit_cap()
-            left = "not set" if cap is None else max(cap - submitted_today, 0)
-            enabled = f"{'on' if listed else 'not on'} autosubmit_portals · cap remaining {left}"
+        enabled = ("unknown (no profile)" if prof is None else
+                   _enablement_now(prof, portal, s["portal_method"], submitted_today))
         print(f"\n{BOLD}{portal}{OFF}  {DIM}enablement now: {enabled}{OFF}")
         print(f"  runs {s['runs']} · scored {s['scored']} · {GREEN}matches {s['match']}{OFF} · "
               f"{RED}false submits {s['false_submit']}{OFF} · false stops {s['false_stop']} · "
               f"unknown {s['unknown']} · pending {s['pending']} · "
-              f"{BOLD}consecutive matches {s['streak']}{OFF}")
+              f"{BOLD}consecutive matches {s['streak']}{OFF}, of which matched "
+              f"would_submits {s['streak_submits']}")
 
     mismatches = [m for s in portals.values() for m in s["mismatches"]]
     print(f"\n{BOLD}Mismatches ({len(mismatches)}){OFF}")

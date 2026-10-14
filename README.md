@@ -220,6 +220,11 @@ JavaScript, so it's only as trustworthy as the page. The scores are advice.
 - anything uncertain is unknown.
 
 A false `would_submit` resets the portal's streak of consecutive matches.
+Next to the streak, the report shows how many of its matches were
+`would_submit`s: a streak made only of `would_stop` matches says nothing
+about the gate's yes. The report's enablement line uses the gate's own rule,
+so a portal not detected by its host is never shown as enabled, and if
+today's count can't be read, the cap remaining shows as unknown.
 
 **Profile keys.** All of these start blank, and blank means "no":
 - `autosubmit_portals`: a list of portals;

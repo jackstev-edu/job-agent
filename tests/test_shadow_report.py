@@ -12,14 +12,18 @@ portal. It must never count a guess as a match.
 
 Run from anywhere:  .venv/Scripts/python.exe tests/test_shadow_report.py
 """
+import io
 import json
 import os
 import subprocess
 import sys
-from contextlib import contextmanager
+from argparse import Namespace
+from contextlib import contextmanager, redirect_stdout
+from pathlib import Path
 
 from _harness import REPO, TEST_HOME, Checks, run_as_script
-from agent import config, score, tracker
+from agent import config, gate, score, tracker
+from agent.profile import Profile
 
 EDIT = [{"ref": "f0", "label": "First Name *", "kind": "changed"}]
 UNREAD = [{"ref": "f3", "label": "Confirm", "kind": "unreadable"}]
@@ -106,13 +110,35 @@ def test_streaks_per_portal():
     check.done()
 
 
+def test_streak_counts_its_matched_would_submits():
+    check = Checks()
+    stops_only = [row("would_stop", "n", [], when=f"2026-10-0{i}") for i in range(1, 5)]
+    s = score.by_portal(stops_only)["greenhouse"]
+    check(s["streak"] == 4 and s["streak_submits"] == 0,
+          f"a streak built only from would_stop matches has 0 matched would_submits "
+          f"(streak {s['streak']}, would_submits {s['streak_submits']})")
+    mixed = [row("would_submit", "y", [], when="2026-10-01"),
+             row("would_stop", "n", [], when="2026-10-02"),
+             row("would_submit", "y", [], when="2026-10-03"),
+             row("would_stop", "y", [], when="2026-10-04"),                 # false stop
+             row("would_submit", "y", [], capture="polled", when="2026-10-05")]  # unknown
+    s = score.by_portal(mixed)["greenhouse"]
+    check(s["streak"] == 3 and s["streak_submits"] == 2,
+          "only matched would_submits count; a false stop and an unknown add nothing")
+    s = score.by_portal(mixed + [row("would_submit", "y", EDIT, when="2026-10-06"),
+                                 row("would_stop", "n", [], when="2026-10-07")])["greenhouse"]
+    check(s["streak"] == 1 and s["streak_submits"] == 0,
+          "a false submit resets both; the would_stop match after it adds no would_submit")
+    check.done()
+
+
 @contextmanager
 def home_with_log():
     home = TEST_HOME / "report-home"
     home.mkdir(exist_ok=True)
     (home / "applications.db").unlink(missing_ok=True)
     (home / "profile.yaml").write_text(
-        "autosubmit_portals: [greenhouse]\ndaily_submit_cap: 2\n", encoding="utf-8")
+        "autosubmit_portals: [greenhouse, ashby]\ndaily_submit_cap: 2\n", encoding="utf-8")
     saved = (config.DATABASE_PATH, config.ensure_dirs)
     config.DATABASE_PATH, config.ensure_dirs = home / "applications.db", (lambda: None)
     try:
@@ -136,9 +162,10 @@ def test_shadow_report_command():
         out = _report(home)
         check("No gate runs logged yet." in out, "an empty log says so")
 
-        def log(verdict, reasons, submitted, edits, capture, portal="greenhouse"):
+        def log(verdict, reasons, submitted, edits, capture, portal="greenhouse",
+                method="host"):
             rid = tracker.record_gate_run(f"https://{portal}.example/job", portal=portal,
-                                          portal_method="host",
+                                          portal_method=method,
                                           result={"content_verdict": verdict,
                                                   "content_reasons": reasons, "gate_version": 1},
                                           record_json={})
@@ -149,15 +176,24 @@ def test_shadow_report_command():
         log("would_stop", ["'How did you hear about us?': per-company question; "
                            "profile answering not enabled"], "y", [], "exact")
         log("would_stop", ["run: login_wall (before Apply)"], "n", [], "polled", portal="lever")
+        # On the allowlist, but found by the page's HTML rather than its host.
+        log("would_stop", ["run: 2 wizard steps"], "n", [], "polled", portal="ashby",
+            method="html")
         out = _report(home)
     print(out)
-    check("greenhouse  enablement now: on autosubmit_portals · cap remaining 2" in out,
+    check("greenhouse  enablement now: on autosubmit_portals · cap remaining: 2" in out,
           "greenhouse's current enablement comes from the profile")
     check("lever  enablement now: not on autosubmit_portals" in out, "lever's too")
+    check("ashby  enablement now: not enabled: detected by html, not by its host · "
+          "cap remaining: 2" in out,
+          "an allowlisted portal detected by html is not enabled (the gate's host rule)")
     check("runs 3 · scored 3 · matches 1 · false submits 1 · false stops 1 · unknown 0 · "
-          "pending 0 · consecutive matches 0" in out, "greenhouse counts and streak")
-    check("runs 1 · scored 1 · matches 1" in out and "consecutive matches 1" in out,
-          "lever counts and streak")
+          "pending 0 · consecutive matches 0, of which matched would_submits 0" in out,
+          "greenhouse counts and streak")
+    check("runs 1 · scored 1 · matches 1" in out
+          and "consecutive matches 1, of which matched would_submits 0" in out,
+          "lever: a streak of one would_stop match shows 0 matched would_submits")
+    check("ready" not in out.lower(), "no readiness threshold or verdict is shown")
     check("Mismatches (2)" in out, "both mismatches listed")
     check("would_submit, but it shouldn't have" in out
           and "you submitted, changing First Name * (changed)" in out
@@ -167,6 +203,82 @@ def test_shadow_report_command():
           and "per-company question; profile answering not enabled" in out
           and "you submitted, with no changes" in out, "the false stop: its reason, and what you did")
     check("The agent has submitted nothing" in out, "it says the agent submitted nothing")
+    check.done()
+
+
+def test_report_and_gate_share_the_enablement_rule():
+    import apply
+    check = Checks()
+    for portals in ([], ["greenhouse"]):
+        for cap in (None, 0, 2):
+            prof = Profile({"autosubmit_portals": portals, "daily_submit_cap": cap},
+                           Path("p.yaml"))
+            for method in ("host", "html", "url", ""):
+                for today in (0, 1, 5, None):
+                    v = gate.decide({"portal": "greenhouse", "portal_method": method,
+                                     "fields": []}, prof, agent_submissions_today=today)
+                    line = apply._enablement_now(prof, "greenhouse", method, today)
+                    want_on = v["enablement"]["portal_allowlisted"]
+                    want_cap = gate.cap_text(v["enablement"], v["enablement_reasons"])
+                    ok = (line.startswith("on autosubmit_portals") == want_on
+                          and line.endswith(f"cap remaining: {want_cap}"))
+                    if not ok:
+                        check(False, f"{portals} cap={cap} method={method!r} today={today}: "
+                                     f"report says {line!r}, gate says {v['enablement']}")
+    check(True, "report and gate agree on every portal / method / cap / count combination")
+    prof = Profile({"autosubmit_portals": ["greenhouse"], "daily_submit_cap": 2}, Path("p.yaml"))
+    check(not gate.decide({"portal": "greenhouse", "portal_method": "html", "fields": []},
+                          prof)["enablement"]["portal_allowlisted"]
+          and apply._enablement_now(prof, "greenhouse", "html", 0).startswith("not enabled"),
+          "both refuse an allowlisted portal that wasn't detected by its host")
+    check.done()
+
+
+def test_cap_count_error_is_unknown():
+    import apply
+    check = Checks()
+    prof = Profile({"autosubmit_portals": ["greenhouse"], "daily_submit_cap": 2}, Path("p.yaml"))
+    for bad in (None, True, -1, "3"):
+        ena, reasons = gate.enablement("greenhouse", "host", prof, bad)
+        check(ena["cap_remaining"] is None and gate.cap_text(ena, reasons) == "unknown",
+              f"an uncounted day ({bad!r}) -> cap_remaining None, shown as unknown")
+
+    def boom():
+        raise RuntimeError("database is locked")
+    real = tracker.agent_submissions_today
+    with home_with_log() as home:
+        rid = tracker.record_gate_run("https://greenhouse.example/job", portal="greenhouse",
+                                      portal_method="host",
+                                      result={"content_verdict": "would_stop",
+                                              "content_reasons": ["x"], "gate_version": 1},
+                                      record_json={})
+        tracker.set_gate_outcome(rid, human_submitted="n", edits=[], capture="polled")
+        tracker.agent_submissions_today = boom
+        try:
+            out = io.StringIO()
+            with redirect_stdout(out):
+                apply.cmd_shadow_report(Namespace(profile=str(home / "profile.yaml")))
+            report = out.getvalue()
+            out = io.StringIO()
+            with redirect_stdout(out):
+                run_id, result = apply._shadow_gate(
+                    {"portal": "greenhouse", "portal_method": "host", "fields": [],
+                     "url": "https://greenhouse.example/job"},
+                    Profile.load(home / "profile.yaml"), "https://greenhouse.example/job",
+                    "greenhouse", "host", dry_run=False)
+            printed = out.getvalue()
+            logged = [r for r in tracker.gate_runs() if r["id"] == run_id]
+        finally:
+            tracker.agent_submissions_today = real
+    print(report)
+    check("enablement now: on autosubmit_portals · cap remaining: unknown" in report,
+          "shadow-report: the count raised -> cap remaining: unknown")
+    check("cap remaining: 2" not in report and "cap remaining: 0" not in report,
+          "  ...never the full cap, never none left")
+    check(result["enablement"]["cap_remaining"] is None and "cap remaining: unknown" in printed,
+          "_shadow_gate: the count raised -> cap_remaining None, printed as unknown")
+    check(logged and json.loads(logged[0]["enablement_json"])["cap_remaining"] is None,
+          "  ...and logged as cap_remaining null")
     check.done()
 
 

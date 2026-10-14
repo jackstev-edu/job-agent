@@ -106,7 +106,51 @@ def _allowlist_index(box: dict | None, allow: list[str]) -> int | None:
     return next((i for i, entry in enumerate(allow) if normalize_label(entry) == label), None)
 
 
-def decide(record: dict, profile, *, agent_submissions_today: int = 0) -> dict:
+CAP_COUNT_UNKNOWN = "today's agent submissions couldn't be counted"
+NO_CAP = "no daily_submit_cap set"
+
+
+def enablement(portal: str, method: str, profile,
+               agent_submissions_today: int | None) -> tuple[dict, list[str]]:
+    """
+    Whether this portal and today's cap would allow an unattended submit:
+    ({"portal_allowlisted", "cap_remaining"}, reasons). The one rule, used by
+    the gate and by shadow-report alike. A portal counts only when it was
+    detected by its host. `agent_submissions_today` is None when it couldn't
+    be counted, and then cap_remaining is None (unknown), never a full cap.
+    """
+    reasons: list[str] = []
+    allowlisted = method == "host" and portal in profile.autosubmit_portals()
+    if method != "host":
+        reasons.append(f"portal detected by {method or 'nothing'}, not by its host")
+    elif not allowlisted:
+        reasons.append(f"portal '{portal}' not on autosubmit_portals")
+    cap = profile.daily_submit_cap()
+    counted = (isinstance(agent_submissions_today, int)
+               and not isinstance(agent_submissions_today, bool)
+               and agent_submissions_today >= 0)
+    cap_remaining = None
+    if not counted:
+        reasons.append(CAP_COUNT_UNKNOWN)
+    if cap is None:
+        reasons.append(NO_CAP)
+    elif counted:
+        cap_remaining = max(cap - agent_submissions_today, 0)
+        if cap_remaining == 0:
+            reasons.append("daily_submit_cap reached")
+    return {"portal_allowlisted": allowlisted, "cap_remaining": cap_remaining}, reasons
+
+
+def cap_text(ena: dict, reasons: list[str]) -> str:
+    """How cap_remaining reads: a number, "unknown" if the count failed, or "not set"."""
+    if CAP_COUNT_UNKNOWN in reasons:
+        return "unknown"
+    if ena.get("cap_remaining") is None:
+        return "not set"
+    return str(ena["cap_remaining"])
+
+
+def decide(record: dict, profile, *, agent_submissions_today: int | None = 0) -> dict:
     """
     Returns {
       "gate_version", "content_verdict", "content_reasons",
@@ -125,7 +169,7 @@ def decide(record: dict, profile, *, agent_submissions_today: int = 0) -> dict:
                 "enablement_reasons": ["gate error"], "trace": [], "consent_actions": {}}
 
 
-def _decide(record: dict, profile, agent_submissions_today: int) -> dict:
+def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
     content: list[str] = []
     trace: list[dict] = []
 
@@ -286,28 +330,16 @@ def _decide(record: dict, profile, agent_submissions_today: int) -> dict:
                            f"({(fr.get('src') or 'no src')[:80]})")
 
     # Enablement: never part of the verdict, never scored.
-    enablement_reasons: list[str] = []
-    portal, method = record.get("portal") or "", record.get("portal_method") or ""
-    allowlisted = method == "host" and portal in profile.autosubmit_portals()
-    if method != "host":
-        enablement_reasons.append(f"portal detected by {method or 'nothing'}, not by its host")
-    elif not allowlisted:
-        enablement_reasons.append(f"portal '{portal}' not on autosubmit_portals")
-    cap = profile.daily_submit_cap()
-    if cap is None:
-        cap_remaining = None
-        enablement_reasons.append("no daily_submit_cap set")
-    else:
-        cap_remaining = max(cap - int(agent_submissions_today), 0)
-        if cap_remaining == 0:
-            enablement_reasons.append("daily_submit_cap reached")
+    ena, enablement_reasons = enablement(record.get("portal") or "",
+                                         record.get("portal_method") or "", profile,
+                                         agent_submissions_today)
 
     # Same reason twice says nothing new.
     content = list(dict.fromkeys(content))
     return {"gate_version": GATE_VERSION,
             "content_verdict": WOULD_STOP if content else WOULD_SUBMIT,
             "content_reasons": content,
-            "enablement": {"portal_allowlisted": allowlisted, "cap_remaining": cap_remaining},
+            "enablement": ena,
             "enablement_reasons": enablement_reasons,
             "trace": trace,
             "consent_actions": consent_actions}

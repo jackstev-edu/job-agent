@@ -74,20 +74,27 @@ def by_portal(rows: list[dict]) -> "OrderedDict[str, dict]":
     Per-portal counts and the current streak, oldest run first. A match adds
     one to the streak; a false submit resets it to 0; a false stop is a
     mismatch but, by the rule as given, neither adds nor resets; unknown and
-    pending runs don't count either way.
+    pending runs don't count either way. "streak_submits" is how many of the
+    streak's matches were would_submits: a streak of would_stops alone says
+    nothing about the gate's yes. "portal_method" is how the latest run
+    detected the portal.
     """
     out: "OrderedDict[str, dict]" = OrderedDict()
     for row in sorted(rows, key=lambda r: (r.get("created_at") or "", r.get("id") or 0)):
         portal = row.get("portal") or "(unknown portal)"
         s = out.setdefault(portal, {"runs": 0, MATCH: 0, FALSE_SUBMIT: 0, FALSE_STOP: 0,
-                                    UNKNOWN: 0, PENDING: 0, "streak": 0, "mismatches": []})
+                                    UNKNOWN: 0, PENDING: 0, "streak": 0, "streak_submits": 0,
+                                    "mismatches": []})
+        s["portal_method"] = row.get("portal_method") or ""
         result = score_run(row)
         s["runs"] += 1
         s[result] += 1
         if result == MATCH:
             s["streak"] += 1
+            if row.get("verdict") == "would_submit":
+                s["streak_submits"] += 1
         elif result == FALSE_SUBMIT:
-            s["streak"] = 0
+            s["streak"] = s["streak_submits"] = 0
         if result in (FALSE_SUBMIT, FALSE_STOP):
             s["mismatches"].append({"row": row, "result": result})
     for s in out.values():

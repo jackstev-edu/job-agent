@@ -49,7 +49,7 @@ def test_clean_form_would_submit_and_is_logged():
     check(error is None, f"the run finished ({error})")
     check("Shadow gate: would_submit — Submit is still yours." in text,
           "clean form -> would_submit, printed as advice only")
-    check("portal allowlisted no" in text and "cap remaining 2" in text,
+    check("portal allowlisted no" in text and "cap remaining: 2" in text,
           "enablement printed apart: a file:// form isn't an allowlisted portal")
     check("allowlisted consent boxes: 0 would be ticked, 1 left; the agent ticked none" in text,
           "the planned consent action is printed, and nothing was ticked")
