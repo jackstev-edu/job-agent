@@ -58,9 +58,13 @@ def step_entry(fields: list[dict], categories: dict, plan: dict, flags: list[dic
 
 def build_record(page: "Page", *, url: str, portal: str, portal_method: str,
                  company: str, steps: list[dict], events: list[dict],
-                 dry_run: bool) -> dict:
+                 dry_run: bool, uploads: dict[str, list[str]] | None = None) -> dict:
     """
     Merge the steps into one record and read the page's final state.
+
+    `uploads` is {file box ref: [names of the files the agent put there]},
+    the baseline for spotting a file you swapped; None if that isn't known.
+    It stays in memory for the outcome diff and is never stored.
 
     Never raises: a part that can't be read is left empty and named in
     "errors", which the gate treats as a reason to stop.
@@ -123,6 +127,7 @@ def build_record(page: "Page", *, url: str, portal: str, portal_method: str,
         "frames": frames,
         "events": events,
         "errors": errors,
+        "uploads": uploads,
     }
 
 

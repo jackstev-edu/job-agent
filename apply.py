@@ -260,6 +260,9 @@ def cmd_fill(args) -> None:
         all_rows: list[dict] = []
         all_flags: list[dict] = []
         steps: list[dict] = []
+        # {file box ref: names the agent uploaded there}, the baseline for
+        # spotting a resume you swapped. None once it can't be known.
+        uploaded: dict[str, list[str]] | None = {}
         resume = prof.resume_path(args.resume)
         max_steps = 1 if args.dry_run else args.max_steps
 
@@ -287,6 +290,11 @@ def cmd_fill(args) -> None:
             # 1. Resume first: portals autofill from it and would overwrite us.
             uploads = [f for f in fields if f.get("type") == "file"]
             if step == 1 and uploads and resume and not args.dry_run:
+                try:
+                    box = page.query_selector(
+                        f"[{extract.REF_ATTR}='{uploads[0]['ref']}']")
+                except Exception:
+                    box = None
                 worked, detail = filler.upload_file(page, uploads[0]["ref"], resume)
                 print(f"  {GREEN if worked else RED}{detail}{OFF}")
                 if not worked:
@@ -294,6 +302,10 @@ def cmd_fill(args) -> None:
                 browser_mod.settle(page, 2500)
                 fields = extract.enrich_comboboxes(
                     page, extract.extract_fields(page))
+                # A failed upload put nothing there, or nothing known; either
+                # way the baseline can't be trusted.
+                ref = outcome.upload_ref(box, fields) if worked else None
+                uploaded = {ref: [Path(resume).name]} if ref else None
 
             # 2. Ask the model what KIND of question each field is. It never
             #    sees your data here and never answers anything.
@@ -345,7 +357,7 @@ def cmd_fill(args) -> None:
             if args.dry_run:
                 steps.append(shadow.step_entry(fields, categories, plan, flags, None))
                 record = _build_record(page, url, key, detected_by, company, steps,
-                                       events, dry_run=True)
+                                       events, dry_run=True, uploads=uploaded)
                 _print_dry_run(fields, plan, flags)
                 _shadow_gate(record, prof, url, key, detected_by, dry_run=True)
                 return
@@ -371,7 +383,7 @@ def cmd_fill(args) -> None:
         # Read before the review sheet opens and you start editing: this is
         # the form as the agent left it.
         record = _build_record(page, url, key, detected_by, company, steps, events,
-                               dry_run=False)
+                               dry_run=False, uploads=uploaded)
 
         # -- 5. optional cover letter ----------------------------------------
         if args.cover_letter:
@@ -518,12 +530,12 @@ def _shadow_gate(record, prof, url, portal, detected_by, *,
 
 
 def _build_record(page, url, portal, detected_by, company, steps, events, *,
-                  dry_run: bool) -> dict:
+                  dry_run: bool, uploads: dict | None = None) -> dict:
     """The submit gate's record of this run; a failed build is itself a record."""
     try:
         return shadow.build_record(page, url=url, portal=portal, portal_method=detected_by,
                                    company=company, steps=steps, events=events,
-                                   dry_run=dry_run)
+                                   dry_run=dry_run, uploads=uploads)
     except Exception as e:
         return shadow.failed_record(url, portal, f"record not built: {type(e).__name__}")
 

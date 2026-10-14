@@ -4,7 +4,8 @@ test_outcome.py — watching what you do after a fill, without touching anything
 WHAT THIS DOES: Checks the edit diff (including the would_tick / leave
 baselines for allowlisted consent boxes, both ways), how the confirmation
 page and your answer combine into y / n / unknown, each portal's success
-signature on pages served at real-looking hosts, and the watcher end to end.
+signature on pages served at real-looking hosts, and the watcher end to end,
+file boxes included (compared by file names and count, never contents).
 In the end-to-end runs a scripted "you" edits a field, types into a password
 box and flips it to plain text, then submits. Every value Python reads is
 recorded and searched for the password. Also checks `fill` stores the
@@ -101,6 +102,41 @@ def test_edits_and_consent_baselines():
     check.done()
 
 
+def test_file_box_edits():
+    # A file box is compared by the names (and so the count) of its files
+    # against what the agent uploaded. Contents never come into it.
+    check = Checks()
+    rec = {"fields": [{"ref": "cv", "type": "file", "label": "Resume"},
+                      {"ref": "cl", "type": "file", "label": "Cover letter"},
+                      {"ref": "t", "type": "text", "label": "City"}],
+           "plan": {"t": {"value": "Springfield"}}, "uploads": {"cv": ["resume.pdf"]}}
+    gate = {"consent_actions": {}}
+    kinds = lambda final, r=rec: {e["ref"]: e["kind"]
+                                  for e in outcome.compute_edits(r, gate, final)}
+    same = {"cv": ["resume.pdf"], "cl": [], "t": "Springfield"}
+    check(kinds(same) == {}, "resume unchanged, nothing added -> no edit")
+    check(kinds({**same, "cv": ["other.pdf"]}) == {"cv": "file_replaced"},
+          "resume replaced -> an edit")
+    check(kinds({**same, "cv": ["resume.pdf", "extra.pdf"]}) == {"cv": "file_replaced"},
+          "same name plus another file: the count differs -> an edit")
+    check(kinds({**same, "cv": []}) == {"cv": "file_removed"}, "resume removed -> an edit")
+    check(kinds({**same, "cl": ["letter.pdf"]}) == {"cl": "file_added"},
+          "a file put in a box the agent left empty -> an edit")
+    check(kinds({**same, "cv": "C:\\fakepath\\resume.pdf"}) == {"cv": "unreadable"},
+          "a read that isn't a list of names is unreadable, never a match")
+    missing = dict(same); del missing["cv"]
+    check(kinds(missing) == {"cv": "unreadable"}, "a file box missing from the read is unreadable")
+    unknown = {**rec, "uploads": None}
+    check(kinds(same, unknown) == {"cv": "unreadable", "cl": "unreadable"},
+          "no upload baseline -> every file box unreadable, so zero edits can't be claimed")
+    no_key = {k: v for k, v in rec.items() if k != "uploads"}
+    check(kinds(same, no_key) == {"cv": "unreadable", "cl": "unreadable"},
+          "a record without the baseline at all is treated the same")
+    edits = outcome.compute_edits(rec, gate, {**same, "cv": ["Secret Name CV.pdf"]})
+    check("Secret Name" not in json.dumps(edits), "edits name the box, never the file")
+    check.done()
+
+
 def test_hook_payload_is_checked():
     # A page can call the hook itself. Only our snapshot's shape is accepted.
     check = Checks()
@@ -109,8 +145,14 @@ def test_hook_payload_is_checked():
           "known refs with short plain values are accepted")
     for junk, what in (("x", "a string"), ({}, "an empty dict"), ({"f9": "x"}, "an unknown ref"),
                        ({"f0": {"nested": 1}}, "a nested value"), ({"f0": 3}, "a number"),
-                       ({"f0": "x" * 6000}, "an over-long value"), (None, "nothing")):
+                       ({"f0": "x" * 6000}, "an over-long value"), (None, "nothing"),
+                       ({"f0": ["a.pdf", 3]}, "a file list with a non-name in it"),
+                       ({"f0": [["a.pdf"]]}, "a nested file list"),
+                       ({"f0": ["x"] * 51}, "too many file names"),
+                       ({"f0": ["x" * 1001]}, "an over-long file name")):
         check(outcome._accept(junk, refs) is None, f"rejects {what}")
+    check(outcome._accept({"f0": ["resume.pdf"], "f1": []}, refs)
+          == {"f0": ["resume.pdf"], "f1": []}, "a file box's list of names is accepted")
     check.done()
 
 
@@ -208,6 +250,99 @@ def test_watch_submit_with_a_password_present():
           and PASSWORD not in json.dumps(edits),
           "your edit recorded by label; the password-hinted box unreadable, so zero edits "
           "can't be claimed")
+    check.done()
+
+
+FILE_SENTINEL = "FILE-CONTENT-SENTINEL-5531"
+FILE_HTML = APP_HTML.replace(
+    '<label for="pw">',
+    '<label for="cv">Resume</label><input id="cv" type="file">\n  <label for="pw">')
+
+
+def _resume_files() -> tuple[Path, Path]:
+    d = TEST_HOME / "uploads"
+    d.mkdir(exist_ok=True)
+    mine, other = d / "resume.pdf", d / "other.pdf"
+    mine.write_text(f"agent upload {FILE_SENTINEL}", encoding="utf-8")
+    other.write_text(f"your replacement {FILE_SENTINEL}", encoding="utf-8")
+    return mine, other
+
+
+def _watch_file_form(you_replace: bool):
+    """The agent uploads the resume, rescans, then a scripted you submits."""
+    mine, other = _resume_files()
+    pages = {"/acme/jobs/1": FILE_HTML, "/acme/jobs/1/confirmation": THANKS_HTML}
+    with mock_page(HERE / "gate_form.html", _routes(pages)) as page:
+        page.goto(APP_URL)
+        first = extract.extract_fields(page)
+        cv = next(f for f in first if f.get("type") == "file")
+        box = page.query_selector(f"[{extract.REF_ATTR}='{cv['ref']}']")
+        page.set_input_files(f"[{extract.REF_ATTR}='{cv['ref']}']", str(mine))   # as the agent
+        rec, by = _record(page)                                                 # the rescan
+        ref = outcome.upload_ref(box, rec["fields"])
+        rec["uploads"] = {ref: [mine.name]} if ref else None
+        page.fill("#fn", "Test"); page.fill("#em", "t@x.invalid")
+        seen = _spy(page)
+        real_accept = outcome._accept
+        outcome._accept = lambda raw, refs: (seen.append(raw), real_accept(raw, refs))[1]
+        steps = iter(([lambda: page.set_input_files("#cv", str(other))] if you_replace else [])
+                     + [lambda: page.fill("#pw", PASSWORD), lambda: page.click("#show"),
+                        lambda: page.click("#go")])
+
+        def you():
+            step = next(steps, None)
+            if step:
+                step()
+            return False
+        try:
+            watched = outcome.watch(page, record=rec, stop_requested=you, poll_ms=100)
+        finally:
+            outcome._accept = real_accept
+    return rec, by, ref, watched, seen
+
+
+def test_watch_file_box_replaced_and_unchanged():
+    check = Checks()
+    for replace in (True, False):
+        rec, by, ref, watched, seen = _watch_file_form(replace)
+        what = "replaced" if replace else "unchanged"
+        print(f"  {what}: ended {watched['ended']}, capture {watched['capture']}, "
+              f"final {watched['final']}")
+        check(ref == by("Resume")["ref"], f"{what}: the rescan's ref for the uploaded box found")
+        check(watched["ended"] == "success" and watched["capture"] == "exact",
+              f"{what}: read at the moment of submitting")
+        check(watched["final"].get(ref) == (["other.pdf"] if replace else ["resume.pdf"]),
+              f"{what}: the box read back as its file names")
+        kinds = {e["label"]: e["kind"] for e in
+                 outcome.compute_edits(rec, {"consent_actions": {}}, watched["final"])}
+        check(kinds.get("Resume") == ("file_replaced" if replace else None),
+              f"{what}: resume {'replaced -> an edit' if replace else 'unchanged -> no edit'}")
+        check(any(isinstance(x, dict) and ref in x for x in seen),
+              f"{what}: a read holding the file box was recorded (so the next check means something)")
+        check(FILE_SENTINEL not in json.dumps(seen, default=str),
+              f"{what}: no file contents reached Python")
+        check(PASSWORD not in json.dumps(seen, default=str),
+              f"{what}: the password never reached Python")
+    check.done()
+
+
+def test_upload_ref_needs_a_unique_live_box():
+    check = Checks()
+    pages = {"/acme/jobs/1": FILE_HTML}
+    with mock_page(HERE / "gate_form.html", _routes(pages)) as page:
+        page.goto(APP_URL)
+        fields = extract.extract_fields(page)
+        cv = next(f for f in fields if f.get("type") == "file")
+        box = page.query_selector("#cv")
+        check(outcome.upload_ref(box, fields) == cv["ref"], "a live box holding its own ref")
+        check(outcome.upload_ref(None, fields) is None, "no handle -> unknown")
+        text_only = [f for f in fields if f.get("type") != "file"]
+        check(outcome.upload_ref(box, text_only) is None, "a ref that isn't a file field -> unknown")
+        page.evaluate("r => document.getElementById('fn').setAttribute('data-ja-ref', r)", cv["ref"])
+        check(outcome.upload_ref(box, fields) is None,
+              "a stale ref another element also carries -> unknown")
+        page.evaluate("() => document.getElementById('cv').remove()")
+        check(outcome.upload_ref(box, fields) is None, "a box gone from the page -> unknown")
     check.done()
 
 

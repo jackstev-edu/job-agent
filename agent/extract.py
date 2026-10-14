@@ -409,6 +409,9 @@ _SNAPSHOT_JS = r"""
     if (t === 'password' || /password/i.test(el.getAttribute('autocomplete') || '')) continue;
     let v;
     if (t === 'checkbox' || t === 'radio') v = el.checked;
+    // A file box: the chosen files' names, in order, and nothing else. The
+    // count is the list's length. File contents are never opened.
+    else if (t === 'file') v = Array.from(el.files || [], f => String(f.name));
     else if (el.tagName === 'SELECT') v = el.selectedOptions[0]?.text.trim() ?? '';
     // Before 'value': a <button> has one, and it's always empty.
     else if (el.hasAttribute('aria-pressed')) v = el.getAttribute('aria-pressed') === 'true';

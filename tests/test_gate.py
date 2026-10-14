@@ -108,6 +108,13 @@ def test_1_required_fields():
     stops(check, r, "required, but empty", "a '*' label counts as required even without the attribute")
     r = base(); r["dry_run"] = True; r["results"] = None; r["snapshot"] = {}
     check(run(r)["content_verdict"] == "would_submit", "a dry run judges the plan, not the page")
+    # A file box reads back as the list of its file names.
+    r = base(); r["fields"][4]["required"] = True; r["snapshot"]["f5"] = []
+    stops(check, r, "'Resume': required, but empty", "a required file box with no files")
+    r = base(); r["fields"][4]["required"] = True; r["snapshot"]["f5"] = [" "]
+    stops(check, r, "'Resume': required, but empty", "a required file box with a blank name")
+    r = base(); r["fields"][4]["required"] = True; r["snapshot"]["f5"] = ["resume.pdf"]
+    check(run(r)["content_verdict"] == "would_submit", "a required file box with a file in it")
     check.done()
 
 

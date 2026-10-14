@@ -75,13 +75,22 @@ _HOOK_JS = ("""
 """)
 
 _MAX_VALUE = 5000
+_MAX_FILES, _MAX_FILE_NAME = 50, 1000
 
 
 def _accept(raw, refs: set[str]) -> dict | None:
-    """The hook's read, if it's shaped like ours: known refs, short plain values."""
+    """
+    The hook's read, if it's shaped like ours: known refs, short plain values,
+    and for a file box a short list of short file names.
+    """
     if not isinstance(raw, dict) or not raw or not set(raw) <= refs:
         return None
     for v in raw.values():
+        if isinstance(v, list):
+            if len(v) > _MAX_FILES or not all(
+                    isinstance(n, str) and len(n) <= _MAX_FILE_NAME for n in v):
+                return None
+            continue
         if v is not None and not isinstance(v, (str, bool)):
             return None
         if isinstance(v, str) and len(v) > _MAX_VALUE:
@@ -135,7 +144,7 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
     A read made at the moment of submitting is "exact"; one from polling is
     "polled".
     """
-    fields = [f for f in record.get("fields") or [] if f.get("type") != "file"]
+    fields = record.get("fields") or []
     refs = extract.readable_refs(fields)
     portal, method = record.get("portal") or "", record.get("portal_method") or ""
     start_url = record.get("final_url") or record.get("url") or ""
@@ -199,6 +208,34 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
             "capture": state["capture"], "hooked": hooked}
 
 
+# The uploaded box's ref after a rescan. Every scan restamps refs, and one
+# that skips a box leaves it holding a stale ref another element may now
+# carry, so the ref only counts if the box is still in the page and is the
+# one element holding it.
+_UPLOAD_REF_JS = r"""
+(el) => {
+  if (!el.isConnected) return null;
+  const r = el.getAttribute('data-ja-ref');
+  if (!r) return null;
+  return document.querySelectorAll(`[data-ja-ref="${CSS.escape(r)}"]`).length === 1 ? r : null;
+}
+"""
+
+
+def upload_ref(handle, fields: list[dict]) -> str | None:
+    """
+    The ref the rescan gave the file box the agent uploaded to, or None if
+    it can't be pinned down (then the upload baseline is unknown).
+    """
+    if handle is None:
+        return None
+    try:
+        ref = handle.evaluate(_UPLOAD_REF_JS)
+    except Exception:
+        return None
+    return ref if ref in {f.get("ref") for f in fields if f.get("type") == "file"} else None
+
+
 def _empty(value) -> bool:
     return value is None or value is False or not str(value).strip()
 
@@ -212,18 +249,28 @@ def compute_edits(record: dict, result: dict, final: dict | None) -> list[dict] 
     Baselines: what the agent typed or picked; for an allowlisted consent box,
     ticked if the gate planned would_tick and unticked for leave. So ticking a
     would_tick box is not an edit, leaving it unticked is, and ticking a
-    leave box is.
+    leave box is. For a file box, the names of the files the agent uploaded
+    (record["uploads"], none for a box it didn't upload to): different names
+    or a different count is an edit. Only names are compared, never contents.
+    Without that baseline a file box is unreadable.
     """
     if final is None:
         return None
     plan = record.get("plan") or {}
     consent = result.get("consent_actions") or {}
+    uploads = record.get("uploads")
     edits = []
     for f in record.get("fields") or []:
         ref, ftype = f.get("ref"), (f.get("type") or "").lower()
-        if ftype in ("file", "password"):
+        if ftype == "password":
             continue
         label = (f.get("label") or f.get("name") or "(unlabelled)")[:120]
+        if ftype == "file":
+            kind = _file_edit(None if uploads is None else uploads.get(ref, []),
+                              final.get(ref))
+            if kind:
+                edits.append({"ref": ref, "label": label, "kind": kind})
+            continue
         baseline = (consent[ref] == "would_tick") if ref in consent \
             else (plan.get(ref) or {}).get("value")
         if ref not in final:
@@ -244,6 +291,17 @@ def compute_edits(record: dict, result: dict, final: dict | None) -> list[dict] 
                     "cleared" if _empty(now) else "changed")
             edits.append({"ref": ref, "label": label, "kind": kind})
     return edits
+
+
+def _file_edit(uploaded: list | None, now) -> str | None:
+    """How a file box changed from what the agent uploaded: by names and count."""
+    if not isinstance(uploaded, list) or not isinstance(now, list):
+        return "unreadable"
+    if sorted(map(str, uploaded)) == sorted(map(str, now)):
+        return None
+    if not now:
+        return "file_removed"
+    return "file_added" if not uploaded else "file_replaced"
 
 
 def human_submitted(*, detected: str, answer: str | None, signature_verified: bool) -> str:

@@ -84,6 +84,8 @@ def _is_required(f: dict) -> bool:
 def _present(value: Any) -> bool:
     if value is None or value is False:
         return False
+    if isinstance(value, (list, tuple)):        # a file box reads back as its file names
+        return any(_present(v) for v in value)
     return bool(str(value).strip())
 
 
