@@ -248,11 +248,11 @@
     - ~~whether census-only checkboxes should also need a `<label>` or
       `aria-label`~~ decided in fix round 13 (gate_version 2): they do, and
       any hidden ticked box stops. Since gate_version 3 an unread tick counts
-      as ticked. Since gate_version 4 the only exemption is an Ashby button
-      pair's own box: the group's only box, hidden, read unticked before the
-      fill and ticked after it, for a planned "Yes". Every other box in a
-      group, a pair answered "No" included, meets the label and allowlist
-      checks, so it stops;
+      as ticked. Since gate_version 5 the only exemption is an Ashby button
+      pair's own box: the only box with its group_ref, hidden, the same
+      element before and after the fill, read unticked then ticked for a
+      planned "Yes", or unticked both times for a planned "No". Every other
+      box in a group meets the label and allowlist checks, so it stops;
     - whether a false stop should break a portal's streak. Today only a
       false submit resets it.
     Needs you.

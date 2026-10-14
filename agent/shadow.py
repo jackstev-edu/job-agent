@@ -211,6 +211,11 @@ def redacted(record: dict, result: dict) -> dict:
         "fields": fields,
         "flagged": [fl.get("ref") for fl in record.get("flags") or []],
         "census": [_redacted_box(b, traced) for b in record.get("census") or []],
+        # The pre-fill state of button-pair boxes only, which is what the
+        # gate's pair exemption compared. Withheld the same way as above.
+        "prefill_census": None if not isinstance(record.get("prefill_census"), list) else
+        [_redacted_box(b, traced) for b in record["prefill_census"]
+         if isinstance(b, dict) and (b.get("in_button_group") or b.get("group_ref"))],
         # Hosts only: a frame's full address can carry tokens.
         "frames": [{"host": _host(fr.get("src")), "visible": fr.get("visible")}
                    for fr in record.get("frames") or []],

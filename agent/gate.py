@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections import Counter
 from typing import Any
 
 from . import sensitive
@@ -28,7 +27,10 @@ from . import sensitive
 # 4: that exemption needs the group's only box, hidden, unticked before the
 #    fill and ticked after it, for a planned "Yes". Every other box in a group
 #    meets the ordinary label and allowlist checks.
-GATE_VERSION = 4
+# 5: a pair planned "No" is exempt when its only box stays unticked; both
+#    exemptions need the same element before and after, and every box with
+#    the group_ref counts, grouped or not.
+GATE_VERSION = 5
 
 WOULD_SUBMIT, WOULD_STOP = "would_submit", "would_stop"
 
@@ -157,44 +159,70 @@ def cap_text(ena: dict, reasons: list[str]) -> str:
 
 
 def _group_boxes(census) -> dict:
-    """{group_ref: [boxes]} for the census boxes that sit in a button group."""
+    """
+    {group_ref: [boxes]} for every census box carrying a group_ref, whether
+    or not it says it's in a button group, so nothing sharing the ref is
+    left out of the count.
+    """
     out: dict = {}
     if not isinstance(census, list):
         return out
     for b in census:
-        if isinstance(b, dict) and b.get("in_button_group") is True and b.get("group_ref"):
+        if isinstance(b, dict) and b.get("group_ref"):
             out.setdefault(b["group_ref"], []).append(b)
     return out
 
 
+# What a button pair's own box reads as, before and after the fill, for each
+# answer it may be exempt under. Ashby mirrors the pressed button into it:
+# ticked for "Yes", unticked otherwise (as tests/button_pairs.html imitates
+# it; unconfirmed on a live page, see TODO item 21). Any other answer gets
+# no exemption.
+_PAIR_TICKS = {"yes": (False, True), "no": (False, False)}
+
+
+def _same_box(a: dict, b: dict) -> bool:
+    """The pre-fill and post-fill reads are of the same element, as far as the census can tell."""
+    if any(a.get(k) != b.get(k) for k in ("label_source", "label_inner", "label_content")):
+        return False
+    return a.get("ref") is None or b.get("ref") is None or a.get("ref") == b.get("ref")
+
+
 def _is_pair_mirror(box: dict, plan: dict, after: dict, before: dict | None) -> bool:
     """
-    Is this box an Ashby button pair's own hidden box, ticked by the agent's
-    "Yes" and by nothing else? Ashby mirrors the pressed button into it:
-    ticked for "Yes", unticked otherwise (as tests/button_pairs.html imitates
-    it; unconfirmed on a live page, see TODO item 21). Only then is it exempt
-    from the hidden-and-ticked stop and from the label and allowlist checks.
-    All must hold, each read exactly:
+    Is this box an Ashby button pair's own hidden box, in exactly the state the
+    agent's planned answer leaves it? Only then is it exempt from the
+    hidden-and-ticked stop and from the label and allowlist checks. All must
+    hold, each read exactly:
       - it's in a button group with a group_ref, planned with an answer that
-        normalises to "yes";
-      - it's the only census box with that group_ref, after the fill and in
-        the pre-fill census alike, so a second box can't ride along;
+        normalises to exactly "yes" or "no";
+      - it's the only census box with that group_ref, grouped or not, after
+        the fill and in the pre-fill census alike, so a second box can't ride
+        along;
       - it's hidden (visible is False). A visible box gets no exemption;
-      - the pre-fill census read it as unticked (False, not unread) and the
-        census after the fill reads it as ticked (True). No pre-fill census
-        for the run means no exemption.
+      - the pre-fill and post-fill reads are the same element: same label
+        source and text, and the same ref when both have one;
+      - "yes": read unticked before the fill (False, not unread) and ticked
+        after (True). "no": read unticked (False) both times. No pre-fill
+        census for the run means no exemption.
     """
     ref = box.get("group_ref")
     if box.get("in_button_group") is not True or not ref:
         return False
     group = plan.get(ref)
-    if not group or group.get("value") is None or normalize_label(group["value"]) != "yes":
+    if not group or group.get("value") is None:
+        return False
+    ticks = _PAIR_TICKS.get(normalize_label(group["value"]))
+    if ticks is None:
         return False
     if len(after.get(ref) or []) != 1 or box.get("visible") is not False:
         return False
     if before is None or len(before.get(ref) or []) != 1:
         return False
-    return before[ref][0].get("checked") is False and box.get("checked") is True
+    was = before[ref][0]
+    if not _same_box(was, box):
+        return False
+    return was.get("checked") is ticks[0] and box.get("checked") is ticks[1]
 
 
 def decide(record: dict, profile, *, agent_submissions_today: int | None = 0) -> dict:
@@ -350,9 +378,9 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
     for box in census:
         shown = box.get("label_inner") or box.get("label_content") or "(unlabelled)"
         name = f"checkbox '{shown[:80]}'"
-        # The one exemption: a button pair's own hidden box, ticked by the
-        # agent's planned "Yes" (see _is_pair_mirror). The question itself
-        # went through 2 and 3 above.
+        # The one exemption: a button pair's own hidden box, in exactly the
+        # state the agent's planned "Yes" or "No" leaves it (see
+        # _is_pair_mirror). The question itself went through 2 and 3 above.
         if _is_pair_mirror(box, plan, after, before):
             continue
         # A box you can't see, already ticked, is something you'd be sending

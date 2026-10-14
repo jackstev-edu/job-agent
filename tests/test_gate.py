@@ -292,15 +292,57 @@ def test_4_ashby_button_pairs():
     unread = _pair(after=None)
     stops(check, unread, "hidden, and ticked", "planned Yes, but the tick after the fill wasn't read")
 
-    # Not exempt means the ordinary label checks: a pair answered No leaves its
-    # hidden box unticked, and that box has no <label> or aria-label.
-    stops(check, _pair(planned="No", after=False), "label not explicit (none)",
-          "a pair answered No: its unticked box gets no exemption")
+    # A pair answered No: its only box stays unticked, before and after.
+    no_pair = _pair(planned="No", after=False)
+    check(run(no_pair)["content_verdict"] == "would_submit",
+          "a No pair passes (single, hidden, unticked before and after, planned No)")
+    stops(check, _pair(planned="No", after=True), "hidden, and ticked",
+          "a No pair whose box gets ticked")
+    stops(check, _pair(planned="No thanks", after=False), "label not explicit (none)",
+          "planned 'No thanks': not exactly No, so the box meets the label checks")
+    stops(check, _pair(planned="No", before=None, after=False), "label not explicit (none)",
+          "a No pair whose pre-fill tick wasn't read")
+    no_pre_no = _pair(planned="No", after=False); no_pre_no["prefill_census"] = None
+    stops(check, no_pre_no, "label not explicit (none)", "a No pair with no pre-fill census")
+
+    # The pre-fill and post-fill box must be the same element.
+    for planned, after_tick in (("Yes", True), ("No", False)):
+        for key, value in (("label_source", "aria-label"), ("label_inner", "Something else"),
+                           ("label_content", "Something else")):
+            swapped = _pair(planned=planned, after=after_tick)
+            swapped["prefill_census"][-1][key] = value
+            check(run(swapped)["content_verdict"] == "would_stop",
+                  f"planned {planned}: before/after box differs in {key} -> stop")
+        refs = _pair(planned=planned, after=after_tick)
+        refs["census"][-1]["ref"] = "c7"; refs["prefill_census"][-1]["ref"] = "c8"
+        check(run(refs)["content_verdict"] == "would_stop",
+              f"planned {planned}: before/after box has a different ref -> stop")
+        one_ref = _pair(planned=planned, after=after_tick); one_ref["census"][-1]["ref"] = "c7"
+        check(run(one_ref)["content_verdict"] == "would_submit",
+              f"planned {planned}: a ref on only one side isn't a mismatch")
+
+    # The count is checked on each side on its own.
+    extra = box("Extra", ref=None, in_button_group=True, group_ref="f10",
+                label_source="none", visible=False, checked=False)
+    for planned, after_tick in (("Yes", True), ("No", False)):
+        one_two = _pair(planned=planned, after=after_tick); one_two["census"].append(dict(extra))
+        stops(check, one_two, "label not explicit (none)",
+              f"planned {planned}: one box before, two after")
+        two_one = _pair(planned=planned, after=after_tick)
+        two_one["prefill_census"].append(dict(extra))
+        check(run(two_one)["content_verdict"] == "would_stop",
+              f"planned {planned}: two boxes before, one after")
+        loose = _pair(planned=planned, after=after_tick)
+        stray = dict(extra, in_button_group=False, label_source="for", label_inner=SMS,
+                     label_content=SMS)
+        loose["census"].append(stray); loose["prefill_census"].append(dict(stray))
+        check(run(loose)["content_verdict"] == "would_stop",
+              f"planned {planned}: an ungrouped box sharing the group_ref counts too")
     # The question itself still needs its profile line when it's an eligibility one.
     elig = _pair(label="Are you willing to relocate?")
     stops(check, elig, "'Are you willing to relocate?': legal/eligibility/EEO/pay answer not traced",
           "a model-answered eligibility button pair")
-    check(run(mirror)["gate_version"] == gate.GATE_VERSION == 4, "gate_version bumped to 4")
+    check(run(mirror)["gate_version"] == gate.GATE_VERSION == 5, "gate_version bumped to 5")
     check.done()
 
 

@@ -127,5 +127,52 @@ def test_no_answer_values_reach_gate_runs():
     check.done()
 
 
+def test_prefill_states_of_button_pairs_are_stored_withheld_alike():
+    # The pre-fill census goes into gate_runs for button-pair boxes only, and a
+    # pair asking an eligibility question keeps its tick to itself, before the
+    # fill as after.
+    check = Checks()
+    rec = test_gate._pair(label="Do you enjoy working outdoors?")
+    rec["fields"].append({"ref": "f30", "type": "radio", "widget": "buttons",
+                          "label": "Will you now or in the future require visa sponsorship?",
+                          "options": ["Yes", "No"]})
+    rec["categories"]["f30"] = "work_authorization"
+    rec["plan"]["f30"] = {"value": "No", "source": "profile",
+                          "profile_path": "eligibility.requires_sponsorship", "fit": "bool"}
+    rec["results"]["f30"] = {"filled": True}
+    sponsor = test_gate.box("Will you now or in the future require visa sponsorship?", ref=None,
+                            in_button_group=True, group_ref="f30", label_source="none",
+                            visible=False, checked=False)
+    vet = test_gate.box("I identify as a protected veteran", ref=None, in_button_group=True,
+                        group_ref="f31", label_source="none", visible=False, checked=True)
+    rec["census"] += [sponsor, vet]
+    rec["prefill_census"] += [dict(sponsor), dict(vet)]
+    result = gate.decide(rec, test_gate.profile())
+    stored = shadow.redacted(rec, result)
+    with temp_db():
+        tracker.record_gate_run(rec["url"], portal="greenhouse", portal_method="host",
+                                result=result, record_json=stored)
+        kept = json.loads(tracker.gate_runs()[0]["record_json"])
+    pre = {b["group_ref"]: b for b in kept["prefill_census"]}
+    print(f"  stored pre-fill: {kept['prefill_census']}")
+    check(set(pre) == {"f10", "f30", "f31"},
+          "only button-pair boxes are stored from the pre-fill census (not the SMS box)")
+    check(pre["f10"].get("checked") is False and "checked_withheld" not in pre["f10"],
+          "an ordinary pair's pre-fill state is kept")
+    for ref, what in (("f30", "a traced eligibility pair"), ("f31", "a veteran-status pair")):
+        check("checked" not in pre[ref] and pre[ref].get("checked_withheld") is True,
+              f"{what}: its pre-fill state is withheld")
+        after = next(b for b in kept["census"] if b.get("group_ref") == ref)
+        check("checked" not in after and after.get("checked_withheld") is True,
+              f"{what}: its post-fill state is withheld too")
+    dump = json.dumps(kept)
+    check(all(f'"checked": {s}' not in json.dumps({k: pre[k] for k in ("f30", "f31")})
+              for s in ("true", "false")), "no withheld tick state anywhere in the stored pre-fill")
+    check('"prefill_census": null' not in dump, "a record with a pre-fill census stores it")
+    none_pre = shadow.redacted({**rec, "prefill_census": None}, result)
+    check(none_pre["prefill_census"] is None, "no pre-fill census is stored as null, not empty")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())

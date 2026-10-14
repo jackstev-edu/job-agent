@@ -354,9 +354,11 @@ def cmd_fill(args) -> None:
                             r for r in decision.get("review_reasons", []) if r != "model"]
                     plan[ref] = decision
 
-            # The checkboxes as they stand before the agent answers anything on
-            # this step, so the gate can tell a box the agent's answer ticked
-            # from one that came ticked. A read only, like the census itself.
+            # The checkboxes as they stand just before the agent fills this
+            # step's answers, so the gate can tell a box the agent's answer
+            # ticked from one that came ticked. On step 1 this is after the
+            # resume upload, so anything the portal ticks from the resume
+            # reads as already ticked, which stops. A read only.
             prefill = _prefill_census(page)
 
             if args.dry_run:
