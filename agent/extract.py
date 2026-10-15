@@ -76,14 +76,24 @@ _SECRET_JS = (r"""
 """)
 
 # Everything that can show a field's value as text: form controls, editable
-# regions, dropdown and listbox widgets, and react-select-style chosen-value
-# displays (plus script and style). Text inside these never reaches the model,
-# whether it comes in as page text or as a field's label or help.
+# regions, dropdown and listbox widgets, button-like pickers, sliders,
+# selected rows, and the chosen-value, chip and tag displays of the common
+# widget libraries (plus script and style). Text inside these never reaches
+# the model, whether it comes in as page text or as a field's label or help.
+# A deny-list: a library that shows a value in none of these still shows
+# through (TODO 23).
 _VALUE_SHOWN = ('input, textarea, select, option, button, '
                 '[contenteditable]:not([contenteditable="false"]), [role=combobox], '
                 '[role=listbox], [role=option], [role=textbox], [role=searchbox], '
-                '[role=spinbutton], [class*="singleValue"], [class*="single-value"], '
+                '[role=spinbutton], [role=button], [role=slider], [aria-selected="true"], '
+                '[class*="singleValue"], [class*="single-value"], '
                 '[class*="multiValue"], [class*="multi-value"], '
+                '[class*="chip" i], [class~="tag" i], [class*="ant-tag"], '
+                '[class*="ant-select-selection"], [class*="select2-selection"], '
+                '[class*="choices__item"], [class*="search-choice"], '
+                '[class*="chosen-single"], [class*="selected-item" i], '
+                '[class*="selectedItem" i], [data-automation-id="selectedItem"], '
+                '[data-automation-id="selectedItemList"], '
                 'script, style, noscript, template')
 
 # A label or help text built like page_text: what innerText would give, minus
@@ -124,6 +134,21 @@ _TEXT_OF_JS = (r"""
 # type=submit, so a typeless button inside a form counts.
 _SUBMITS_JS = r"""el => ['BUTTON', 'INPUT'].includes(el.tagName) && !!el.form
     && ['submit', 'image'].includes(String(el.type || '').toLowerCase())"""
+
+# Does a dropdown's box hold any text? Only true or false leaves the page,
+# never the text or its length. The password test runs first, and a box (or
+# any box inside it) that's secret is never read at all: it counts as
+# holding text, so it isn't opened.
+_HOLDS_TEXT_JS = ("""
+el => {
+""" + _SECRET_JS + r"""
+  const boxes = [el, ...el.querySelectorAll('input, textarea, [contenteditable]')];
+  if (boxes.some(b => isSecret(b, ''))) return true;
+  return boxes.some(b => ('value' in b && b.tagName !== 'BUTTON')
+      ? String(b.value) !== ''
+      : b.isContentEditable && b.textContent.trim() !== '');
+}
+""")
 
 # --- the injected JavaScript -------------------------------------------------
 # This runs inside the page, in the browser, with full access to the DOM.
@@ -684,6 +709,14 @@ def enrich_comboboxes(page: "Page", fields: list[dict]) -> list[dict]:
             # Checked again at click time, not trusted from the scan.
             if box.evaluate(_SUBMITS_JS):
                 field["submits"] = True
+                continue
+            # A box already holding text filters its menu by that text, and a
+            # creatable one offers 'Create "<text>"': its rows would carry
+            # the text to the model. Not opened; the in-page check returns
+            # only true or false.
+            if box.evaluate(_HOLDS_TEXT_JS):
+                field["note"] = ("this dropdown already holds text, so its choices "
+                                 "weren't read")
                 continue
             box.scroll_into_view_if_needed(timeout=3000)
             box.click(timeout=3000)

@@ -253,6 +253,9 @@ def cmd_fill(args) -> None:
         # page can show your answers outside any form (a review step, a
         # summary), and no value from the page may reach the model.
         posting_text = extract.page_text(page, 6000)
+        # Role and company from the posting's title, for the same reason: a
+        # later page's title can carry an answer, and the letter is sent both.
+        role, company = extract.guess_role_and_company(page)
         # You open the form: on a portal you're signed in to, "Apply" can be
         # a one-click submit, so the agent never presses it.
         print(f"\n{BOLD}Click Apply if the form isn't open, then press Enter.{OFF}")
@@ -261,8 +264,6 @@ def cmd_fill(args) -> None:
         # Again: Workday only shows its sign-in page once Apply is clicked.
         if _get_past_login_wall(page):
             events.append({"kind": "login_wall", "detail": "after Apply"})
-
-        role, company = extract.guess_role_and_company(page)
 
         # One page: the one you're on. The agent fills it and stops. It never
         # clicks Next or Continue; you move between pages yourself.
@@ -274,6 +275,11 @@ def cmd_fill(args) -> None:
         # of its keys) and every page seen with a password box on it.
         guard = extract.ReadGuard()
         resume = prof.resume_path(args.resume)
+        # What the model may see of each field's help text. After the resume
+        # upload the portal may have autofilled fields, and help text there
+        # can be validation text echoing a value ("'(555) 12' is not a valid
+        # phone number"), so none is sent. The policy still reads it locally.
+        send_help = True
         # And once more just before the scan: a page can ask you to sign in late.
         if _get_past_login_wall(page):
             events.append({"kind": "login_wall", "detail": "step 1"})
@@ -304,6 +310,7 @@ def cmd_fill(args) -> None:
             browser_mod.settle(page, 2500)
             fields = extract.enrich_comboboxes(
                 page, extract.extract_fields(page, guard))
+            send_help = False
             # A failed upload put nothing there, or nothing known; either
             # way the baseline can't be trusted.
             ref = outcome.upload_ref(box, fields) if worked else None
@@ -312,7 +319,7 @@ def cmd_fill(args) -> None:
         # 2. Ask the model what KIND of question each field is. It never
         #    sees your data here and never answers anything.
         categories = classify.classify_fields(
-            [f for f in fields if f.get("type") != "file"])
+            [_for_model(f, send_help) for f in fields if f.get("type") != "file"])
 
         # 3. Apply the policy. Sensitive fields never reach the mapper.
         plan: dict[str, dict] = {}
@@ -352,7 +359,8 @@ def cmd_fill(args) -> None:
 
         # 4. The mapper answers only what's left.
         if for_model:
-            mapped = mapper.map_fields(for_model, prof, posting_text[:3000])
+            mapped = mapper.map_fields([_for_model(f, send_help) for f in for_model],
+                                       prof, posting_text[:3000])
             for ref, decision in mapped.items():
                 if next((f for f in for_model
                          if f["ref"] == ref and f.get("_draft")), None):
@@ -549,6 +557,11 @@ def _shadow_gate(record, prof, url, portal, detected_by, *,
     except Exception as e:
         print(f"{DIM}  couldn't log the gate's verdict ({type(e).__name__}){OFF}")
         return None, result
+
+
+def _for_model(field: dict, send_help: bool) -> dict:
+    """A field as a model call is given it: a copy, without its help text unless allowed."""
+    return dict(field) if send_help else {**field, "help_text": ""}
 
 
 def _fillable_plan(fields: list[dict], plan: dict) -> dict:

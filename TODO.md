@@ -374,29 +374,37 @@
       editable regions, combobox / listbox / option widgets, react-select
       value displays) are left out of aria-labelledby, label[for], a
       wrapping <label>, a nearby legend / label / .label and
-      aria-describedby. Still open:
+      aria-describedby. Closed (fix round after 2c7a1ab):
+      - Validation text echoing a value after the resume upload: the
+        post-upload rescan sends no help text to the classifier or the
+        mapper. The policy still reads it locally.
+      - A dropdown's options filtered by text in its box (or a creatable
+        `Create "<text>"` row): a box already holding text isn't opened.
+        The in-page check runs after the password test and returns only
+        true or false.
+      - Value displays in `[role=button]`, `[role=slider]`,
+        `[aria-selected=true]` rows, and the chip / tag / selected-item
+        displays of MUI, Ant, Select2, Choices, Chosen and Workday
+        (`data-automation-id="selectedItem"`) are on the skip list.
+      - The document title (role and company, for the tracker and the
+        cover letter) is read on the posting, before Apply.
+      Still open:
       - **Validation/error text (aria-describedby, aria-errormessage) can
-        echo a typed value** ("'jo@x' is not a valid email"). It's plain
-        text, so the skip list doesn't catch it. aria-errormessage isn't
-        read today; aria-describedby is. Follow mode rescans after user
-        input, so this MUST be closed before follow-mode commit 6. It is
-        already live today: `fill` rescans after the resume upload, when
-        portals autofill fields from the resume, and sends that scan's
-        help text to the model.
-      - Same deadline, also live today: a combobox's harvested options come
-        from its open menu, which a type-to-search widget filters by the
-        text in its box, and a creatable one shows as `Create "<typed
-        text>"`. The agent opens menus before it types anything on that
-        step, but text the resume autofill put in the box gets through.
-      - The skip list is a deny-list. Not on it: `[role=button]` (older MUI
-        and Workday pickers show the chosen value in one), chips / tags /
-        selected-item displays, `[role=slider]`, `[aria-selected=true]`
-        rows. A value shown in one of these inside a label or help source
-        still reaches the model.
+        echo a typed value** ("'jo@x' is not a valid email") in the FIRST
+        scan, when the page already holds a value (a saved draft, a page
+        that opens filled). It's plain text, so the skip list doesn't catch
+        it. aria-errormessage isn't read today; aria-describedby is. Follow
+        mode rescans after user input, so this MUST be closed before
+        follow-mode commit 6.
+      - The skip list is a deny-list. A widget library that shows a chosen
+        value in none of its selectors still shows through, in labels,
+        help and page text.
+      - A dropdown whose search box is outside the element the scan
+        stamped (a separate input it controls) isn't seen by the
+        holds-text check.
       - Residual: an aria-label or placeholder that page script rewrites to
         include the value is sent as the label. Neither the scan nor the
-        model calls read a `title` attribute. The document title is read
-        once, as role and company, for the tracker and the cover letter.
+        model calls read a `title` attribute.
     - Not covered by the password fix: a hostile page that moves a ref
       attribute onto its own unmarked, neutrally-labelled password box. The
       page controls its DOM and could hand over the value many other ways;
