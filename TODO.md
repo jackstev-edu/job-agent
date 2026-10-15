@@ -330,6 +330,12 @@
       a dry run a No pair is exempt while a Yes pair stops. Fix: withhold
       the No exemption when `dry_run` is set (or note it in the
       `_is_pair_mirror` docstring and TODO item 21).
+    - Known limit of the password fix: a box whose type, autocomplete hint,
+      name, id, label and placeholder all say nothing about a password, and
+      which is already shown as text before the agent's first scan, can't be
+      recognised: the agent never saw it as a password. Every reader then
+      treats it as an ordinary box. A box seen as a password once stays
+      secret for the run (page marker plus Python's sticky set).
 
 ## Deferred
 

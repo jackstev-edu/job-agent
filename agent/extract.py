@@ -13,6 +13,8 @@ one that costs dollars and gets lost.
 
 from __future__ import annotations
 
+import json
+
 import re
 
 from typing import TYPE_CHECKING
@@ -29,11 +31,44 @@ REF_ATTR = "data-ja-ref"
 # substring: the buttons themselves carry "...-input-yesno-option".
 BUTTON_GROUP = ".ashby-application-form-input-yesno"
 
+# A box the agent must never read: once any reader sees it as a password, it's
+# marked with this attribute, and every later reader refuses a marked box.
+SECRET_ATTR = "data-ja-secret"
+
+# Names, ids, labels and placeholders that say "password", in the languages
+# portals commonly use. Page text only ever makes a box secret here: it can
+# stop a read, never allow one.
+SECRET_WORDS = (r"pass[\s_-]*word|passw|passwd|pwd|passcode|kennwort|passwort|"
+                r"contrase[ñn]a|senha|mot[\s_-]*de[\s_-]*passe|wachtwoord|l[öo]senord|"
+                r"salasana|has[łl]o|heslo|jelsz[óo]|пароль|密码|密碼|パスワード|비밀번호|"
+                r"סיסמה|كلمة[\s_-]*(?:ال)?مرور")
+
+# The same test in the page, shared by the scan and the snapshot. It marks what
+# it finds, so a later "show password" toggle doesn't make the box readable.
+# The constants are baked in, so the submit hook in outcome.py, which embeds
+# _SNAPSHOT_JS as a function, needs no extra arguments.
+_SECRET_JS = (r"""
+  const SECRET_ATTR = """ + json.dumps(SECRET_ATTR) + r""";
+  const SECRET_RX = new RegExp(""" + json.dumps(SECRET_WORDS) + r""", 'iu');
+  const isSecret = (el, label) => {
+    if (el.hasAttribute(SECRET_ATTR)) return true;
+    const hit = (el.type || '').toLowerCase() === 'password'
+      || /password/i.test(el.getAttribute('autocomplete') || '')
+      || SECRET_RX.test([el.name, el.id, label, el.getAttribute('placeholder'),
+                         el.getAttribute('aria-label'),
+                         ...[...(el.labels || [])].map(l => l.innerText)]
+                        .filter(Boolean).join(' '));
+    if (hit) el.setAttribute(SECRET_ATTR, '1');
+    return hit;
+  };
+""")
+
 # --- the injected JavaScript -------------------------------------------------
 # This runs inside the page, in the browser, with full access to the DOM.
 _SCAN_JS = r"""
 (GROUP) => {
   const REF = 'data-ja-ref';
+""" + _SECRET_JS + r"""
   let counter = 0;
   const fields = [];
 
@@ -181,24 +216,25 @@ _SCAN_JS = r"""
         || el.getAttribute('aria-autocomplete') === 'list';
 
     const tag = el.tagName.toLowerCase();
-    // A password box's value is never read. Nor is the value of a box that
-    // is hinted as one, or named as one: a "show password" toggle flips
-    // type=password to text, so the type alone can't be trusted.
-    const secret = (el.type || '').toLowerCase() === 'password'
-        || /password/i.test(el.getAttribute('autocomplete') || '')
-        || /passw|pwd|passcode/i.test(`${el.name || ''} ${el.id || ''}`);
+    // The scan reads no input's value at all: what's in a box is read only by
+    // the snapshot, for refs Python has cleared. It does mark a box marked,
+    // hinted or named as a password, since a "show password" toggle flips
+    // type=password to text and the type alone can't be trusted.
+    const label = labelFor(el);
+    const secret = isSecret(el, label);
     const field = {
       ref: stamp(el),
       type: isCustomCombobox ? 'combobox'
           : tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : type,
       name: el.name || el.id || '',
-      label: labelFor(el).slice(0, 300),
+      label: label.slice(0, 300),
       placeholder: el.getAttribute('placeholder') || '',
       required: !!el.required || el.getAttribute('aria-required') === 'true',
       help_text: helpFor(el),
-      current_value: secret ? '' : (el.value || '').slice(0, 200),
       maxlength: el.maxLength > 0 ? el.maxLength : null,
+      tag, dom_name: el.name || '', dom_id: el.id || '',
     };
+    if (secret) field.secret = true;
 
     if (field.type === 'select') {
       field.options = [...el.options].map(o => o.text.trim()).filter(Boolean);
@@ -231,9 +267,40 @@ _NOISE = ("search", "cookie", "newsletter", "subscribe", "promo code",
           "discount", "language selector")
 
 
-def extract_fields(page: "Page") -> list[dict]:
-    """Return a tidy list of every fillable question on the page."""
+def field_key(f: dict) -> tuple:
+    """
+    A field's identity across rescans and re-renders, from structure: tag,
+    name and normalised label (or tag and id, when it has neither). Never the
+    type, which a "show password" toggle changes, and never the ref, which
+    every scan reassigns.
+    """
+    tag, name = f.get("tag") or "", f.get("dom_name") or ""
+    label = " ".join(str(f.get("label") or "").split()).casefold()
+    return (tag, name, label) if (name or label) else (tag, "#" + (f.get("dom_id") or ""))
+
+
+def is_secret(f: dict) -> bool:
+    """A field no reader or writer may take a value from."""
+    return bool(f.get("secret")) or (f.get("type") or "").lower() == "password"
+
+
+def extract_fields(page: "Page", secret_keys: set | None = None) -> list[dict]:
+    """
+    Return a tidy list of every fillable question on the page.
+
+    `secret_keys` is the run's sticky set of field keys ever seen as secret.
+    The page can strip its marker and a re-render replaces the element, so a
+    field whose key is in it stays secret whatever the page says now. Any
+    field seen as secret here is added to it.
+    """
+    secret_keys = set() if secret_keys is None else secret_keys
     fields = page.evaluate(_SCAN_JS, BUTTON_GROUP)
+    for f in fields:
+        key = field_key(f)
+        if is_secret(f):
+            secret_keys.add(key)
+        elif key in secret_keys:
+            f["secret"] = True
     return [
         f for f in fields
         if not any(word in f"{f.get('label','')} {f.get('name','')}".lower()
@@ -401,18 +468,19 @@ def enrich_comboboxes(page: "Page", fields: list[dict]) -> list[dict]:
 
 # --- reading the form back, after you've corrected it ------------------------
 # Deliberately narrower than the scan above. It reads only the refs it's
-# given, which are the fields the scan saw as anything but a password box.
-# At read time it also skips, without touching the value, any element that
-# is now type=password (a "show password" toggle flips it back and forth) or
-# has a password autocomplete hint. Same refusal as filler.py.
+# given, which are the fields the scan didn't see as secret. At read time it
+# also skips, without touching the value, any element that is now secret:
+# marked, type=password, hinted or named as a password. Same refusal as
+# filler.py.
 _SNAPSHOT_JS = r"""
 (refs) => {
+""" + _SECRET_JS + r"""
   const out = {};
   for (const ref of refs) {
     const el = document.querySelector(`[data-ja-ref="${CSS.escape(ref)}"]`);
     if (!el) continue;
     const t = (el.type || '').toLowerCase();
-    if (t === 'password' || /password/i.test(el.getAttribute('autocomplete') || '')) continue;
+    if (isSecret(el, '')) continue;
     let v;
     if (t === 'checkbox' || t === 'radio') v = el.checked;
     // A file box: the chosen files' names, in order, and nothing else. The
@@ -441,10 +509,10 @@ _SNAPSHOT_JS = r"""
 
 
 def readable_refs(fields: list[dict]) -> list[str]:
-    """The refs a snapshot may read: never a field the scan saw as a password."""
+    """The refs a snapshot may read: never a secret field."""
     refs: list[str] = []
     for f in fields:
-        if (f.get("type") or "").lower() == "password":
+        if is_secret(f):
             continue
         refs += f.get("option_refs") or [f["ref"]]
     return refs

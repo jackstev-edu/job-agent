@@ -165,8 +165,10 @@ def decide(field: dict, category: str, profile) -> dict:
             return {**base, "action": "human", "value": None,
                     "source": "human", "reason": why}
 
-    # -- layer 2: a password input is refused on type alone, however labelled -
-    if (field.get("type") or "").lower() == "password":
+    # -- layer 2: a password input is refused on type alone, however labelled,
+    # and so is any box the scan marked secret (toggled to text, hinted or
+    # named as a password, or seen as one earlier in the run).
+    if (field.get("type") or "").lower() == "password" or field.get("secret"):
         return {**base, "action": "human", "value": None, "source": "human",
                 "reason": "Credential field. This tool never types passwords."}
 

@@ -25,7 +25,7 @@ RECORD_VERSION = 1
 
 # The fields of a scanned field worth keeping in the record.
 _FIELD_KEYS = ("ref", "type", "widget", "label", "name", "placeholder", "required",
-               "options", "option_refs", "help_text", "search_required")
+               "options", "option_refs", "help_text", "search_required", "secret")
 
 # The parts of a plan decision the gate reads.
 _DECISION_KEYS = ("value", "source", "profile_path", "fit", "confidence", "needs_review",
@@ -183,6 +183,12 @@ def redacted(record: dict, result: dict) -> dict:
     fields = []
     for f in record.get("fields") or []:
         ref = f.get("ref")
+        if extract.is_secret(f):
+            # A secret box appears by label and kind only, never anything
+            # about what's in it.
+            fields.append({"ref": ref, "label": f.get("label"), "type": f.get("type"),
+                           "secret": True})
+            continue
         if ref in traced:
             t = traced[ref]
             keys = ("ref", "label", "category", "profile_path", "source", "fit")

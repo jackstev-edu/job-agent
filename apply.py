@@ -263,6 +263,9 @@ def cmd_fill(args) -> None:
         # {file box ref: names the agent uploaded there}, the baseline for
         # spotting a resume you swapped. None once it can't be known.
         uploaded: dict[str, list[str]] | None = {}
+        # Every field seen as secret this run, by structural key: it stays
+        # secret even if the page strips its marker or re-renders the box.
+        secret_keys: set = set()
         resume = prof.resume_path(args.resume)
         max_steps = 1 if args.dry_run else args.max_steps
 
@@ -273,7 +276,7 @@ def cmd_fill(args) -> None:
             if _get_past_login_wall(page):
                 events.append({"kind": "login_wall", "detail": f"step {step}"})
 
-            fields = extract.extract_fields(page)
+            fields = extract.extract_fields(page, secret_keys)
             if not fields:
                 events.append({"kind": "no_fields", "detail": f"step {step}"})
                 if step == 1:
@@ -301,7 +304,7 @@ def cmd_fill(args) -> None:
                     events.append({"kind": "upload_failed", "detail": detail})
                 browser_mod.settle(page, 2500)
                 fields = extract.enrich_comboboxes(
-                    page, extract.extract_fields(page))
+                    page, extract.extract_fields(page, secret_keys))
                 # A failed upload put nothing there, or nothing known; either
                 # way the baseline can't be trusted.
                 ref = outcome.upload_ref(box, fields) if worked else None
@@ -370,6 +373,10 @@ def cmd_fill(args) -> None:
                 _shadow_gate(record, prof, url, key, detected_by, dry_run=True)
                 return
 
+            # The policy already hands every secret box to you; this makes sure
+            # no plan entry for one can ever reach the filler.
+            secret_refs = {f["ref"] for f in fields if extract.is_secret(f)}
+            plan = {ref: d for ref, d in plan.items() if ref not in secret_refs}
             step_rows = filler.run_plan(page, fields, plan)
             steps.append(shadow.step_entry(fields, categories, plan, flags, step_rows,
                                            prefill_census=prefill))
@@ -602,7 +609,7 @@ def _log_corrections(page, url, fields, plan, categories, final=None) -> None:
     norm = lambda v: "" if v in (None, False) else str(v).strip()
     rows = []
     for f in fields:
-        if f.get("type") in ("file", "password"):
+        if f.get("type") == "file" or extract.is_secret(f):
             continue
         if f["ref"] not in final:
             continue        # not read back; logging it as cleared would be false

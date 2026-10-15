@@ -265,6 +265,11 @@ def compute_edits(record: dict, result: dict, final: dict | None) -> list[dict] 
         if ftype == "password":
             continue
         label = (f.get("label") or f.get("name") or "(unlabelled)")[:120]
+        if extract.is_secret(f):
+            # Never read, so never diffed: by label and kind only, and zero
+            # edits can't be claimed while it's on the form.
+            edits.append({"ref": ref, "label": label, "kind": "unreadable"})
+            continue
         if ftype == "file":
             kind = _file_edit(None if uploads is None else uploads.get(ref, []),
                               final.get(ref))
