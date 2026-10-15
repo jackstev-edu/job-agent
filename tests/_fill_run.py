@@ -106,7 +106,8 @@ class EnterAlreadyPressed:
 
 
 def run_fill(form: Path, *, dry_run: bool, answers=("n",), profile_yaml: str = PROFILE,
-             classify=classify_by_label, map_fields=map_from_profile, patches=()):
+             classify=classify_by_label, map_fields=map_from_profile, patches=(),
+             cover_letter: bool = False):
     """
     Run cmd_fill on `form`. Returns (printed text, records built, error or None).
     `answers` are what you'd type at each terminal prompt, in order; by
@@ -127,7 +128,8 @@ def run_fill(form: Path, *, dry_run: bool, answers=("n",), profile_yaml: str = P
         return rec
 
     args = Namespace(profile=str(profile_path), url=form.resolve().as_uri(), force=True,
-                     dry_run=dry_run, resume=None, cover_letter=False, max_steps=6)
+                     dry_run=dry_run, resume=None, cover_letter=cover_letter,
+                     max_steps=6)
     out, error = io.StringIO(), None
     with ExitStack() as stack:
         for target, name, value in (

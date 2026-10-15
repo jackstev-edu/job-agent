@@ -248,6 +248,11 @@ def cmd_fill(args) -> None:
 
         if _get_past_login_wall(page):
             events.append({"kind": "login_wall", "detail": "before Apply"})
+        # The posting's text, taken once, before Apply is clicked or anything
+        # is typed, and the only page text any model call is given. Later the
+        # page can show your answers outside any form (a review step, a
+        # summary), and no value from the page may reach the model.
+        posting_text = extract.page_text(page, 6000)
         adapters.prepare(page, key)
         # Again: Workday only shows its sign-in page once Apply is clicked.
         if _get_past_login_wall(page):
@@ -343,7 +348,7 @@ def cmd_fill(args) -> None:
 
             # 4. The mapper answers only what's left.
             if for_model:
-                mapped = mapper.map_fields(for_model, prof, extract.page_text(page))
+                mapped = mapper.map_fields(for_model, prof, posting_text[:3000])
                 for ref, decision in mapped.items():
                     if next((f for f in for_model
                              if f["ref"] == ref and f.get("_draft")), None):
@@ -402,8 +407,7 @@ def cmd_fill(args) -> None:
         if args.cover_letter:
             print(f"\n{DIM}Drafting a cover letter…{OFF}")
             try:
-                text = letters.draft_cover_letter(
-                    prof, extract.page_text(page, 6000), company, role)
+                text = letters.draft_cover_letter(prof, posting_text, company, role)
                 path = letters.save_draft(text, company, role)
                 print(f"  {GREEN}draft saved:{OFF} {path}")
             except Exception as e:

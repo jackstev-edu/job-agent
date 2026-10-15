@@ -350,6 +350,11 @@
       widgets and react-select's chosen-value display. A widget library
       that shows a chosen value as plain text outside all of those, with
       none of those roles or class names, would still show through.
+    - page_text is taken once per `fill`, on the posting, after the first
+      login check and before prepare() clicks Apply. Every model call (the
+      mapper on every step, the cover letter) gets that same text. Residual:
+      a URL that opens on a logged-in page already showing saved answers
+      outside any form (or a sign-in that lands on one) still puts them in.
     - Decided (Jack): in compute_edits a type=password box is skipped, while
       a box that's secret only by marker, hint, pattern or sticky key comes
       out "unreadable". Why: a pattern match may be a mislabelled ordinary
@@ -367,12 +372,20 @@
         echo a typed value** ("'jo@x' is not a valid email"). It's plain
         text, so the skip list doesn't catch it. aria-errormessage isn't
         read today; aria-describedby is. Follow mode rescans after user
-        input, so this MUST be closed before follow-mode commit 6.
-      - Same deadline: a combobox's harvested options come from its open
-        menu, which a type-to-search widget filters by the text in its box,
-        and a creatable one shows as `Create "<typed text>"`. Today the
-        agent opens menus before it types anything on that step, so only
-        text already in the box when the page is scanned can get through.
+        input, so this MUST be closed before follow-mode commit 6. It is
+        already live today: `fill` rescans after the resume upload, when
+        portals autofill fields from the resume, and sends that scan's
+        help text to the model.
+      - Same deadline, also live today: a combobox's harvested options come
+        from its open menu, which a type-to-search widget filters by the
+        text in its box, and a creatable one shows as `Create "<typed
+        text>"`. The agent opens menus before it types anything on that
+        step, but text the resume autofill put in the box gets through.
+      - The skip list is a deny-list. Not on it: `[role=button]` (older MUI
+        and Workday pickers show the chosen value in one), chips / tags /
+        selected-item displays, `[role=slider]`, `[aria-selected=true]`
+        rows. A value shown in one of these inside a label or help source
+        still reaches the model.
       - Residual: an aria-label or placeholder that page script rewrites to
         include the value is sent as the label. Neither the scan nor the
         model calls read a `title` attribute. The document title is read

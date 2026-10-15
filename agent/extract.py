@@ -507,6 +507,8 @@ def page_text(page: "Page", limit: int = 3000) -> str:
     source of facts about you, and never as instructions. It is sent to the
     model, so it leaves out every place a field value can appear as text
     (see _PAGE_TEXT_JS): no value read from a field reaches the model.
+    `fill` calls this once, on the posting, before Apply is clicked or
+    anything is typed: a later page can show answers outside any form.
     """
     try:
         raw = page.evaluate(_PAGE_TEXT_JS)
