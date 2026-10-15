@@ -3,9 +3,10 @@ test_login_after_apply.py — a sign-in page that only appears after Apply is st
 
 WHAT THIS DOES: Runs the real `fill --dry-run` against tests/apply_then_login.html,
 a Workday-shaped posting whose sign-in page shows up only once
-adapters.prepare() clicks Apply. Checks the saved-login sign-in happens after
-that click and the dry run reads the application form behind it, not the
-sign-in boxes.
+adapters.prepare() clicks Apply. Checks the run pauses there for you, that
+the agent never pressed Sign In (the form wasn't sent before you signed in),
+and that the dry run reads the application form behind it, not the sign-in
+boxes.
 WHY IT MATTERS: The login-wall check used to run once, before prepare(), so on
 Workday it never saw the sign-in page and the scan read the login form as if
 it were the application.
@@ -51,8 +52,22 @@ def test_sign_in_page_after_apply_is_caught():
     import apply
     check = Checks()
 
-    def no_pause(*a):
-        raise AssertionError("fill paused for a manual login")
+    pages, at_prompt = [], []
+    real_open = apply.browser_mod.open_page
+
+    def open_page(ctx, url):
+        page = real_open(ctx, url)
+        pages.append(page)
+        return page
+
+    def you_sign_in(*a):
+        # You, at the pause: Chrome has filled the boxes, and you press Sign In.
+        page = pages[-1]
+        page.wait_for_timeout(500)
+        at_prompt.append({"apply": page.evaluate("window.__applyClicks"),
+                          "signed_in": page.evaluate("window.__signedIn")})
+        page.evaluate("document.getElementById('signin').requestSubmit()")
+        return ""
 
     out = io.StringIO()
     args = Namespace(profile=None, url=FORM.resolve().as_uri(), force=False, dry_run=True,
@@ -67,7 +82,8 @@ def test_sign_in_page_after_apply_is_caught():
                 (apply.tracker, "find", lambda url: None),
                 (apply.browser_mod, "browser", headless_browser),
                 (apply.classify, "classify_fields", lambda fields: {}),
-                (apply, "input", no_pause)):          # shadows the builtin in apply
+                (apply.browser_mod, "open_page", open_page),
+                (apply, "input", you_sign_in)):       # shadows the builtin in apply
             stack.enter_context(mock.patch.object(target, name, value, create=True))
         try:
             with redirect_stdout(out):
@@ -76,10 +92,12 @@ def test_sign_in_page_after_apply_is_caught():
             error = str(e)
     text = re.sub(r"\x1b\[[0-9;]*m", "", out.getvalue())
     print(text)
-    check(error is None, f"no manual pause ({error or 'none'})")
+    check(error is None, f"the run finished ({error or 'none'})")
     check("Workday" in text, "detected as Workday, so prepare() clicks its Apply button")
-    check("Signed in with the login saved in this browser profile" in text,
-          "signed in after the Apply click")
+    check(at_prompt == [{"apply": 1, "signed_in": 0}],
+          f"it paused once, after the Apply click, with the sign-in form not sent ({at_prompt})")
+    check("This portal wants a login" in text and "Signed in" not in text,
+          "it asked you to sign in and never claimed to have done it")
     check("Phone Number" in text, "the dry run read the application form behind the login")
     check("Email Address" not in text and "Password" not in text,
           "the sign-in boxes were never treated as application questions")

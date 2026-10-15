@@ -67,7 +67,7 @@ CATALOG: dict[str, ATS] = {
         "manual effort will go.",
         multi_step=True, needs_account=True,
         quirks=["Element IDs regenerate between renders — key off data-automation-id.",
-                "Each step is a separate page; Continue between them.",
+                "Each step is a separate page; you press Continue between them, never the agent.",
                 "Date fields are three separate spinners, not one input.",
                 "Resume autofill populates work history badly. Expect to correct it."],
     ),
@@ -148,10 +148,8 @@ def detect_with_method(url: str, page = None) -> tuple[str, ATS, str]:
 def prepare(page: "Page", key: str) -> None:
     """Do whatever this system needs before the form is readable."""
     if key in ("ashby", "greenhouse", "smartrecruiters"):
-        _click_if_visible(page, "a#apply_button, "
-                                "button:has-text('Apply for this Job'), "
-                                "button:has-text('Apply for this job'), "
-                                "a:has-text('Apply Now'), button:has-text('Apply')")
+        _click_if_visible(page, "a#apply_button, button:has-text('Apply'), "
+                                "a:has-text('Apply')")
     elif key == "workday":
         _click_if_visible(page, "a[data-automation-id='adventureButton'], "
                                 "button:has-text('Apply Manually')")
@@ -159,42 +157,51 @@ def prepare(page: "Page", key: str) -> None:
     browser_mod.settle(page, 700)
 
 
+# The only buttons prepare() may press, matched against the whole label.
+# Whole-label on purpose: "Apply with LinkedIn", "Apply with Google" and
+# "Apply with Indeed" are Easy Apply or SSO, and a substring match on
+# "Apply" pressed whichever came first.
+APPLY_BUTTON = re.compile(r"^(apply|apply for this job|apply manually)$", re.I)
+
+
 def _click_if_visible(page: "Page", selector: str) -> None:
-    """Click a button only if it exists, is visible, and isn't forbidden."""
+    """
+    Click the first visible element in `selector` whose whole label is a
+    plain Apply (APPLY_BUTTON) and isn't forbidden. Nothing else is pressed.
+    """
     try:
-        button = page.locator(selector).first
-        if not button.is_visible(timeout=1500):
+        for el in page.locator(selector).all()[:200]:
+            if not el.is_visible():
+                continue
+            label = " ".join((el.inner_text() or "").split())
+            if not APPLY_BUTTON.match(label) or is_forbidden_button(label):
+                continue
+            el.click()
+            browser_mod.settle(page, 1500)
             return
-        if is_forbidden_button(button.inner_text()):
-            return
-        button.click()
-        browser_mod.settle(page, 1500)
     except Exception:
         pass
 
 
-def next_step(page: "Page", key: str) -> bool:
-    """
-    Advance a multi-step wizard by one page.
+# What a "next page" control looks like on each system.
+_NEXT_STEP = {
+    "workday": "button[data-automation-id='bottom-navigation-next-button'], "
+               "button:has-text('Save and Continue'), button:has-text('Continue')",
+    "icims": "input[value='Continue'], button:has-text('Continue')",
+    "taleo": "a:has-text('Save and Continue'), button:has-text('Next')",
+}
 
-    Refuses to click anything that looks like a final submit. Returns True if
-    it moved on, False if it couldn't find a safe Continue button.
-    """
-    selector = {
-        "workday": "button[data-automation-id='bottom-navigation-next-button'], "
-                   "button:has-text('Save and Continue'), button:has-text('Continue')",
-        "icims": "input[value='Continue'], button:has-text('Continue')",
-        "taleo": "a:has-text('Save and Continue'), button:has-text('Next')",
-    }.get(key, "button:has-text('Continue'), button:has-text('Next')")
 
+def has_next_step(page: "Page", key: str) -> bool:
+    """
+    Is there a visible Next or Continue control, so the application goes on
+    past this page? Only looked for, never clicked: you move between pages
+    yourself.
+    """
+    selector = _NEXT_STEP.get(key, "button:has-text('Continue'), button:has-text('Next'), "
+                                   "input[type=submit][value*='Continue' i], "
+                                   "input[type=submit][value*='Next' i]")
     try:
-        button = page.locator(selector).first
-        if not button.is_visible(timeout=2500):
-            return False
-        if is_forbidden_button(button.inner_text()):
-            return False
-        button.click()
-        browser_mod.settle(page, 2000)
-        return True
+        return any(el.is_visible() for el in page.locator(selector).all()[:25])
     except Exception:
         return False

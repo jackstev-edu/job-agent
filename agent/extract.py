@@ -120,11 +120,17 @@ _TEXT_OF_JS = (r"""
   };
 """)
 
+# Can clicking this element submit a form? A <button> with no type is
+# type=submit, so a typeless button inside a form counts.
+_SUBMITS_JS = r"""el => ['BUTTON', 'INPUT'].includes(el.tagName) && !!el.form
+    && ['submit', 'image'].includes(String(el.type || '').toLowerCase())"""
+
 # --- the injected JavaScript -------------------------------------------------
 # This runs inside the page, in the browser, with full access to the DOM.
 _SCAN_JS = r"""
 ([GROUP, GEN]) => {
   const REF = 'data-ja-ref';
+  const SUBMITS = """ + _SUBMITS_JS + r""";
 """ + _SECRET_JS + _TEXT_OF_JS + r"""
   // Every ref from an earlier scan goes first, hidden boxes' included, so a
   // box this scan skips can't keep a ref that a new box is about to get. The
@@ -345,6 +351,9 @@ _SCAN_JS = r"""
       required: el.getAttribute('aria-required') === 'true',
       help_text: '',
       note: 'custom dropdown — filled by clicking and typing',
+      // A typeless <button> in a form is a submit button. Opening this
+      // dropdown would click it, so it's handed to you and never clicked.
+      submits: SUBMITS(el),
     });
   });
 
@@ -668,10 +677,14 @@ def enrich_comboboxes(page: "Page", fields: list[dict]) -> list[dict]:
     the rest of the pipeline knows the answer is typed rather than picked.
     """
     for field in fields:
-        if field.get("type") != "combobox" or field.get("options"):
+        if field.get("type") != "combobox" or field.get("options") or field.get("submits"):
             continue
         try:
             box = page.locator(f"[{REF_ATTR}='{field['ref']}']").first
+            # Checked again at click time, not trusted from the scan.
+            if box.evaluate(_SUBMITS_JS):
+                field["submits"] = True
+                continue
             box.scroll_into_view_if_needed(timeout=3000)
             box.click(timeout=3000)
             options = wait_for_options(page)

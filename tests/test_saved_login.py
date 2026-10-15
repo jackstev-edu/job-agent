@@ -1,20 +1,20 @@
 """
-test_saved_login.py — a browser-filled login gets one click on "Sign in", and nothing more.
+test_saved_login.py — at a login wall the agent pauses for you and clicks nothing.
 
 WHAT THIS DOES: Loads tests/login_wall.html, where a page script stands in for
-Chrome's password manager, and checks sign_in_with_saved_login presses only a
-plain "Sign in" once both boxes are filled. It must leave account creation,
-look-alike buttons ("Continue with Google") and unfilled forms to you, and the
-password must never come back to Python. fill_one must still refuse a password
-box.
-WHY IT MATTERS: The agent never reads, types, generates or stores a password.
-The browser may fill one, and this is the only click the agent makes on a
-login page.
+Chrome's password manager and fills both boxes. The login-wall step, and then
+a real `fill`, must pause for you and press nothing: not Sign in, not Create
+account, not "Continue with Google". The password must never come back to
+Python, the old saved-login sign-in must be gone, and fill_one must still
+refuse a password box.
+WHY IT MATTERS: No code path clicks Sign in, Create account or SSO. The
+browser may fill a saved login; you press the button.
 
 Run from anywhere:  .venv/Scripts/python.exe tests/test_saved_login.py
 """
-import time
+import json
 from pathlib import Path
+from unittest import mock
 
 from _harness import Checks, mock_page, run_as_script
 from agent import browser, filler, sensitive
@@ -35,100 +35,60 @@ def _record_evaluate(page) -> list:
     return seen
 
 
-def _variant(page, body: str, fill_js: str = "") -> None:
-    """Replace the page with another login form, keeping the click recorder."""
-    page.set_content(f"""<!doctype html><body>{body}<script>
-      window.__clicks = [];
-      document.addEventListener('click', e => {{
-        const b = e.target.closest('button'); if (b) window.__clicks.push(b.innerText.trim());
-      }}, true);
-      {fill_js}</script></body>""")
-
-
-FILL_ALL = """for (const el of document.querySelectorAll('input'))
-                el.value = el.type === 'password' ? 'SENTINEL-PW-9' : 'test@example.invalid';"""
-
-
-def test_signs_in_when_the_browser_filled_the_form():
+def test_the_login_wall_step_pauses_and_clicks_nothing():
+    import apply
     check = Checks()
     with mock_page(FORM) as page:
-        check(browser.detect_login_wall(page), "login wall detected")
+        page.wait_for_timeout(800)                      # the stand-in autofill has run
+        check(page.evaluate("document.getElementById('pw').value.length") > 0,
+              "the browser stand-in filled the password (so the checks below mean something)")
         seen = _record_evaluate(page)
-        ok, detail = browser.sign_in_with_saved_login(page, wait_ms=3000)
-        print(f"  -> {ok} {detail}")
-        check(ok and detail == "pressed 'Sign in'", "waited for the fill, then pressed Sign in")
-        check(page.evaluate("window.__signedIn") == 1, "the login form was sent once")
-        check(not browser.detect_login_wall(page), "past the login wall")
-        check(SENTINEL not in repr(seen), "the password never came back to Python")
+        at_prompt = []
+
+        def you(*a):
+            at_prompt.append((page.evaluate("window.__clicks"),
+                              page.evaluate("window.__signedIn || 0")))
+            return ""
+        with mock.patch.object(apply, "input", you, create=True):
+            wall = apply._get_past_login_wall(page)
+    check(wall is True, "the login wall was seen")
+    check(at_prompt == [([], 0)], f"it paused for you once, with nothing clicked or sent ({at_prompt})")
+    check(SENTINEL not in json.dumps(seen, default=str), "the password never came back to Python")
+    check(not hasattr(browser, "sign_in_with_saved_login") and not hasattr(browser, "SIGN_IN_BUTTON"),
+          "the saved-login sign-in is gone from browser.py")
     check.done()
 
 
-def test_unfilled_form_falls_back_to_you():
+def test_a_real_fill_at_a_login_wall_clicks_nothing():
+    import apply
+    from _fill_run import run_fill
+
     check = Checks()
-    with mock_page(FORM) as page:
-        page.goto(FORM.resolve().as_uri() + "#nofill")
-        page.reload()
-        start = time.monotonic()
-        ok, detail = browser.sign_in_with_saved_login(page, wait_ms=800)
-        took = time.monotonic() - start
-        print(f"  -> {ok} {detail} ({took:.1f}s)")
-        check(not ok and "did not fill" in detail, "nothing filled -> no sign-in")
-        check(took < 3, "gave up after the wait, not later")
-        check(page.evaluate("window.__clicks") == [], "nothing was clicked")
-    check.done()
+    pages, seen_at_prompts = [], []
+    real_open = apply.browser_mod.open_page
 
+    def open_page(ctx, url):
+        page = real_open(ctx, url)
+        pages.append(page)
+        return page
+    replies = iter(["", "", "", "n"])                   # three login pauses, then "Did you submit it?"
 
-def test_account_creation_is_left_to_you():
-    check = Checks()
-    with mock_page(FORM) as page:
-        _variant(page, """<form>
-            <input type="email" autocomplete="username">
-            <input type="password" autocomplete="new-password">
-            <input type="password" autocomplete="new-password">
-            <label><input type="checkbox"> I agree to the terms</label>
-            <button type="submit">Continue</button></form>""", FILL_ALL)
-        ok, detail = browser.sign_in_with_saved_login(page, wait_ms=500)
-        print(f"  two password boxes -> {ok} {detail}")
-        check(not ok and "account creation" in detail, "password + confirm box refused")
-        check(page.evaluate("window.__clicks") == [], "  ...and nothing clicked")
-        check(not page.locator("input[type=checkbox]").is_checked(), "  ...terms left unticked")
-
-        _variant(page, """<form><input type="email"><input type="password"
-            autocomplete="new-password"><button>Sign in</button></form>""", FILL_ALL)
-        ok, detail = browser.sign_in_with_saved_login(page, wait_ms=500)
-        print(f"  new-password box -> {ok} {detail}")
-        check(not ok and "account creation" in detail, "a new-password box is refused")
-        check(page.evaluate("window.__clicks") == [], "  ...and nothing clicked")
-    check.done()
-
-
-def test_only_a_plain_sign_in_button_is_pressed():
-    check = Checks()
-    with mock_page(FORM) as page:
-        cases = {
-            "look-alikes only": """<button type="button">Continue with Google</button>
-                                   <button>Sign in and apply</button>
-                                   <button>Create account</button>""",
-            "two candidates": "<button>Log in</button><button>Continue</button>",
-        }
-        for name, buttons in cases.items():
-            _variant(page, f"""<form><input type="email" autocomplete="username">
-                <input type="password" autocomplete="current-password">{buttons}</form>""",
-                     FILL_ALL)
-            ok, detail = browser.sign_in_with_saved_login(page, wait_ms=500)
-            print(f"  {name} -> {ok} {detail}")
-            check(not ok and page.evaluate("window.__clicks") == [], f"{name}: nothing pressed")
-
-        saved = filler.is_forbidden_button
-        filler.is_forbidden_button = lambda text: True
-        try:
-            page.goto(FORM.resolve().as_uri())
-            ok, detail = browser.sign_in_with_saved_login(page, wait_ms=3000)
-        finally:
-            filler.is_forbidden_button = saved
-        print(f"  is_forbidden_button says no -> {ok} {detail}")
-        check(not ok and "refused" in detail and page.evaluate("window.__clicks") == [],
-              "is_forbidden_button still has the last word")
+    def you(*a):
+        page = pages[-1]
+        seen_at_prompts.append((page.evaluate("window.__clicks"),
+                                page.evaluate("window.__signedIn || 0")))
+        return next(replies)
+    text, records, error = run_fill(FORM, dry_run=False,
+                                    patches=((apply.browser_mod, "open_page", open_page),
+                                             (apply, "input", you)))
+    print(text[-700:])
+    check(error is None, f"the run finished ({error})")
+    check(len(seen_at_prompts) == 4 and all(p == ([], 0) for p in seen_at_prompts),
+          f"at every pause, nothing had been clicked and the form wasn't sent ({seen_at_prompts})")
+    check("This portal wants a login" in text and "Signed in" not in text,
+          "it asked you to sign in and never claimed to have done it")
+    check(SENTINEL not in text and SENTINEL not in json.dumps(records, default=str),
+          "the password is in neither the output nor the gate's record")
     check.done()
 
 

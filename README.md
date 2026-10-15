@@ -206,8 +206,9 @@ page access. It says `would_submit` only if all of these hold, and otherwise
 5. There are no per-company questions (how you heard about us, previously
    employed here). Answering those from the profile isn't enabled.
 6. Free text is one of your `voice.canned_answers`, word for word.
-7. Nothing unexpected happened: no CAPTCHA, no login wall (even one signed
-   past automatically), one wizard step only, no visible embedded frame.
+7. Nothing unexpected happened: no CAPTCHA, no login wall (even one you
+   signed past), no Next or Continue control (more pages to come), no
+   visible embedded frame.
 
 Separately, it notes whether the portal is on `autosubmit_portals` and how
 much of `daily_submit_cap` is left. That's never part of the call and never
@@ -261,13 +262,10 @@ support is deferred; see section 6):
    should stay on this machine.
 4. Press Enter in the terminal to carry on.
 
-On later runs, Chrome fills the login form by itself. The agent waits a few
-seconds for that, checks that both boxes are filled without reading what's in
-them, and presses the form's one **Sign in** / **Log in** / **Continue**
-button. If anything is off (nothing filled, a sign-up form, two candidate
-buttons, or only "Continue with Google"), it falls back to the pause in
-step 1. To forget a login, open `chrome://password-manager` in the agent's
-Chrome window.
+On later runs, Chrome fills the login form by itself. The agent still
+pauses at the login wall and never presses Sign in: you press it, then
+Enter in the terminal. To forget a login, open `chrome://password-manager`
+in the agent's Chrome window.
 
 ---
 
@@ -316,9 +314,9 @@ model can add caution, never remove it.
 
 **`agent/browser.py`** (Playwright) — Opens a real Chrome window that remembers
 you between runs, so you log in to a portal once by hand and every future run
-inherits that session. It also spots CAPTCHAs and stops. On a login wall it
-presses Sign in only if Chrome's own password manager has filled the form;
-otherwise it stops and hands you the window.
+inherits that session. It also spots CAPTCHAs and login walls and stops at
+either, handing you the window. Chrome's own password manager may fill a
+login; you press Sign in.
 
 **`agent/extract.py`** (Python + injected JavaScript) — Runs a small script
 inside the page that walks the HTML and returns just the questions, throwing
@@ -381,13 +379,14 @@ of that without having to think about it each time.
 - **Solve CAPTCHAs.** It detects them, names them, and hands you the browser.
 - **Read, type, generate or store a password.** The browser's own password
   manager, inside the agent's Chrome profile, may fill a login you saved
-  (see "Saving a portal login once"). The agent then presses a plain Sign in
-  button and nothing else.
+  (see "Saving a portal login once"). You press Sign in.
 - **Create accounts.** Terms, verification codes and Create Account are yours.
 - **Touch LinkedIn Easy Apply.** LinkedIn's terms prohibit automated access, and
   restrictions there are common and painful to reverse. Click those by hand.
 - **Answer eligibility, EEO, or criminal-history questions with a model.**
-- **Click Submit.**
+- **Click Submit, Next, Continue, Sign in, Create account or an SSO button.**
+  On a multi-page application it fills the page you're on, says more pages
+  follow, and you move on yourself.
 
 ---
 
@@ -441,8 +440,8 @@ printing each check as it goes.
 | `test_dry_run_and_tracker.py` | A null answer prints as a blank with the model's note, not `[ok] None`. A `--force` rerun refreshes a draft in full, but never knocks a submitted, rejected, interview or offer row back to draft. |
 | `test_save_draft.py` | A cover-letter draft is written to the private documents folder, never the repo. |
 | `test_learn.py` | `apply.py learn` on a seeded log: each kind of suggestion, eligibility/EEO/compensation flagged only, one-offs ignored, nothing written. Anonymised rows shaped like the first real log check that false corrections (unreadable dropdowns, a reformatted phone number) are set aside, and that the logger doesn't record them. |
-| `login_wall.html` · `test_saved_login.py` | A browser-filled login gets one click on a plain "Sign in", and the password never reaches Python. Account creation, "Continue with Google", look-alike or duplicate buttons, and unfilled forms are left to you. `fill_one` still refuses a password box. |
-| `apply_then_login.html` · `test_login_after_apply.py` | The real `fill --dry-run` on a Workday-shaped mock whose sign-in page appears only after the Apply click: it signs in there and scans the form behind it, not the login boxes. |
+| `login_wall.html` · `test_saved_login.py` | At a browser-filled login wall the real `fill` pauses for you and clicks nothing: no Sign in, Create account or "Continue with Google". The password never reaches Python. `fill_one` still refuses a password box. |
+| `apply_then_login.html` · `test_login_after_apply.py` | The real `fill --dry-run` on a Workday-shaped mock whose sign-in page appears only after the Apply click: it pauses there, you sign in, and it scans the form behind it, not the login boxes. It never clicks Sign In. |
 | `test_gate.py` | The submit gate, one condition at a time from a passing record: an arbitration box, a substring trap, CSS-hidden text, fine print, an injected instruction, a missing EEO profile line, a loose option fit, the free-text waiver, Ashby button pairs, allowlisted consent boxes (would_tick / leave), enablement kept apart, and stopping on any error. |
 | `consent_boxes.html` · `test_gate_data.py` · `test_gate_profile.py` | The gate's inputs: every checkbox (hidden, custom, Ashby) and where its label came from, iframes, how profile answers were fitted, host-only portal detection, named review reasons, and the blank, safely-read profile keys. |
 | `gate_form.html` · `gate_clean.html` · `test_gate_record.py` · `test_gate_fill.py` | The real `fill` builds the gate's record and prints and logs its call: the clean form would submit, the fuller one stops with its reasons named, dry runs aren't logged, and an EEO answer seeded as a sentinel never reaches the log. |

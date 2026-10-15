@@ -260,10 +260,8 @@ def cmd_fill(args) -> None:
 
         role, company = extract.guess_role_and_company(page)
 
-        # A multi-step wizard is filled one page at a time. Each pass scans,
-        # classifies, fills, then looks for a Continue button — never a Submit.
-        all_rows: list[dict] = []
-        all_flags: list[dict] = []
+        # One page: the one you're on. The agent fills it and stops. It never
+        # clicks Next or Continue; you move between pages yourself.
         steps: list[dict] = []
         # {file box ref: names the agent uploaded there}, the baseline for
         # spotting a resume you swapped. None once it can't be known.
@@ -272,132 +270,131 @@ def cmd_fill(args) -> None:
         # of its keys) and every page seen with a password box on it.
         guard = extract.ReadGuard()
         resume = prof.resume_path(args.resume)
-        max_steps = 1 if args.dry_run else args.max_steps
+        # And once more just before the scan: a page can ask you to sign in late.
+        if _get_past_login_wall(page):
+            events.append({"kind": "login_wall", "detail": "step 1"})
 
-        for step in range(1, max_steps + 1):
-            if step > 1:
-                print(f"\n{BOLD}Step {step}{OFF}")
-            # And before every step, since a wizard can ask you to sign in midway.
-            if _get_past_login_wall(page):
-                events.append({"kind": "login_wall", "detail": f"step {step}"})
+        fields = extract.extract_fields(page, guard)
+        if not fields:
+            print(f"\n{RED}No form fields found.{OFF} The form is probably "
+                  f"behind another click, or inside an iframe.")
+            return
 
-            fields = extract.extract_fields(page, guard)
-            if not fields:
-                events.append({"kind": "no_fields", "detail": f"step {step}"})
-                if step == 1:
-                    print(f"\n{RED}No form fields found.{OFF} The form is probably "
-                          f"behind another click, or inside an iframe.")
-                    return
-                break
+        # Open custom dropdowns to read their choices — otherwise they
+        # arrive with no options and can't be matched to your profile.
+        fields = extract.enrich_comboboxes(page, fields)
+        print(f"\n{len(fields)} field(s) on the page.")
 
-            # Open custom dropdowns to read their choices — otherwise they
-            # arrive with no options and can't be matched to your profile.
-            fields = extract.enrich_comboboxes(page, fields)
-            print(f"\n{len(fields)} field(s) on the page.")
+        # 1. Resume first: portals autofill from it and would overwrite us.
+        uploads = [f for f in fields if f.get("type") == "file"]
+        if uploads and resume and not args.dry_run:
+            try:
+                box = page.query_selector(
+                    f"[{extract.REF_ATTR}='{uploads[0]['ref']}']")
+            except Exception:
+                box = None
+            worked, detail = filler.upload_file(page, uploads[0]["ref"], resume)
+            print(f"  {GREEN if worked else RED}{detail}{OFF}")
+            if not worked:
+                events.append({"kind": "upload_failed", "detail": detail})
+            browser_mod.settle(page, 2500)
+            fields = extract.enrich_comboboxes(
+                page, extract.extract_fields(page, guard))
+            # A failed upload put nothing there, or nothing known; either
+            # way the baseline can't be trusted.
+            ref = outcome.upload_ref(box, fields) if worked else None
+            uploaded = {ref: [Path(resume).name]} if ref else None
 
-            # 1. Resume first: portals autofill from it and would overwrite us.
-            uploads = [f for f in fields if f.get("type") == "file"]
-            if step == 1 and uploads and resume and not args.dry_run:
-                try:
-                    box = page.query_selector(
-                        f"[{extract.REF_ATTR}='{uploads[0]['ref']}']")
-                except Exception:
-                    box = None
-                worked, detail = filler.upload_file(page, uploads[0]["ref"], resume)
-                print(f"  {GREEN if worked else RED}{detail}{OFF}")
-                if not worked:
-                    events.append({"kind": "upload_failed", "detail": detail})
-                browser_mod.settle(page, 2500)
-                fields = extract.enrich_comboboxes(
-                    page, extract.extract_fields(page, guard))
-                # A failed upload put nothing there, or nothing known; either
-                # way the baseline can't be trusted.
-                ref = outcome.upload_ref(box, fields) if worked else None
-                uploaded = {ref: [Path(resume).name]} if ref else None
+        # 2. Ask the model what KIND of question each field is. It never
+        #    sees your data here and never answers anything.
+        categories = classify.classify_fields(
+            [f for f in fields if f.get("type") != "file"])
 
-            # 2. Ask the model what KIND of question each field is. It never
-            #    sees your data here and never answers anything.
-            categories = classify.classify_fields(
-                [f for f in fields if f.get("type") != "file"])
+        # 3. Apply the policy. Sensitive fields never reach the mapper.
+        plan: dict[str, dict] = {}
+        flags: list[dict] = []
+        for_model: list[dict] = []
 
-            # 3. Apply the policy. Sensitive fields never reach the mapper.
-            plan: dict[str, dict] = {}
-            flags: list[dict] = []
-            for_model: list[dict] = []
+        for field in fields:
+            if field.get("type") == "file":
+                continue
+            if field.get("submits"):
+                # Opening this dropdown means clicking a button that can
+                # submit the form, so it's never touched.
+                flags.append({"ref": field["ref"], "label": field.get("label"),
+                              "options": field.get("options"), "action": "human",
+                              "value": None, "source": "human",
+                              "category": categories.get(field["ref"], "unknown"),
+                              "reason": "This dropdown is a button that could submit "
+                                        "the form, so I don't click it. Answer it yourself."})
+                continue
+            verdict = sensitive.decide(
+                field, categories.get(field["ref"], "unknown"), prof)
+            if verdict["action"] == "human":
+                flags.append({**verdict, "ref": field["ref"]})
+            elif verdict["action"] == "fill":
+                plan[field["ref"]] = verdict
+            else:
+                field["_draft"] = verdict["action"] == "draft"
+                for_model.append(field)
 
-            for field in fields:
-                if field.get("type") == "file":
-                    continue
-                verdict = sensitive.decide(
-                    field, categories.get(field["ref"], "unknown"), prof)
-                if verdict["action"] == "human":
-                    flags.append({**verdict, "ref": field["ref"]})
-                elif verdict["action"] == "fill":
-                    plan[field["ref"]] = verdict
-                else:
-                    field["_draft"] = verdict["action"] == "draft"
-                    for_model.append(field)
+        counts = {}
+        for f in fields:
+            c = categories.get(f["ref"], "file")
+            counts[c] = counts.get(c, 0) + 1
+        print(f"{DIM}  {', '.join(f'{v} {k}' for k, v in sorted(counts.items()))}{OFF}")
+        print(f"{DIM}  {len(plan)} from profile · {len(flags)} for you "
+              f"· {len(for_model)} to the model{OFF}")
 
-            counts = {}
-            for f in fields:
-                c = categories.get(f["ref"], "file")
-                counts[c] = counts.get(c, 0) + 1
-            print(f"{DIM}  {', '.join(f'{v} {k}' for k, v in sorted(counts.items()))}{OFF}")
-            print(f"{DIM}  {len(plan)} from profile · {len(flags)} for you "
-                  f"· {len(for_model)} to the model{OFF}")
+        # 4. The mapper answers only what's left.
+        if for_model:
+            mapped = mapper.map_fields(for_model, prof, posting_text[:3000])
+            for ref, decision in mapped.items():
+                if next((f for f in for_model
+                         if f["ref"] == ref and f.get("_draft")), None):
+                    decision["needs_review"] = True
+                    decision["draft"] = True
+                    # The mapper prompt tells the model to flag every
+                    # draft, so its own flag on one is the draft's flag.
+                    # Flags raised in code (too long, approximate option,
+                    # low confidence) keep their own names.
+                    decision["review_reasons"] = ["draft"] + [
+                        r for r in decision.get("review_reasons", []) if r != "model"]
+                plan[ref] = decision
 
-            # 4. The mapper answers only what's left.
-            if for_model:
-                mapped = mapper.map_fields(for_model, prof, posting_text[:3000])
-                for ref, decision in mapped.items():
-                    if next((f for f in for_model
-                             if f["ref"] == ref and f.get("_draft")), None):
-                        decision["needs_review"] = True
-                        decision["draft"] = True
-                        # The mapper prompt tells the model to flag every
-                        # draft, so its own flag on one is the draft's flag.
-                        # Flags raised in code (too long, approximate option,
-                        # low confidence) keep their own names.
-                        decision["review_reasons"] = ["draft"] + [
-                            r for r in decision.get("review_reasons", []) if r != "model"]
-                    plan[ref] = decision
+        # The checkboxes as they stand just before the agent fills this
+        # step's answers, so the gate can tell a box the agent's answer
+        # ticked from one that came ticked. On step 1 this is after the
+        # resume upload, so anything the portal ticks from the resume
+        # reads as already ticked, which stops. A read only.
+        prefill = _prefill_census(page)
 
-            # The checkboxes as they stand just before the agent fills this
-            # step's answers, so the gate can tell a box the agent's answer
-            # ticked from one that came ticked. On step 1 this is after the
-            # resume upload, so anything the portal ticks from the resume
-            # reads as already ticked, which stops. A read only.
-            prefill = _prefill_census(page)
+        # A Next or Continue control means the application goes on past this
+        # page. It's only looked for, never clicked: the gate stops on it,
+        # and you carry on yourself.
+        more_pages = adapters.has_next_step(page, key)
+        if more_pages:
+            events.append({"kind": "multi_step", "detail": "a Next or Continue control"})
 
-            if args.dry_run:
-                steps.append(shadow.step_entry(fields, categories, plan, flags, None,
-                                               prefill_census=prefill))
-                record = _build_record(page, url, key, detected_by, company, steps,
-                                       events, dry_run=True, uploads=uploaded)
-                _print_dry_run(fields, plan, flags)
-                _shadow_gate(record, prof, url, key, detected_by, dry_run=True)
-                return
-
-            plan = _fillable_plan(fields, plan)
-            step_rows = filler.run_plan(page, fields, plan)
-            steps.append(shadow.step_entry(fields, categories, plan, flags, step_rows,
+        if args.dry_run:
+            steps.append(shadow.step_entry(fields, categories, plan, flags, None,
                                            prefill_census=prefill))
-            all_rows += step_rows
-            all_flags += flags
-            _print_summary(all_rows[-len(plan):], flags)
+            record = _build_record(page, url, key, detected_by, company, steps,
+                                   events, dry_run=True, uploads=uploaded)
+            _print_dry_run(fields, plan, flags)
+            _shadow_gate(record, prof, url, key, detected_by, dry_run=True)
+            return
 
-            if step >= max_steps:
-                break
-            if flags:
-                print(f"\n{AMBER}Stopping here — {len(flags)} question(s) need you "
-                      f"before this page is complete.{OFF}")
-                break
-            if not adapters.next_step(page, key):
-                break
-            events.append({"kind": "advanced", "detail": f"to step {step + 1}"})
-            print(f"{DIM}  advanced to the next step{OFF}")
+        plan = _fillable_plan(fields, plan)
+        rows = filler.run_plan(page, fields, plan)
+        steps.append(shadow.step_entry(fields, categories, plan, flags, rows,
+                                       prefill_census=prefill))
+        _print_summary(rows, flags)
+        if more_pages:
+            print(f"\n{AMBER}This application continues on another page.{OFF} I filled "
+                  f"this one only, and I never click Next or Continue: carry on in the "
+                  f"browser yourself.")
 
-        rows, flags = all_rows, all_flags
         # Read before the review sheet opens and you start editing: this is
         # the form as the agent left it.
         record = _build_record(page, url, key, detected_by, company, steps, events,
@@ -424,8 +421,8 @@ def cmd_fill(args) -> None:
 
         print(f"\n{BOLD}Form filled. Stopping here — I don't submit.{OFF}")
         print(f"Review sheet: {sheet}")
-        if all_flags:
-            print(f"{AMBER}{len(all_flags)} question(s) are waiting for you — see "
+        if flags:
+            print(f"{AMBER}{len(flags)} question(s) are waiting for you — see "
                   f"the top of the review sheet.{OFF}")
         run_id, gate_result = _shadow_gate(record, prof, url, key, detected_by,
                                            dry_run=False)
@@ -551,9 +548,10 @@ def _fillable_plan(fields: list[dict], plan: dict) -> dict:
     secret box to you; this makes sure no entry for one can reach the
     filler, nor one whose ref isn't from the latest scan. filler.py resolves
     refs without checking their generation, so this is where an old
-    generation's ref is treated as missing, never filled.
+    generation's ref is treated as missing, never filled. Nor can a dropdown
+    that is a submit-capable button (opening it would click it).
     """
-    secret_refs = {f["ref"] for f in fields if extract.is_secret(f)}
+    secret_refs = {f["ref"] for f in fields if extract.is_secret(f) or f.get("submits")}
     return {ref: d for ref, d in plan.items()
             if ref not in secret_refs and extract.is_current(ref)}
 
@@ -579,27 +577,22 @@ def _build_record(page, url, portal, detected_by, company, steps, events, *,
 
 def _get_past_login_wall(page) -> bool:
     """
-    If the page is a login wall, sign in with the browser's saved login, or
-    pause for you. Returns whether there was a wall at all.
+    If the page is a login wall, pause while you sign in. Returns whether
+    there was a wall at all. The agent never clicks Sign in, Create account
+    or an SSO button, and never types, reads or stores a password: Chrome's
+    own password manager may fill the boxes, and you press the button.
 
-    Run at the start, after adapters.prepare(), and before each wizard step:
+    Run at the start, after adapters.prepare(), and just before the scan:
     Workday only shows its sign-in page after prepare() clicks Apply, so a
     check made once, up front, never saw it.
     """
     if not browser_mod.detect_login_wall(page):
         return False
-    # Chrome's own password manager may have filled the form; if so we
-    # press sign-in. We never type, read or store the password.
-    signed_in, detail = browser_mod.sign_in_with_saved_login(page)
-    if signed_in:
-        print(f"\n{GREEN}Signed in with the login saved in this browser "
-              f"profile{OFF} {DIM}({detail}){OFF}")
-        return True
-    print(f"\n{AMBER}This portal wants a login.{OFF} {DIM}({detail}){OFF}")
-    print("Sign in, or create the account, yourself in the browser window.")
-    print("Let Chrome save the password when it offers, and later runs sign")
-    print(f"in by themselves. The session is saved to {DIM}"
-          f"{config.CHROME_PROFILE_DIR}{OFF}.")
+    print(f"\n{AMBER}This portal wants a login.{OFF}")
+    print("Sign in yourself in the browser window. Chrome may fill a login it")
+    print("saved; you press Sign in. Create the account yourself if you need one,")
+    print(f"and let Chrome save the password when it offers. The session is saved")
+    print(f"to {DIM}{config.CHROME_PROFILE_DIR}{OFF}.")
     print("Press Enter when you're in.")
     input()
     browser_mod.settle(page)
@@ -859,8 +852,6 @@ def main() -> None:
     p_fill.add_argument("--cover-letter", action="store_true", help="also draft one")
     p_fill.add_argument("--dry-run", action="store_true", help="plan only, touch nothing")
     p_fill.add_argument("--force", action="store_true", help="ignore warnings")
-    p_fill.add_argument("--max-steps", type=int, default=6,
-                        help="how many wizard pages to walk (default 6)")
     p_fill.set_defaults(fn=cmd_fill)
 
     sub.add_parser("learn", help="suggest profile fixes from your logged corrections "

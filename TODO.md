@@ -426,6 +426,13 @@ Parked for after the MVP. Each one says what's known and what it needs.
    on a real portal that gets past the wall and resumes filling on the
    post-login page. On Workday that's blocked by the step below.
 
+   Superseded, 15 Oct 2026: `sign_in_with_saved_login` is gone. The design
+   rules now forbid clicking Sign in, Next or Continue, so at a login wall
+   the agent pauses (Chrome may still autofill) and you press Sign in, and
+   `fill` fills only the page it's on, logging a `multi_step` event when a
+   Next / Continue control is there. A multi-page wizard now needs follow
+   mode (you move, it fills each page).
+
    Findings from a live Workday attempt, Oct 2026. These are why it's
    deferred:
    - **"Sign in with Google" / SSO isn't supported.** Google blocks sign-in
