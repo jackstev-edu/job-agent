@@ -375,13 +375,6 @@ def cmd_fill(args) -> None:
 
             plan = _fillable_plan(fields, plan)
             step_rows = filler.run_plan(page, fields, plan)
-            # run_plan reports one row per plan entry it found a field for, in
-            # plan order; what it filled from your name or email is the only
-            # thing readable later on a credential step.
-            by_ref = {f["ref"] for f in fields}
-            ran = [ref for ref in plan if ref in by_ref]
-            filled = [ref for ref, row in zip(ran, step_rows) if row.get("filled")]
-            extract.mark_identity(page, fields, plan, filled, prof)
             steps.append(shadow.step_entry(fields, categories, plan, flags, step_rows,
                                            prefill_census=prefill))
             all_rows += step_rows

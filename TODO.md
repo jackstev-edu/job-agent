@@ -331,18 +331,25 @@
       the No exemption when `dry_run` is set (or note it in the
       `_is_pair_mirror` docstring and TODO item 21).
     - Known limit of the password fix, narrowed by default-deny reads: a box
-      is read only with a name or an explicit label, never on a page this run
-      has seen a password box on (except what the agent filled from your
-      name or email), and never once seen as a password. What's left: a
-      named or labelled box that says nothing about a password, already
-      shown as text before the agent's first scan, on a page where no
-      password box or password hint has appeared. Nothing on the page marks
-      it as one, so it reads as an ordinary box.
-    - Default-deny reads apply rule 4 (credential steps) only inside a run,
-      i.e. with a ReadGuard; `fill` always passes one. A bare
-      `extract_fields(page)` (tests) keeps rules 1-3 only. Ticked and pressed
-      state (checkbox, radio, button pairs) is exempt from the
-      stable-identity rule: it's only ever true or false.
+      is read only with a name or an explicit label, never on a page where a
+      password box or hint has been seen this run or is present at read
+      time, and never once seen as a password. What's left: a named or
+      labelled box that says nothing about a password, already shown as text
+      before the agent's first scan, on a page where no password box or
+      password hint ever appears. Nothing marks it as one, so it reads as an
+      ordinary box.
+    - Default-deny reads: ticked and pressed state (checkbox, radio, button
+      pairs) is exempt from the stable-identity rule, since it's only ever
+      true or false. Every other rule applies to it.
+    - Accepted (Jack, R4): if you paste a password into an ordinary, readable
+      box by mistake, it's read like any value there, and for an ordinary
+      category the corrections log keeps it (~/.job-agent/corrections.jsonl,
+      local only). The rules can't tell a pasted password from an answer.
+    - Residual in page_text (what the model is shown of the page): it leaves
+      out forms, form controls, editable regions, dropdown / listbox
+      widgets and react-select's chosen-value display. A widget library
+      that shows a chosen value as plain text outside all of those, with
+      none of those roles or class names, would still show through.
     - Decided (Jack): in compute_edits a type=password box is skipped, while
       a box that's secret only by marker, hint, pattern or sticky key comes
       out "unreadable". Why: a pattern match may be a mislabelled ordinary

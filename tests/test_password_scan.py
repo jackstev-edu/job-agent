@@ -56,7 +56,13 @@ WORDS = [("name", "kennwort"), ("name", "passwort"), ("id", "contrasena"),
          ("label", "סיסמה"), ("label", "كلمة المرور"), ("label", "密碼"), ("name", "passwd"),
          ("label", "Pass word"),
          # Written in other Unicode forms, matched after NFKC normalisation:
-         ("label", "Contrasen\u0303a"), ("label", "Lo\u0308senord"), ("label", "ｐａｓｓｗｏｒｄ")]
+         ("label", "Contrasen\u0303a"), ("label", "Lo\u0308senord"), ("label", "ｐａｓｓｗｏｒｄ"),
+         ("label", "Passphrase"), ("label", "PIN"), ("name", "user_pin"), ("label", "Secret answer"),
+         ("label", "Security answer"), ("label", "Token"), ("name", "api_token")]
+
+# Ordinary questions with those words inside other words, or a clearance level.
+NOT_SECRET = ["Shipping address", "Your opinion", "Executive secretary to the CEO",
+              "Tokens of appreciation", "Spinning class", "Do you hold an active Secret clearance?"]
 
 
 def _languages_form() -> str:
@@ -83,6 +89,17 @@ def _spy(page) -> list:
         return out
     page.evaluate = spy
     return seen
+
+
+def _direct(page, fields, refs) -> dict:
+    """
+    _SNAPSHOT_JS asked directly for these refs, bypassing readable_refs, with
+    the tag, type and name the scan saw for each. Every ref must have them,
+    or the page's refusal would prove nothing.
+    """
+    sigs = {r: s for f in fields for r, s in (f.get("sigs") or {}).items()}
+    assert all(r in sigs for r in refs), f"no scan signature for some of {refs}"
+    return page.evaluate(extract._SNAPSHOT_JS, [[r, *sigs[r]] for r in refs])
 
 
 def _write(name: str, html: str) -> Path:
@@ -113,7 +130,7 @@ def test_neutral_box_toggled_stripped_and_rerendered():
         snap = extract.snapshot(page, toggled)
         check(box(toggled)["ref"] not in snap and box(toggled)["ref"] not in
               extract.readable_refs(toggled), "  ...readable_refs and the snapshot leave it out")
-        direct = page.evaluate(extract._SNAPSHOT_JS, [box(toggled)["ref"]])
+        direct = _direct(page, toggled, [box(toggled)["ref"]])
         check(box(toggled)["ref"] not in direct,
               "  ...and the snapshot refuses it even when asked for its ref directly")
 
@@ -151,7 +168,7 @@ def test_text_boxes_named_like_a_password_in_many_languages():
             check(f is not None and f.get("secret") is True,
                   f"{where} {ascii(word)}: marked secret")      # ascii(): Windows consoles
         secret_refs = [f["ref"] for f in fields if f.get("secret")]
-        direct = page.evaluate(extract._SNAPSHOT_JS, secret_refs)
+        direct = _direct(page, fields, secret_refs)
         check(not set(direct) & set(secret_refs),
               "the snapshot refuses every one of them, asked directly")
         city = next(f for f in fields if f["label"] == "City")
@@ -206,7 +223,7 @@ def test_a_hidden_stale_box_never_shares_a_ref():
         # A collision forced by the page: the hidden box given the new field's ref.
         real("r => document.getElementById('input-7').setAttribute('data-ja-ref', r)", city["ref"])
         check(city["ref"] not in extract.snapshot(page, second)
-              and city["ref"] not in page.evaluate(extract._SNAPSHOT_JS, [city["ref"]]),
+              and city["ref"] not in _direct(page, second, [city["ref"]]),
               "a ref carried by two elements is treated as missing: nothing read")
     check(SENTINEL not in json.dumps(seen, default=str),
           "the sentinel is nowhere in anything page.evaluate returned")
@@ -239,9 +256,10 @@ def test_old_generation_refs_resolve_to_nothing():
               f"the filler, given the old ref, finds nothing and changes nothing ({detail[:40]})")
         # Even if the page puts an old ref back on an element, it isn't resolved.
         real("""r => { const e = document.createElement('input'); e.value = 'planted';
-                     e.setAttribute('data-ja-ref', r); document.forms[0].appendChild(e); }""",
+                     e.name = 'city'; e.setAttribute('data-ja-ref', r);
+                     document.forms[0].appendChild(e); }""",
              old_city["ref"])
-        check(page.evaluate(extract._SNAPSHOT_JS, [old_city["ref"]]) == {},
+        check(_direct(page, first, [old_city["ref"]]) == {},
               "an old-generation ref put back by the page is still treated as missing")
         check(extract.snapshot(page, second) == {new_city["ref"]: "Springfield",
                                                  next(f["ref"] for f in second
@@ -284,7 +302,7 @@ def test_a_rerender_that_changes_one_key_is_still_secret():
         check(real("() => document.getElementById('input-9').hasAttribute('data-ja-secret')"),
               "  ...and the element is marked again, so in-page readers refuse it too")
         check(f["ref"] not in extract.snapshot(page, [f])
-              and f["ref"] not in page.evaluate(extract._SNAPSHOT_JS, [f["ref"]]),
+              and f["ref"] not in _direct(page, [f], [f["ref"]]),
               "  ...and nothing reads it")
     check(SENTINEL not in json.dumps(seen, default=str),
           "the sentinel is nowhere in anything page.evaluate returned")
@@ -339,7 +357,7 @@ def test_anonymous_id_only_and_placeholder_only_boxes_are_never_read():
         check(not set(extract.readable_refs(again)) & set(refs),
               "readable_refs leaves out all three")
         check(not set(extract.snapshot(page, again)) & set(refs)
-              and not set(page.evaluate(extract._SNAPSHOT_JS, refs)) & set(refs),
+              and not set(_direct(page, again, refs)) & set(refs),
               "the snapshot reads none of them, even asked for their refs directly")
         email = next(f for f in again if f.get("dom_name") == "email")
         check(email.get("credential_step") and email["ref"] not in extract.snapshot(page, again),
@@ -360,34 +378,164 @@ CRED = f"""<!doctype html><html><body><form>
 </script></body></html>"""
 
 
-def test_a_credential_step_reads_only_what_the_agent_filled_from_your_identity():
-    from agent.profile import Profile
+def test_a_credential_step_reads_nothing():
     check = Checks()
-    prof = Profile({"personal": {"email": "t@x.invalid", "first_name": "Test"}}, Path("p.yaml"))
     with mock_page(_write("pw_cred.html", CRED)) as page:
         seen = _spy(page)
-        guard = extract.ReadGuard()
-        fields = extract.extract_fields(page, guard)
-        by = {f["label"]: f for f in fields}
-        check(all(f.get("credential_step") for f in fields) and guard.credential_pages,
-              "a page with a password box is remembered as a credential step")
-        nick, email = by["Nickname"], by["Email"]
-        check(nick.get("stable_identity") and not nick.get("secret"),
-              "Nickname is named and labelled, and not secret by any pattern")
-        check(nick["ref"] not in extract.readable_refs(fields)
-              and nick["ref"] not in page.evaluate(extract._SNAPSHOT_JS, [nick["ref"]]),
-              "on a credential step, Nickname is never read, by Python or asked directly in the page")
-        page.fill("#em", "t@x.invalid")                       # as the agent would
-        plan = {email["ref"]: {"value": "t@x.invalid"}, nick["ref"]: {"value": "Test"}}
-        marked = extract.mark_identity(page, fields, plan, [email["ref"]], prof)
-        check(marked == [email["ref"]], "the email box the agent filled is marked as yours")
-        check(extract.snapshot(page, fields) == {email["ref"]: "t@x.invalid"},
-              "the email box the agent filled reads; nothing else on the step does")
-        page.evaluate("r => document.getElementById('nn').setAttribute('data-ja-identity', '1')")
-        check(nick["ref"] not in extract.snapshot(page, fields),
-              "the page marking Nickname as 'identity' doesn't make it readable (Python says no)")
+        for guard, how in ((extract.ReadGuard(), "with the run's guard"), (None, "a lone scan")):
+            fields = extract.extract_fields(page, guard)
+            by = {f["label"]: f for f in fields}
+            check(all(f.get("credential_step") for f in fields),
+                  f"{how}: a page with a password box is a credential step")
+            nick, email = by["Nickname"], by["Email"]
+            check(nick.get("stable_identity") and not nick.get("secret"),
+                  f"{how}: Nickname is named and labelled, and not secret by any pattern")
+            page.fill("#em", "t@x.invalid")                   # as the agent would
+            refs = [f["ref"] for f in fields if f.get("sigs")]
+            check(extract.readable_refs(fields) == [] and extract.snapshot(page, fields) == {},
+                  f"{how}: nothing is read, not Nickname, not even the email the agent filled")
+            check(_direct(page, fields, refs) == {},
+                  f"{how}: asked directly for every ref, the page returns nothing while a "
+                  f"password box is there")
     check(SENTINEL not in json.dumps(seen, default=str),
           "the sentinel is nowhere in anything page.evaluate returned")
+    check.done()
+
+
+LATE = """<!doctype html><html><body><form>
+  <label for="ci">City</label><input id="ci" name="city" value="Springfield">
+</form>
+<script>
+  window.addPassword = () => document.forms[0].insertAdjacentHTML('beforeend',
+    '<input type="password">');
+  window.addHint = () => document.forms[0].insertAdjacentHTML('beforeend',
+    '<input type="text" autocomplete="current-password">');
+  window.removeAdded = () => [...document.forms[0].querySelectorAll('input:not(#ci)')]
+    .forEach(e => e.remove());
+</script></body></html>"""
+
+
+def test_a_password_box_appearing_after_the_scan_stops_every_read():
+    check = Checks()
+    with mock_page(_write("pw_late.html", LATE)) as page:
+        real = page.evaluate
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        city = fields[0]
+        check(extract.snapshot(page, fields) == {city["ref"]: "Springfield"},
+              "no password box: the named, labelled City box reads")
+        for add, what in (("addPassword", "a password box"), ("addHint", "a password-hinted box")):
+            real(f"window.{add}()")
+            check(city["ref"] in extract.readable_refs(fields)
+                  and extract.snapshot(page, fields) == {},
+                  f"{what} appears after the scan: Python still allows City, the page reads nothing")
+            real("window.removeAdded()")
+        check(extract._SNAPSHOT_JS in outcome._HOOK_JS,
+              "the submit hook runs the same read, so it refuses the same way")
+    check.done()
+
+
+SIG = """<!doctype html><html><body><form>
+  <label for="ci">City</label><input id="ci" name="city" value="Springfield">
+</form></body></html>"""
+
+
+def test_an_element_no_longer_matching_its_scan_is_not_read():
+    check = Checks()
+    changes = [
+        ("document.getElementById('ci').setAttribute('name', 'town')", "its name changed"),
+        ("document.getElementById('ci').type = 'email'", "its type changed"),
+        ("""(() => { const old = document.getElementById('ci'), t = document.createElement('textarea');
+             t.name = 'city'; t.id = 'ci'; t.value = 'Springfield';
+             t.setAttribute('data-ja-ref', old.getAttribute('data-ja-ref')); old.replaceWith(t); })()""",
+         "it was swapped for a textarea carrying the same ref and name"),
+    ]
+    for js, what in changes:
+        with mock_page(_write("pw_sig.html", SIG)) as page:
+            fields = extract.extract_fields(page, extract.ReadGuard())
+            ref = fields[0]["ref"]
+            check(extract.snapshot(page, fields) == {ref: "Springfield"}, f"before: City reads ({what})")
+            page.evaluate(f"() => {{ {js}; }}")
+            check(ref not in extract.snapshot(page, fields) and _direct(page, fields, [ref]) == {},
+                  f"{what}: the element isn't what the scan saw, so it isn't read")
+    check.done()
+
+
+RADIO_CRED = """<!doctype html><html><body><form>
+  <fieldset><legend>Are you willing to relocate?</legend>
+    <label><input type="radio" name="relocate" value="y"> Yes</label>
+    <label><input type="radio" name="relocate" value="n"> No</label></fieldset>
+  <label for="pw">Password</label><input id="pw" name="password" type="password">
+</form></body></html>"""
+
+
+def test_a_radio_on_a_credential_step_is_unreadable_and_proves_nothing():
+    from agent import score
+    check = Checks()
+    with mock_page(_write("pw_radio.html", RADIO_CRED)) as page:
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        radio = next(f for f in fields if f["type"] == "radio")
+        final = extract.snapshot(page, fields)
+    check(radio["ref"] not in final, "the radio group isn't in the read at all, not even as 'none chosen'")
+    rec = {"fields": fields, "plan": {}}
+    edits = outcome.compute_edits(rec, {"consent_actions": {}}, final)
+    kinds = {e["label"]: e["kind"] for e in edits}
+    check(kinds.get("Are you willing to relocate?") == "unreadable",
+          f"compute_edits lists it as unreadable ({kinds})")
+    row = {"verdict": "would_submit", "human_submitted": "y", "capture": "exact",
+           "outcome_at": "2026-10-15", "edits_json": json.dumps(edits)}
+    check(score.score_run(row) == "unknown",
+          "so score.py can't claim zero edits: a would_submit with that read is unknown, not a match")
+    unit = {"ref": "r0", "type": "radio", "option_refs": ["r0", "r1"], "options": ["Yes", "No"]}
+    check(extract.snapshot_from_raw([unit], {}) == {}
+          and extract.snapshot_from_raw([unit], {"r0": False, "r1": False}) == {"r0": None}
+          and extract.snapshot_from_raw([unit], {"r1": True}) == {"r0": "No"},
+          "a group is recorded only when one of its options was read")
+    check.done()
+
+
+ID_ONLY = f"""<!doctype html><html><body><form>
+  <input id="x7" value="{SENTINEL}">
+  <input placeholder="Your city" value="{SENTINEL}">
+  <label for="ok">City</label><input id="ok" name="city" value="Springfield">
+</form></body></html>"""
+
+
+def test_an_id_only_or_placeholder_only_box_is_never_read_without_a_password_on_the_page():
+    check = Checks()
+    with mock_page(_write("pw_idonly.html", ID_ONLY)) as page:
+        seen = _spy(page)
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        check(not any(f.get("credential_step") for f in fields),
+              "no password box on the page: not a credential step (so rule 3 is what's tested)")
+        idonly = next(f for f in fields if f.get("dom_id") == "x7")
+        ph = next(f for f in fields if f.get("placeholder") == "Your city")
+        city = next(f for f in fields if f.get("dom_name") == "city")
+        for f, what in ((idonly, "an id-only box"), (ph, "a placeholder-only box")):
+            check(not f.get("secret") and f.get("stable_identity") is False,
+                  f"{what}: not secret, but no stable identity")
+            check(f["ref"] not in extract.readable_refs(fields)
+                  and _direct(page, fields, [f["ref"]]) == {},
+                  f"{what}: left out of readable_refs, and refused when asked directly")
+        check(extract.snapshot(page, fields) == {city["ref"]: "Springfield"},
+              "the named, labelled box beside them reads")
+    check(SENTINEL not in json.dumps(seen, default=str),
+          "neither box's value is anywhere in what page.evaluate returned")
+    check.done()
+
+
+def test_ordinary_words_that_contain_secret_ones_stay_readable():
+    check = Checks()
+    html = ("<!doctype html><html><body><form>"
+            + "".join(f'<label for="n{i}">{w}</label><input id="n{i}" name="n{i}" value="v{i}">'
+                      for i, w in enumerate(NOT_SECRET))
+            + "</form></body></html>")
+    with mock_page(_write("pw_notsecret.html", html)) as page:
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        snap = extract.snapshot(page, fields)
+        for i, w in enumerate(NOT_SECRET):
+            f = next(f for f in fields if f.get("dom_name") == f"n{i}")
+            check(not f.get("secret") and snap.get(f["ref"]) == f"v{i}",
+                  f"{ascii(w)}: not secret, and read")
     check.done()
 
 
@@ -432,6 +580,33 @@ def test_an_ordinary_form_still_reads_normally():
         check(got == {"ci": "Springfield", "zip": "12345", "Country": "Exampleland",
                       "Text me updates": True},
               "a <label>, a name, an aria-label and a ticked box all read as before")
+    check.done()
+
+
+PAGE_TEXT = f"""<!doctype html><html><body>
+  <h1>Data Engineer</h1><p>We build pipelines for a living.</p>
+  <form><label for="a">About you</label><textarea id="a"></textarea>
+    <label for="c">City</label><input id="c" name="city"></form>
+  <div contenteditable="true" id="ce"></div>
+  <div class="select__control"><div class="select__single-value">{SENTINEL}-chosen</div></div>
+  <div role="combobox" id="cb">{SENTINEL}-combo</div>
+  <p style="display:none">hidden text</p>
+</body></html>"""
+
+
+def test_page_text_for_the_model_holds_no_field_value():
+    check = Checks()
+    with mock_page(_write("pw_page_text.html", PAGE_TEXT)) as page:
+        page.fill("#a", f"{SENTINEL}-typed")
+        page.fill("#c", f"{SENTINEL}-city")
+        page.evaluate(f"() => {{ document.getElementById('ce').textContent = '{SENTINEL}-edit'; }}")
+        text = extract.page_text(page, 6000)
+    print(f"  page_text: {text!r}")
+    check("Data Engineer" in text and "We build pipelines for a living." in text,
+          "the page's own text is there")
+    check(SENTINEL not in text, "no typed value, editable text, chosen option or widget text is")
+    check("hidden text" not in text and "City" not in text,
+          "nor hidden text, nor anything inside the form")
     check.done()
 
 
@@ -502,8 +677,9 @@ def test_fill_never_stores_or_returns_the_password():
     check(error is None, f"the run finished ({error})")
     check(any(isinstance(x, (list, dict)) and x for x in seen),
           "the spies saw the page's reads (so the next checks mean something)")
-    check(any(isinstance(p, dict) and p for p in payloads),
-          "the submit hook fired and its payload was captured (so the next check means something)")
+    check(payloads and all(p == {} for p in payloads),
+          "the submit hook fired, and handed back nothing on this credential step "
+          "(so the next check means something)")
     check(SENTINEL not in json.dumps(seen, default=str), "not in anything evaluate or the hook returned")
     check(SENTINEL not in text, "not printed")
     rec = records[0] if records else {}

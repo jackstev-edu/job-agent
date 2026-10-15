@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import string
 import time
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -59,11 +60,11 @@ _TEXT_JS = "() => (document.body ? document.body.innerText : '').slice(0, 20000)
 # from the binding (the sync API deadlocks), and moments later the form is gone.
 _HOOK_JS = ("""
 (args) => {
-  const [name, refs] = args;
+  const [name, items] = args;
   const snap = """ + extract._SNAPSHOT_JS + """;
   const fire = () => {
     let data = null;
-    try { data = snap(refs); } catch (e) {}
+    try { data = snap(items); } catch (e) {}
     try { window[name](data); } catch (e) {}
   };
   document.addEventListener('submit', fire, true);
@@ -179,9 +180,12 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
 
     hooked = False
     try:
-        name = f"__ja_{secrets.token_hex(8)}"
+        # A random name with no fixed prefix, so page script can't pick it
+        # out of window by name. It still accepts more than one call: a
+        # resubmit after a validation error is read too.
+        name = secrets.choice(string.ascii_letters) + secrets.token_hex(12)
         page.expose_binding(name, on_submit)
-        page.evaluate(_HOOK_JS, [name, refs])
+        page.evaluate(_HOOK_JS, [name, extract.read_items(fields)])
         hooked = True
     except Exception:
         pass

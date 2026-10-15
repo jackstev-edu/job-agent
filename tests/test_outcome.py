@@ -185,7 +185,10 @@ def test_success_signatures():
     with mock_page(HERE / "gate_form.html", _routes(pages)) as page:
         page.goto(APP_URL)
         rec, _ = _record(page)
-        refs = extract.readable_refs(rec["fields"])
+        # Whether the form is still there reads no value, so it uses every ref
+        # (as the watcher does): this page has a password box, so nothing on
+        # it is readable.
+        refs = [r for f in rec["fields"] for r in (f.get("option_refs") or [f["ref"]])]
         d = lambda **k: outcome.detect_success(page, refs=refs, start_url=APP_URL,
                                                **{"portal": "greenhouse", "portal_method": "host", **k})
         before = d()
@@ -214,7 +217,9 @@ def test_watch_submit_with_a_password_present():
         # The submit-time read arrives through the hook's binding, not
         # evaluate: record what it's handed too.
         real_accept = outcome._accept
-        outcome._accept = lambda raw, refs: (seen.append(raw), real_accept(raw, refs))[1]
+        hooked: list = []
+        outcome._accept = lambda raw, refs: (seen.append(raw), hooked.append(raw),
+                                             real_accept(raw, refs))[2]
         steps = iter([
             lambda: page.fill("#fn", "Tess"),                            # you edit a field
             lambda: page.fill("#pw", PASSWORD),                          # you type a password
@@ -236,27 +241,31 @@ def test_watch_submit_with_a_password_present():
           f"detected {watched['detection']['result']}, final {watched['final']}")
     check(watched["ended"] == "success" and watched["detection"]["result"] == "match",
           "the confirmation page ended the watch")
-    check(watched["capture"] == "exact", "the form was read at the moment of submitting")
-    check(watched["final"][by("First Name")["ref"]] == "Tess", "  ...with your edit in it")
-    pw_refs = {by("Create a password")["ref"], by("Confirm")["ref"]}
-    check(not pw_refs & set(watched["final"]), "neither password box was read")
-    check(any(isinstance(x, dict) and by("First Name")["ref"] in x for x in seen[-50:]),
-          "the hook's payload was recorded (so the next check means something)")
+    # A page with a password box is a credential step: nothing on it is read,
+    # your edit included, so no zero-edit claim can be made.
+    check(not watched["final"], "nothing on the page was read, next to a password box")
+    check(hooked and all(p == {} for p in hooked),
+          "the hook fired at submit, and handed back nothing (so the next check means something)")
+    check(watched["capture"] != "exact", "  ...so there's no exact submit-time read")
     check(PASSWORD not in json.dumps(seen, default=str), "the password never reached Python, "
           "even shown as text, by evaluate or by the hook")
     edits = outcome.compute_edits(rec, {"consent_actions": {}}, watched["final"])
     kinds = {e["label"]: e["kind"] for e in edits}
-    check(kinds == {"First Name *": "changed", "Confirm": "unreadable"}
+    check(kinds == {"First Name *": "unreadable", "Email": "unreadable", "Confirm": "unreadable",
+                    "I agree to receive SMS updates": "unreadable"}
           and PASSWORD not in json.dumps(edits),
-          "your edit recorded by label; the password-hinted box unreadable, so zero edits "
-          "can't be claimed")
+          "every field next to the password box is unreadable, so zero edits can't be claimed")
     check.done()
 
 
 FILE_SENTINEL = "FILE-CONTENT-SENTINEL-5531"
-FILE_HTML = APP_HTML.replace(
-    '<label for="pw">',
-    '<label for="cv">Resume</label><input id="cv" type="file">\n  <label for="pw">')
+# The resume form without its password boxes: a page with one is a credential
+# step, and nothing on it would be read.
+FILE_HTML = (APP_HTML
+             .replace('<label for="pw">Create a password</label><input id="pw" type="password">',
+                      '<label for="cv">Resume</label><input id="cv" type="file">')
+             .replace('<label for="np">Confirm</label><input id="np" type="text" '
+                      'autocomplete="new-password">', ''))
 
 
 def _resume_files() -> tuple[Path, Path]:
@@ -286,8 +295,7 @@ def _watch_file_form(you_replace: bool):
         real_accept = outcome._accept
         outcome._accept = lambda raw, refs: (seen.append(raw), real_accept(raw, refs))[1]
         steps = iter(([lambda: page.set_input_files("#cv", str(other))] if you_replace else [])
-                     + [lambda: page.fill("#pw", PASSWORD), lambda: page.click("#show"),
-                        lambda: page.click("#go")])
+                     + [lambda: page.click("#go")])
 
         def you():
             step = next(steps, None)

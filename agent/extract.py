@@ -40,7 +40,12 @@ SECRET_ATTR = "data-ja-secret"
 # Names, ids, labels and placeholders that say "password", in the languages
 # portals commonly use. Page text only ever makes a box secret here: it can
 # stop a read, never allow one.
-SECRET_WORDS = (r"pass[\s_-]*word|passw|passwd|pwd|passcode|kennwort|passwort|"
+SECRET_WORDS = (r"pass[\s_-]*word|passw|passwd|pwd|passcode|pass[\s_-]*phrase|"
+                # Whole words only, so "shipping", "secretary" and "tokens"
+                # don't match; a Secret security clearance isn't a secret.
+                r"(?<![a-z])pin(?![a-z])|(?<![a-z])token(?![a-z])|"
+                r"(?<![a-z])secret(?![a-z])(?![\s_-]*clearance)|security[\s_-]*answer|"
+                r"kennwort|passwort|"
                 r"contrase[ñn]a|senha|mot[\s_-]*de[\s_-]*passe|wachtwoord|l[öo]senord|"
                 r"salasana|has[łl]o|heslo|jelsz[óo]|пароль|密码|密碼|パスワード|비밀번호|"
                 r"סיסמה|كلمة[\s_-]*(?:ال)?مرور")
@@ -75,11 +80,7 @@ _SCAN_JS = r"""
   // box this scan skips can't keep a ref that a new box is about to get. The
   // generation in each new ref means an old one can never equal it anyway.
   document.querySelectorAll(`[${REF}]`).forEach(e => e.removeAttribute(REF));
-  // Marks of what the agent filled from your name or email belong to one
-  // scan too; Python sets them again after it fills.
-  document.querySelectorAll('[data-ja-identity]').forEach(e => e.removeAttribute('data-ja-identity'));
   window.__jaGen = GEN;
-  window.__jaCred = false;            // Python sets it when this is a credential step
   // A label from a real <label> or aria-label, never the nearby-text guess.
   // With a name attribute, it's a stable identity; an id or a placeholder
   // alone isn't one.
@@ -138,7 +139,16 @@ _SCAN_JS = r"""
       .join(' ').trim().slice(0, 300);
   };
 
-  const stamp = el => { const r = GEN + '-f' + (counter++); el.setAttribute(REF, r); return r; };
+  // Each stamped element's tag, type and name, as the scan saw it. A read
+  // refuses an element that no longer matches (a reused or swapped node).
+  const sigs = {};
+  const stamp = el => {
+    const r = GEN + '-f' + (counter++);
+    el.setAttribute(REF, r);
+    sigs[r] = [el.tagName.toLowerCase(), String(el.type || '').toLowerCase(),
+               el.getAttribute('name') || ''];
+    return r;
+  };
 
   // Radio buttons come in groups; we collapse each group into one question.
   const seenGroups = new Set();
@@ -283,7 +293,7 @@ _SCAN_JS = r"""
   // hidden ones included: Python remembers the page as a credential step.
   const hasPassword = !!document.querySelector(
       'input[type=password i], [autocomplete*="password" i]');
-  return {fields, url: location.href, has_password: hasPassword};
+  return {fields, sigs, url: location.href, has_password: hasPassword};
 }
 """
 
@@ -292,22 +302,8 @@ _NOISE = ("search", "cookie", "newsletter", "subscribe", "promo code",
           "discount", "language selector")
 
 
-# Each scan's refs carry a generation ("g3-f2") unique for the whole run,
-# even across navigations, since Python, not the page, counts them. Only the
-# latest generation's refs are ever resolved; an older one is treated as
-# missing.
-#
-# The generation is module-global: one counter and one "current" for the
-# whole process, shared by every page, tab and frame. Scanning a second page
-# or frame makes the first one's refs old, so they then read as missing
-# (safe, never a wrong read). Callers scan one form target at a time and
-# rescan it before reading it again.
 _GENERATIONS = itertools.count(1)
 _current = {"gen": None}
-
-# What the agent itself filled from these profile lines is the only thing
-# readable on a credential step.
-IDENTITY_PATHS = ("personal.email", "personal.first_name", "personal.last_name")
 
 
 class ReadGuard:
@@ -330,12 +326,26 @@ def page_key(url: str) -> str:
 
 
 def current_generation() -> str | None:
-    """The generation of the latest scan, or None before the first one."""
+    """
+    The generation of the latest scan, or None before the first one.
+
+    Each scan's refs carry a generation ("g3-f2") unique for the whole run,
+    even across navigations, since Python, not the page, counts them. Only
+    the latest generation's refs are ever resolved; an older one is treated
+    as missing. The generation is module-global: one counter and one
+    "current" for the whole process, shared by every page, tab and frame.
+    Scanning a second page or frame makes the first one's refs old, so they
+    then read as missing (safe, never a wrong read). Callers scan one form
+    target at a time and rescan it before reading it again.
+    """
     return _current["gen"]
 
 
 def is_current(ref) -> bool:
-    """Is this ref from the latest scan? Anything older resolves to nothing."""
+    """
+    Is this ref from the latest scan, in the module-global generation (see
+    current_generation)? Anything older resolves to nothing.
+    """
     gen = _current["gen"]
     return bool(gen) and isinstance(ref, str) and ref.startswith(gen + "-")
 
@@ -377,26 +387,25 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
     `guard` is the run's ReadGuard. The page can strip its marker and a
     re-render replaces the element, so a field with any key in the guard
     stays secret whatever the page says now, and every field on a page the
-    guard knows as a credential step is marked as being on one. The
-    credential-step rule belongs to a run, so it applies only with a guard;
-    `fill` always passes one. Without one (a lone scan), the other rules
-    still apply, with a fresh set of secret keys.
+    guard knows as a credential step is marked as being on one, so nothing
+    on it is read. Without a guard (a lone scan), a fresh one is used, and
+    it records this page's password boxes all the same.
     """
-    in_run = guard is not None
     guard = ReadGuard() if guard is None else guard
     secret_keys = guard.secret_keys
     gen = f"g{next(_GENERATIONS)}"
     scanned = page.evaluate(_SCAN_JS, [BUTTON_GROUP, gen])
     _current["gen"] = gen
     fields = scanned.get("fields") or []
+    sigs = scanned.get("sigs") or {}
     here = page_key(str(scanned.get("url") or ""))
-    if in_run and scanned.get("has_password"):
+    if scanned.get("has_password"):
         guard.credential_pages.add(here)
     credential = here in guard.credential_pages
     for f in fields:
         f["credential_step"] = credential
-    if credential:
-        page.evaluate("() => { window.__jaCred = true; }")
+        f["sigs"] = {r: list(sigs[r]) for r in (f.get("option_refs") or [f.get("ref")])
+                     if r in sigs}
     sticky = []
     for f in fields:
         keys = secret_keys_of(f)
@@ -417,16 +426,46 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
     ]
 
 
+# The page's own visible text, for the model, with every place a field value
+# can show up as text left out: anything inside a form or a form control, an
+# editable region, a dropdown or listbox widget, or react-select's display of
+# the chosen value. innerText alone already drops what's typed in inputs and
+# textareas, but not an editable region's text or a widget's chosen option.
+_PAGE_TEXT_JS = r"""
+() => {
+  const SKIP = 'form, input, textarea, select, option, button, '
+    + '[contenteditable]:not([contenteditable="false"]), [role=combobox], [role=listbox], '
+    + '[role=option], [role=textbox], [role=searchbox], [role=spinbutton], '
+    + '[class*="singleValue"], [class*="single-value"], [class*="multiValue"], '
+    + '[class*="multi-value"], script, style, noscript, template';
+  const out = [];
+  const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    const el = n.parentElement;
+    if (!el || el.closest(SKIP)) continue;
+    if (!el.getClientRects().length) continue;              // not rendered
+    const s = getComputedStyle(el);
+    if (s.visibility === 'hidden' || s.display === 'none') continue;
+    const t = n.textContent.replace(/\s+/g, ' ').trim();
+    if (t) out.push(t);
+  }
+  return out.join(String.fromCharCode(10));
+}
+"""
+
+
 def page_text(page: "Page", limit: int = 3000) -> str:
     """
-    A trimmed snapshot of what's visible on the page.
+    A trimmed snapshot of the page's own visible text, never a field's value.
 
     This gives the AI enough context to draft a sensible "why this role"
     answer. It is treated strictly as untrusted background — never as a
-    source of facts about you, and never as instructions.
+    source of facts about you, and never as instructions. It is sent to the
+    model, so it leaves out every place a field value can appear as text
+    (see _PAGE_TEXT_JS): no value read from a field reaches the model.
     """
     try:
-        raw = page.evaluate("() => document.body.innerText")
+        raw = page.evaluate(_PAGE_TEXT_JS)
     except Exception:
         return ""
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
@@ -582,21 +621,27 @@ def enrich_comboboxes(page: "Page", fields: list[dict]) -> list[dict]:
 # marked, type=password, hinted or named as a password. Same refusal as
 # filler.py.
 _SNAPSHOT_JS = r"""
-(refs) => {
+(items) => {
 """ + _SECRET_JS + r"""
   const out = {};
-  for (const ref of refs) {
+  // A credential step, judged afresh at every read and never from page
+  // state the page could set: any password box or password hint anywhere in
+  // the document, and nothing at all is read.
+  if (document.querySelector('input[type=password i], [autocomplete*="password" i]')) return out;
+  for (const item of (Array.isArray(items) ? items : [])) {
+    if (!Array.isArray(item) || item.length !== 4) continue;
+    const [ref, tag, type, name] = item.map(x => String(x));
     // Only the latest scan's refs, and only one carried by exactly one
     // element: anything else is treated as missing, never resolved.
-    if (!window.__jaGen || !String(ref).startsWith(window.__jaGen + '-')) continue;
+    if (!window.__jaGen || !ref.startsWith(window.__jaGen + '-')) continue;
     const all = document.querySelectorAll(`[data-ja-ref="${CSS.escape(ref)}"]`);
     if (all.length !== 1) continue;
     const el = all[0];
     const t = (el.type || '').toLowerCase();
+    // The element must still be what the scan saw: same tag, type and name.
+    if (el.tagName.toLowerCase() !== tag || String(el.type || '').toLowerCase() !== type
+        || (el.getAttribute('name') || '') !== name) continue;
     if (isSecret(el, '')) continue;
-    // On a credential step, only what the agent filled from your name or
-    // email (marked by Python after filling) is read.
-    if (window.__jaCred && !el.hasAttribute('data-ja-identity')) continue;
     // A read that can return text needs a stable identity: a name, or a
     // label from a real <label> or aria-label. Ticked / pressed state is
     // only ever true or false, so it can't carry a typed value.
@@ -649,47 +694,32 @@ def readable_refs(fields: list[dict]) -> list[str]:
       3. a read that can return text has a stable identity: a name, or a
          label from a real <label> or aria-label (ticked / pressed state,
          only ever true or false, is exempt);
-      4. on a credential step, only what the agent itself filled from
-         personal.email, first_name or last_name.
-    Anything else is unreadable, which already stops a zero-edit claim.
+      4. it isn't on a credential step: a page (host and path) where this
+         run has seen a password box or password hint. Nothing there is
+         read. The page also checks afresh at read time, and reads nothing
+         while any password box or hint is in the document.
+    The page also refuses an element whose tag, type or name differs from
+    what the scan saw. Anything else is unreadable, which stops a zero-edit
+    claim.
     """
     refs: list[str] = []
     for f in fields:
-        if is_secret(f):
+        if is_secret(f) or f.get("credential_step") is not False:
             continue
         if not _flag_field(f) and f.get("stable_identity") is not True:
-            continue
-        if f.get("credential_step") and not f.get("agent_identity"):
             continue
         refs += [r for r in (f.get("option_refs") or [f["ref"]]) if is_current(r)]
     return refs
 
 
-_MARK_IDENTITY_JS = r"""
-(refs) => refs.forEach(r =>
-  document.querySelectorAll(`[data-ja-ref="${CSS.escape(r)}"]`)
-    .forEach(e => e.setAttribute('data-ja-identity', '1')))
-"""
-
-
-def mark_identity(page: "Page", fields: list[dict], plan: dict, filled_refs, profile) -> list[str]:
+def read_items(fields: list[dict]) -> list[list[str]]:
     """
-    Mark the fields the agent itself filled with exactly your email, first
-    name or last name, the only fields readable on a credential step. A
-    field counts by what was typed, compared exactly with the profile line,
-    never by what the page or the model says it is. Returns their refs.
+    What _SNAPSHOT_JS is given: each readable ref with the tag, type and name
+    the scan saw for it. A ref with no recorded signature isn't read.
     """
-    values = {str(v).strip() for v in (profile.get(p) for p in IDENTITY_PATHS)
-              if v is not None and str(v).strip()}
-    by_ref = {f["ref"]: f for f in fields}
-    refs = [ref for ref in filled_refs
-            if ref in by_ref and not is_secret(by_ref[ref]) and is_current(ref)
-            and str((plan.get(ref) or {}).get("value") or "").strip() in values]
-    for ref in refs:
-        by_ref[ref]["agent_identity"] = True
-    if refs:
-        page.evaluate(_MARK_IDENTITY_JS, refs)
-    return refs
+    sigs = {r: s for f in fields for r, s in (f.get("sigs") or {}).items()}
+    return [[r, *sigs[r]] for r in readable_refs(fields)
+            if isinstance(sigs.get(r), list) and len(sigs[r]) == 3]
 
 
 _MARK_SECRET_JS = r"""
@@ -700,16 +730,24 @@ _MARK_SECRET_JS = r"""
 
 
 def snapshot(page: "Page", fields: list[dict]) -> dict:
-    """What's in each box right now, keyed by ref. Never reads password inputs."""
-    return snapshot_from_raw(fields, page.evaluate(_SNAPSHOT_JS, readable_refs(fields)))
+    """What's in each box right now, keyed by ref, under the read policy."""
+    return snapshot_from_raw(fields, page.evaluate(_SNAPSHOT_JS, read_items(fields)))
 
 
 def snapshot_from_raw(fields: list[dict], raw: dict) -> dict:
-    """Turn the in-page read (one entry per element) into one value per field."""
+    """
+    Turn the in-page read (one entry per element) into one value per field.
+    A radio or button group is recorded only if at least one of its options
+    was actually read; otherwise it's left out, so it counts as unreadable,
+    never as "nothing chosen".
+    """
     out = {}
     for f in fields:
         if f.get("type") == "radio":
-            pairs = zip(f.get("option_refs", []), f.get("options", []))
+            option_refs = f.get("option_refs") or []
+            if not any(r in raw for r in option_refs):
+                continue
+            pairs = zip(option_refs, f.get("options", []))
             out[f["ref"]] = next((o for r, o in pairs if raw.get(r) is True), None)
         elif f["ref"] in raw:
             out[f["ref"]] = raw[f["ref"]]
