@@ -21,8 +21,8 @@ sends them personally. Windows, PowerShell, venv at `.venv`, run as
 - `agent/mapper.py` — answers ordinary fields in batches of 10, under a prompt
   that forces `null` rather than a guess.
 - `agent/filler.py` — types answers into the page.
-- `agent/adapters.py` — per-ATS quirks; clicks a plain Apply; spots a
-  Next / Continue control (never clicks it).
+- `agent/adapters.py` — per-ATS quirks; spots a Next / Continue control.
+  Clicks nothing: you press Apply, Next and Continue yourself.
 - `agent/browser.py` — launches Playwright's bundled Chromium on a persistent
   profile; CAPTCHA and login-wall detection.
 - `agent/learn.py` — report-only suggestions from the corrections log.

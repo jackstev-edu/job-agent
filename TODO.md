@@ -358,7 +358,7 @@
       that shows a chosen value as plain text outside all of those, with
       none of those roles or class names, would still show through.
     - page_text is taken once per `fill`, on the posting, after the first
-      login check and before prepare() clicks Apply. Every model call (the
+      login check and before you're asked to click Apply. Every model call (the
       mapper on every step, the cover letter) gets that same text. Residual:
       a URL that opens on a logged-in page already showing saved answers
       outside any form (or a sign-in that lands on one) still puts them in.
@@ -432,6 +432,8 @@ Parked for after the MVP. Each one says what's known and what it needs.
    `fill` fills only the page it's on, logging a `multi_step` event when a
    Next / Continue control is there. A multi-page wizard now needs follow
    mode (you move, it fills each page).
+   prepare() no longer clicks Apply either (a signed-in "Apply" can be a
+   one-click submit); fill asks you to click it, then press Enter.
 
    Findings from a live Workday attempt, Oct 2026. These are why it's
    deferred:

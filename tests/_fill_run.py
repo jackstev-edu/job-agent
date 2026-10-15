@@ -105,13 +105,23 @@ class EnterAlreadyPressed:
         pass
 
 
+APPLY_PROMPT = "Click Apply if the form isn't open, then press Enter."
+
+
+def is_apply_prompt(printed: str) -> bool:
+    """Is the last thing printed the "Click Apply" prompt?"""
+    return re.sub(r"\x1b\[[0-9;]*m", "", printed).rstrip().endswith(APPLY_PROMPT)
+
+
 def run_fill(form: Path, *, dry_run: bool, answers=("n",), profile_yaml: str = PROFILE,
              classify=classify_by_label, map_fields=map_from_profile, patches=(),
              cover_letter: bool = False):
     """
     Run cmd_fill on `form`. Returns (printed text, records built, error or None).
     `answers` are what you'd type at each terminal prompt, in order; by
-    default just "n" at "Did you submit it?".
+    default just "n" at "Did you submit it?". The "Click Apply" prompt is
+    answered with Enter on its own and takes no answer from the list: the
+    mock forms are already open.
     """
     import apply
     from agent import shadow
@@ -128,9 +138,13 @@ def run_fill(form: Path, *, dry_run: bool, answers=("n",), profile_yaml: str = P
         return rec
 
     args = Namespace(profile=str(profile_path), url=form.resolve().as_uri(), force=True,
-                     dry_run=dry_run, resume=None, cover_letter=cover_letter,
-                     max_steps=6)
+                     dry_run=dry_run, resume=None, cover_letter=cover_letter)
     out, error = io.StringIO(), None
+
+    def reply(*a):
+        if is_apply_prompt(out.getvalue()):
+            return ""
+        return next(replies)
     with ExitStack() as stack:
         for target, name, value in (
                 (apply.config, "check_api_key", lambda: ("ok", "")),
@@ -139,7 +153,7 @@ def run_fill(form: Path, *, dry_run: bool, answers=("n",), profile_yaml: str = P
                 (apply.mapper, "map_fields", map_fields),
                 (apply.report, "open_in_browser", lambda path: None),
                 (apply.shadow, "build_record", keep),
-                (apply, "input", lambda *a: next(replies)),
+                (apply, "input", reply),
                 (apply, "_EnterWatcher", EnterAlreadyPressed),
                 *patches):
             stack.enter_context(mock.patch.object(target, name, value, create=True))

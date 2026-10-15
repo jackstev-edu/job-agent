@@ -92,7 +92,7 @@ def test_fill_stops_before_the_browser_on_401():
     apply.browser_mod.browser = no_browser
     check = Checks()
     args = Namespace(profile=None, url="https://example.invalid/job", force=False,
-                     dry_run=True, resume=None, cover_letter=False, max_steps=1)
+                     dry_run=True, resume=None, cover_letter=False)
     try:
         with stub_api(401):
             try:

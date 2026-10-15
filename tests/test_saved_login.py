@@ -71,7 +71,8 @@ def test_a_real_fill_at_a_login_wall_clicks_nothing():
         page = real_open(ctx, url)
         pages.append(page)
         return page
-    replies = iter(["", "", "", "n"])                   # three login pauses, then "Did you submit it?"
+    # A login pause, "Click Apply", two more login pauses, then "Did you submit it?".
+    replies = iter(["", "", "", "", "n"])
 
     def you(*a):
         page = pages[-1]
@@ -83,7 +84,7 @@ def test_a_real_fill_at_a_login_wall_clicks_nothing():
                                              (apply, "input", you)))
     print(text[-700:])
     check(error is None, f"the run finished ({error})")
-    check(len(seen_at_prompts) == 4 and all(p == ([], 0) for p in seen_at_prompts),
+    check(len(seen_at_prompts) == 5 and all(p == ([], 0) for p in seen_at_prompts),
           f"at every pause, nothing had been clicked and the form wasn't sent ({seen_at_prompts})")
     check("This portal wants a login" in text and "Signed in" not in text,
           "it asked you to sign in and never claimed to have done it")

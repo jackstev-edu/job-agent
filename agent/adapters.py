@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from playwright.sync_api import Page
 
 from . import browser as browser_mod
-from .filler import is_forbidden_button
 
 
 @dataclass
@@ -59,7 +58,7 @@ CATALOG: dict[str, ATS] = {
                 "Those buttons are typeless, so inside a <form> they'd submit it. "
                 "No <form> seen so far; if one appears they're all refused and "
                 "the questions come to you.",
-                "The form is sometimes behind an 'Apply' button."],
+                "The form is sometimes behind an 'Apply' button, which you click."],
     ),
     "workday": ATS(
         "Workday", "hard",
@@ -146,62 +145,47 @@ def detect_with_method(url: str, page = None) -> tuple[str, ATS, str]:
 
 
 def prepare(page: "Page", key: str) -> None:
-    """Do whatever this system needs before the form is readable."""
-    if key in ("ashby", "greenhouse", "smartrecruiters"):
-        _click_if_visible(page, "a#apply_button, button:has-text('Apply'), "
-                                "a:has-text('Apply')")
-    elif key == "workday":
-        _click_if_visible(page, "a[data-automation-id='adventureButton'], "
-                                "button:has-text('Apply Manually')")
+    """
+    Let the page settle once you've opened the form. Clicks nothing: on a
+    portal you're signed in to, "Apply" can be a one-click submit that no
+    check on the button can see, so you press Apply yourself.
+    """
+    if key == "workday":
         browser_mod.settle(page, 2500)
     browser_mod.settle(page, 700)
 
 
-# The only buttons prepare() may press, matched against the whole label.
-# Whole-label on purpose: "Apply with LinkedIn", "Apply with Google" and
-# "Apply with Indeed" are Easy Apply or SSO, and a substring match on
-# "Apply" pressed whichever came first.
-APPLY_BUTTON = re.compile(r"^(apply|apply for this job|apply manually)$", re.I)
-
-
-def _click_if_visible(page: "Page", selector: str) -> None:
-    """
-    Click the first visible element in `selector` whose whole label is a
-    plain Apply (APPLY_BUTTON) and isn't forbidden. Nothing else is pressed.
-    """
-    try:
-        for el in page.locator(selector).all()[:200]:
-            if not el.is_visible():
-                continue
-            label = " ".join((el.inner_text() or "").split())
-            if not APPLY_BUTTON.match(label) or is_forbidden_button(label):
-                continue
-            el.click()
-            browser_mod.settle(page, 1500)
-            return
-    except Exception:
-        pass
-
-
-# What a "next page" control looks like on each system.
+# What a "next page" control looks like on each system, on top of the
+# generic Next / Continue controls every system is checked for.
 _NEXT_STEP = {
     "workday": "button[data-automation-id='bottom-navigation-next-button'], "
-               "button:has-text('Save and Continue'), button:has-text('Continue')",
-    "icims": "input[value='Continue'], button:has-text('Continue')",
-    "taleo": "a:has-text('Save and Continue'), button:has-text('Next')",
+               "button:has-text('Save and Continue'), ",
+    "icims": "input[value='Continue'], ",
+    "taleo": "a:has-text('Save and Continue'), ",
 }
+_NEXT_GENERIC = ", ".join(
+    f"{tag}:has-text('{word}')" for word in ("Next", "Continue")
+    for tag in ("button", "a", "[role=button]")) + ", " + ", ".join(
+    f"input[type={kind}][value*='{word}' i]" for word in ("Next", "Continue")
+    for kind in ("submit", "button"))
+
+# How many matches has_next_step looks through. More than this and it
+# answers yes rather than guess from the first few.
+NEXT_SCAN_LIMIT = 50
 
 
 def has_next_step(page: "Page", key: str) -> bool:
     """
     Is there a visible Next or Continue control, so the application goes on
     past this page? Only looked for, never clicked: you move between pages
-    yourself.
+    yourself. Anything it can't settle (an error, more matches than it
+    looks through) is a yes, so the gate stops.
     """
-    selector = _NEXT_STEP.get(key, "button:has-text('Continue'), button:has-text('Next'), "
-                                   "input[type=submit][value*='Continue' i], "
-                                   "input[type=submit][value*='Next' i]")
+    selector = _NEXT_STEP.get(key, "") + _NEXT_GENERIC
     try:
-        return any(el.is_visible() for el in page.locator(selector).all()[:25])
+        found = page.locator(selector).all()
+        if len(found) > NEXT_SCAN_LIMIT:
+            return True
+        return any(el.is_visible() for el in found)
     except Exception:
-        return False
+        return True

@@ -253,6 +253,10 @@ def cmd_fill(args) -> None:
         # page can show your answers outside any form (a review step, a
         # summary), and no value from the page may reach the model.
         posting_text = extract.page_text(page, 6000)
+        # You open the form: on a portal you're signed in to, "Apply" can be
+        # a one-click submit, so the agent never presses it.
+        print(f"\n{BOLD}Click Apply if the form isn't open, then press Enter.{OFF}")
+        input()
         adapters.prepare(page, key)
         # Again: Workday only shows its sign-in page once Apply is clicked.
         if _get_past_login_wall(page):
@@ -390,6 +394,11 @@ def cmd_fill(args) -> None:
         steps.append(shadow.step_entry(fields, categories, plan, flags, rows,
                                        prefill_census=prefill))
         _print_summary(rows, flags)
+        # Again after filling: a Next or Continue can appear once a page is
+        # answered.
+        if not more_pages and adapters.has_next_step(page, key):
+            more_pages = True
+            events.append({"kind": "multi_step", "detail": "a Next or Continue control"})
         if more_pages:
             print(f"\n{AMBER}This application continues on another page.{OFF} I filled "
                   f"this one only, and I never click Next or Continue: carry on in the "
@@ -582,8 +591,8 @@ def _get_past_login_wall(page) -> bool:
     or an SSO button, and never types, reads or stores a password: Chrome's
     own password manager may fill the boxes, and you press the button.
 
-    Run at the start, after adapters.prepare(), and just before the scan:
-    Workday only shows its sign-in page after prepare() clicks Apply, so a
+    Run at the start, after you've opened the form, and just before the
+    scan: Workday only shows its sign-in page once Apply is clicked, so a
     check made once, up front, never saw it.
     """
     if not browser_mod.detect_login_wall(page):
