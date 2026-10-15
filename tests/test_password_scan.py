@@ -488,8 +488,8 @@ def test_a_radio_on_a_credential_step_is_unreadable_and_proves_nothing():
     unit = {"ref": "r0", "type": "radio", "option_refs": ["r0", "r1"], "options": ["Yes", "No"]}
     check(extract.snapshot_from_raw([unit], {}) == {}
           and extract.snapshot_from_raw([unit], {"r0": False, "r1": False}) == {"r0": None}
-          and extract.snapshot_from_raw([unit], {"r1": True}) == {"r0": "No"},
-          "a group is recorded only when one of its options was read")
+          and extract.snapshot_from_raw([unit], {"r1": True}) == {},
+          "a group is recorded only when every one of its options was read")
     check.done()
 
 

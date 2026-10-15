@@ -338,6 +338,13 @@
       before the agent's first scan, on a page where no password box or
       password hint ever appears. Nothing marks it as one, so it reads as an
       ordinary box.
+    - The password words are also tested on a camelCase-split copy (pinCode,
+      PINCode, apiToken, userPin...), in the page and again in Python
+      (`extract.says_secret`). Residual: an all-caps run glued to lowercase
+      ("PINcode") has no split point, so PIN isn't a whole word there.
+    - A radio or button group is recorded only if every option was read.
+      If some were refused, the capture is "inexact" and the run is
+      unscored (a false submit still counts).
     - Default-deny reads: ticked and pressed state (checkbox, radio, button
       pairs) is exempt from the stable-identity rule, since it's only ever
       true or false. Every other rule applies to it.

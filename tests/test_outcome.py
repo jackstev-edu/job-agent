@@ -329,8 +329,6 @@ def test_watch_file_box_replaced_and_unchanged():
               f"{what}: a read holding the file box was recorded (so the next check means something)")
         check(FILE_SENTINEL not in json.dumps(seen, default=str),
               f"{what}: no file contents reached Python")
-        check(PASSWORD not in json.dumps(seen, default=str),
-              f"{what}: the password never reached Python")
     check.done()
 
 

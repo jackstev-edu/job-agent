@@ -143,7 +143,8 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
     confirmation page appears, the tab closes, or `timeout_s` passes. Keeps
     the last read of the form taken while its fields were still on the page.
     A read made at the moment of submitting is "exact"; one from polling is
-    "polled".
+    "polled". Either is "inexact" when some, but not all, of a radio or
+    button group's options were read.
     """
     fields = record.get("fields") or []
     refs = extract.readable_refs(fields)
@@ -168,7 +169,11 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
         try:
             if not page.evaluate(_PRESENT_JS, present):
                 return
-            keep(extract.snapshot(page, fields), "polled")
+            raw = page.evaluate(extract._SNAPSHOT_JS, extract.read_items(fields))
+            # Some of a group's options refused: that group is left out, and
+            # the read is "inexact", never scored as a match.
+            keep(extract.snapshot_from_raw(fields, raw),
+                 "inexact" if extract.partly_read(fields, raw) else "polled")
         except Exception:
             return
 
@@ -176,13 +181,18 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
         # Runs inside Playwright's dispatch: no calls back into the page here.
         accepted = _accept(raw, allowed)
         if accepted is not None:
-            keep(extract.snapshot_from_raw(fields, accepted), "exact")
+            keep(extract.snapshot_from_raw(fields, accepted),
+                 "inexact" if extract.partly_read(fields, accepted) else "exact")
 
     hooked = False
     try:
-        # A random name with no fixed prefix, so page script can't pick it
-        # out of window by name. It still accepts more than one call: a
-        # resubmit after a validation error is read too.
+        # A random name with no fixed prefix, so no page script written
+        # against this tool can look it up by a known name. A page can still
+        # enumerate window, find it and call it with whatever it likes: that
+        # is an ACCEPTED hostile-page route (CLAUDE.md, threat model). _accept
+        # limits the shape of what's taken, and it only ever reaches local
+        # files. It still accepts more than one call: a resubmit after a
+        # validation error is read too.
         name = secrets.choice(string.ascii_letters) + secrets.token_hex(12)
         page.expose_binding(name, on_submit)
         page.evaluate(_HOOK_JS, [name, extract.read_items(fields)])

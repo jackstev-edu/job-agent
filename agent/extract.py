@@ -57,14 +57,19 @@ SECRET_WORDS = (r"pass[\s_-]*word|passw|passwd|pwd|passcode|pass[\s_-]*phrase|"
 _SECRET_JS = (r"""
   const SECRET_ATTR = """ + json.dumps(SECRET_ATTR) + r""";
   const SECRET_RX = new RegExp(""" + json.dumps(SECRET_WORDS) + r""", 'iu');
+  // "pinCode" -> "pin Code", "PINCode" -> "PIN Code": the whole-word
+  // patterns need the word boundary a camelCase name hides.
+  const camelSplit = t => t.replace(/([a-z])([A-Z])/g, '$1 $2')
+                           .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
   const isSecret = (el, label) => {
     if (el.hasAttribute(SECRET_ATTR)) return true;
+    const text = [el.name, el.id, label, el.getAttribute('placeholder'),
+                  el.getAttribute('aria-label'),
+                  ...[...(el.labels || [])].map(l => l.innerText)]
+                 .filter(Boolean).join(' ').normalize('NFKC');
     const hit = (el.type || '').toLowerCase() === 'password'
       || /password/i.test(el.getAttribute('autocomplete') || '')
-      || SECRET_RX.test([el.name, el.id, label, el.getAttribute('placeholder'),
-                         el.getAttribute('aria-label'),
-                         ...[...(el.labels || [])].map(l => l.innerText)]
-                        .filter(Boolean).join(' ').normalize('NFKC'));
+      || SECRET_RX.test(text) || SECRET_RX.test(camelSplit(text));
     if (hit) el.setAttribute(SECRET_ATTR, '1');
     return hit;
   };
@@ -146,37 +151,43 @@ _SCAN_JS = r"""
   };
 
   // Find the human-readable question for an input. Ordered hardest-first,
-  // because the accessible name is far more reliable than nearby text. Every
-  // text read goes through textOf, so none of them can carry a value.
-  const labelFor = el => {
+  // because the accessible name is far more reliable than nearby text.
+  // `text` reads one source: textOf for anything sent to the model, so none
+  // of them can carry a value.
+  const labelWith = (el, text) => {
     if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').trim();
 
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
-      const text = labelledBy.split(/\s+/)
-        .map(id => textOf(document.getElementById(id), el))
+      const joined = labelledBy.split(/\s+/)
+        .map(id => text(document.getElementById(id), el))
         .join(' ').trim();
-      if (text) return text;
+      if (joined) return joined;
     }
 
     if (el.id) {
-      const explicit = textOf(document.querySelector(`label[for="${CSS.escape(el.id)}"]`), el);
+      const explicit = text(document.querySelector(`label[for="${CSS.escape(el.id)}"]`), el);
       if (explicit) return explicit;
     }
 
-    const wrapping = textOf(el.closest('label'), el);
+    const wrapping = text(el.closest('label'), el);
     if (wrapping) return wrapping;
 
     // Last resort: climb a few levels looking for a legend or label sibling.
     let parent = el.parentElement;
     for (let i = 0; i < 4 && parent; i++, parent = parent.parentElement) {
-      const nearby = textOf(parent.querySelector(
+      const nearby = text(parent.querySelector(
           ':scope > legend, :scope > label, :scope > .label'), el);
       if (nearby) return nearby;
     }
 
     return (el.getAttribute('placeholder') || el.getAttribute('name') || '').trim();
   };
+  const labelFor = el => labelWith(el, textOf);
+  // The same label read whole, as innerText, for the password test only. It
+  // never leaves the page: page text may only ever add secrecy, so the test
+  // sees at least what it saw before labels were filtered.
+  const rawLabelFor = el => labelWith(el, r => (r?.innerText || '').trim());
 
   // Helper text under a field often contains the real question.
   const helpFor = el => {
@@ -297,7 +308,7 @@ _SCAN_JS = r"""
     // hinted or named as a password, since a "show password" toggle flips
     // type=password to text and the type alone can't be trusted.
     const label = labelFor(el);
-    const secret = isSecret(el, label);
+    const secret = isSecret(el, label + ' ' + rawLabelFor(el));
     const field = {
       ref: stamp(el),
       type: isCustomCombobox ? 'combobox'
@@ -428,6 +439,27 @@ def is_secret(f: dict) -> bool:
     return bool(f.get("secret")) or (f.get("type") or "").lower() == "password"
 
 
+_SECRET_RX = re.compile(SECRET_WORDS, re.I)
+
+
+def _camel_split(text: str) -> str:
+    """'pinCode' -> 'pin Code', 'PINCode' -> 'PIN Code', as camelSplit does in the page."""
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+    return re.sub(r"([A-Z])([A-Z][a-z])", r"\1 \2", text)
+
+
+def says_secret(f: dict) -> bool:
+    """
+    The password-word test again, in Python, on what the scan returned: the
+    name, id, label and placeholder, as written and camelCase-split. A second
+    layer beside the page's own test, which page script can tamper with.
+    """
+    text = unicodedata.normalize("NFKC", " ".join(
+        str(f.get(k) or "") for k in ("name", "dom_name", "dom_id", "label",
+                                      "explicit_label", "placeholder")))
+    return bool(_SECRET_RX.search(text) or _SECRET_RX.search(_camel_split(text)))
+
+
 def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
     """
     Return a tidy list of every fillable question on the page.
@@ -457,6 +489,9 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
     sticky = []
     for f in fields:
         keys = secret_keys_of(f)
+        if not is_secret(f) and says_secret(f):
+            f["secret"] = True
+            sticky += f.get("option_refs") or [f["ref"]]
         if is_secret(f):
             secret_keys.update(keys)
         elif keys & secret_keys:
@@ -783,21 +818,35 @@ def snapshot(page: "Page", fields: list[dict]) -> dict:
 def snapshot_from_raw(fields: list[dict], raw: dict) -> dict:
     """
     Turn the in-page read (one entry per element) into one value per field.
-    A radio or button group is recorded only if at least one of its options
-    was actually read; otherwise it's left out, so it counts as unreadable,
-    never as "nothing chosen".
+    A radio or button group is recorded only if every one of its options was
+    read; otherwise it's left out, so it counts as unreadable, never as
+    "nothing chosen" (the refused option may be the chosen one).
     """
     out = {}
     for f in fields:
         if f.get("type") == "radio":
             option_refs = f.get("option_refs") or []
-            if not any(r in raw for r in option_refs):
+            if not option_refs or not all(r in raw for r in option_refs):
                 continue
             pairs = zip(option_refs, f.get("options", []))
             out[f["ref"]] = next((o for r, o in pairs if raw.get(r) is True), None)
         elif f["ref"] in raw:
             out[f["ref"]] = raw[f["ref"]]
     return out
+
+
+def partly_read(fields: list[dict], raw: dict) -> bool:
+    """
+    Did the read get some, but not all, of a radio or button group's
+    options? The group is left out of the snapshot, and the capture is
+    inexact: the run isn't scored as a match.
+    """
+    for f in fields:
+        if f.get("type") == "radio":
+            got = [r in raw for r in f.get("option_refs") or []]
+            if any(got) and not all(got):
+                return True
+    return False
 
 
 # --- the checkbox census, for the submit gate --------------------------------

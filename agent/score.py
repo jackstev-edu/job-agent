@@ -44,6 +44,10 @@ def score_run(row: dict) -> str:
     Edits are checked before your answer: an edit is evidence on its own, so
     an unknown answer can't hide a false submit. Unreadable fields aren't
     edits, but they stop zero edits being claimed.
+
+    An "inexact" capture (some of a radio or button group's options were
+    refused) isn't scored: unknown, except that a false submit still counts,
+    for the same reason an unknown answer can't hide one.
     """
     if not row.get("outcome_at"):
         return PENDING
@@ -54,6 +58,10 @@ def score_run(row: dict) -> str:
                    and row.get("capture") == "exact")
     submitted = row.get("human_submitted")
     verdict = row.get("verdict")
+    if row.get("capture") == "inexact":
+        if verdict == "would_submit" and (real or submitted == "n"):
+            return FALSE_SUBMIT
+        return UNKNOWN
     if verdict == "would_submit":
         if real or submitted == "n":
             return FALSE_SUBMIT
