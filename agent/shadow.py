@@ -25,7 +25,8 @@ RECORD_VERSION = 1
 
 # The fields of a scanned field worth keeping in the record.
 _FIELD_KEYS = ("ref", "type", "widget", "label", "name", "placeholder", "required",
-               "options", "option_refs", "help_text", "search_required", "secret")
+               "options", "option_refs", "help_text", "search_required", "secret",
+               "stable_identity", "credential_step", "agent_identity")
 
 # The parts of a plan decision the gate reads.
 _DECISION_KEYS = ("value", "source", "profile_path", "fit", "confidence", "needs_review",

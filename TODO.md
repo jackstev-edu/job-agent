@@ -330,12 +330,19 @@
       a dry run a No pair is exempt while a Yes pair stops. Fix: withhold
       the No exemption when `dry_run` is set (or note it in the
       `_is_pair_mirror` docstring and TODO item 21).
-    - Known limit of the password fix: a box whose type, autocomplete hint,
-      name, id, label and placeholder all say nothing about a password, and
-      which is already shown as text before the agent's first scan, can't be
-      recognised: the agent never saw it as a password. Every reader then
-      treats it as an ordinary box. A box seen as a password once stays
-      secret for the run (page marker plus Python's sticky set).
+    - Known limit of the password fix, narrowed by default-deny reads: a box
+      is read only with a name or an explicit label, never on a page this run
+      has seen a password box on (except what the agent filled from your
+      name or email), and never once seen as a password. What's left: a
+      named or labelled box that says nothing about a password, already
+      shown as text before the agent's first scan, on a page where no
+      password box or password hint has appeared. Nothing on the page marks
+      it as one, so it reads as an ordinary box.
+    - Default-deny reads apply rule 4 (credential steps) only inside a run,
+      i.e. with a ReadGuard; `fill` always passes one. A bare
+      `extract_fields(page)` (tests) keeps rules 1-3 only. Ticked and pressed
+      state (checkbox, radio, button pairs) is exempt from the
+      stable-identity rule: it's only ever true or false.
     - Decided (Jack): in compute_edits a type=password box is skipped, while
       a box that's secret only by marker, hint, pattern or sticky key comes
       out "unreadable". Why: a pattern match may be a mislabelled ordinary

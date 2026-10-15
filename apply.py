@@ -263,9 +263,9 @@ def cmd_fill(args) -> None:
         # {file box ref: names the agent uploaded there}, the baseline for
         # spotting a resume you swapped. None once it can't be known.
         uploaded: dict[str, list[str]] | None = {}
-        # Every field seen as secret this run, by structural key: it stays
-        # secret even if the page strips its marker or re-renders the box.
-        secret_keys: set = set()
+        # What this run may never read: every field seen as secret (by each
+        # of its keys) and every page seen with a password box on it.
+        guard = extract.ReadGuard()
         resume = prof.resume_path(args.resume)
         max_steps = 1 if args.dry_run else args.max_steps
 
@@ -276,7 +276,7 @@ def cmd_fill(args) -> None:
             if _get_past_login_wall(page):
                 events.append({"kind": "login_wall", "detail": f"step {step}"})
 
-            fields = extract.extract_fields(page, secret_keys)
+            fields = extract.extract_fields(page, guard)
             if not fields:
                 events.append({"kind": "no_fields", "detail": f"step {step}"})
                 if step == 1:
@@ -304,7 +304,7 @@ def cmd_fill(args) -> None:
                     events.append({"kind": "upload_failed", "detail": detail})
                 browser_mod.settle(page, 2500)
                 fields = extract.enrich_comboboxes(
-                    page, extract.extract_fields(page, secret_keys))
+                    page, extract.extract_fields(page, guard))
                 # A failed upload put nothing there, or nothing known; either
                 # way the baseline can't be trusted.
                 ref = outcome.upload_ref(box, fields) if worked else None
@@ -373,14 +373,15 @@ def cmd_fill(args) -> None:
                 _shadow_gate(record, prof, url, key, detected_by, dry_run=True)
                 return
 
-            # The policy already hands every secret box to you; this makes sure
-            # no plan entry for one can ever reach the filler.
-            # Nor can an entry whose ref isn't from the latest scan: an old
-            # generation's ref is treated as missing, never filled.
-            secret_refs = {f["ref"] for f in fields if extract.is_secret(f)}
-            plan = {ref: d for ref, d in plan.items()
-                    if ref not in secret_refs and extract.is_current(ref)}
+            plan = _fillable_plan(fields, plan)
             step_rows = filler.run_plan(page, fields, plan)
+            # run_plan reports one row per plan entry it found a field for, in
+            # plan order; what it filled from your name or email is the only
+            # thing readable later on a credential step.
+            by_ref = {f["ref"] for f in fields}
+            ran = [ref for ref in plan if ref in by_ref]
+            filled = [ref for ref, row in zip(ran, step_rows) if row.get("filled")]
+            extract.mark_identity(page, fields, plan, filled, prof)
             steps.append(shadow.step_entry(fields, categories, plan, flags, step_rows,
                                            prefill_census=prefill))
             all_rows += step_rows
@@ -545,6 +546,19 @@ def _shadow_gate(record, prof, url, portal, detected_by, *,
     except Exception as e:
         print(f"{DIM}  couldn't log the gate's verdict ({type(e).__name__}){OFF}")
         return None, result
+
+
+def _fillable_plan(fields: list[dict], plan: dict) -> dict:
+    """
+    The plan entries the filler may act on. The policy already hands every
+    secret box to you; this makes sure no entry for one can reach the
+    filler, nor one whose ref isn't from the latest scan. filler.py resolves
+    refs without checking their generation, so this is where an old
+    generation's ref is treated as missing, never filled.
+    """
+    secret_refs = {f["ref"] for f in fields if extract.is_secret(f)}
+    return {ref: d for ref, d in plan.items()
+            if ref not in secret_refs and extract.is_current(ref)}
 
 
 def _prefill_census(page) -> list[dict] | None:

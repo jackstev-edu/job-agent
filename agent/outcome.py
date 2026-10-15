@@ -146,6 +146,11 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
     """
     fields = record.get("fields") or []
     refs = extract.readable_refs(fields)
+    # Whether the form is still there reads no value, so it uses every current
+    # ref, not only the readable ones: on a credential step those are few, and
+    # the form would look gone.
+    present = [r for f in fields for r in (f.get("option_refs") or [f.get("ref")])
+               if extract.is_current(r)]
     portal, method = record.get("portal") or "", record.get("portal_method") or ""
     start_url = record.get("final_url") or record.get("url") or ""
     state = {"final": None, "capture": "none"}
@@ -160,7 +165,7 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
 
     def poll() -> None:
         try:
-            if not page.evaluate(_PRESENT_JS, refs):
+            if not page.evaluate(_PRESENT_JS, present):
                 return
             keep(extract.snapshot(page, fields), "polled")
         except Exception:
@@ -188,7 +193,7 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
             ended = "tab_closed"
             break
         detection = detect_success(page, portal=portal, portal_method=method,
-                                   start_url=start_url, refs=refs)
+                                   start_url=start_url, refs=present)
         if detection["result"] == "match":
             ended = "success"
             break
