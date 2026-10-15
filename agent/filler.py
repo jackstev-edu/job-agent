@@ -6,7 +6,8 @@ enters it into the page, typing character by character because many forms
 only register input they see as real keystrokes.
 
 WHY IT MATTERS: This file contains the hard stop. It has no code path that
-clicks Submit — not as an option, not behind a flag. That's deliberate.
+clicks Submit, presses Enter, or types a line break outside a textarea — not
+as an option, not behind a flag. That's deliberate.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from playwright.sync_api import Page
 
-from . import extract, matching
+from . import extract, matching, sensitive
 from .extract import REF_ATTR
 
 # Buttons this tool will never click, whatever it's asked. Matched against
@@ -30,6 +31,25 @@ FORBIDDEN_BUTTONS = re.compile(
     r"accept|agree and continue)\s*$",
     re.I,
 )
+
+
+def _one_line(text: str) -> str:
+    """Line breaks as spaces: typed into anything but a textarea, a line break is Enter."""
+    return re.sub(r"[\r\n]+", " ", text)
+
+
+# A checkbox's label as it reads right now, every source joined, so the
+# backstop sees at least what the scan saw. Local only: never sent anywhere.
+_CHECKBOX_LABEL_JS = r"""
+el => [el.getAttribute('aria-label'),
+       ...(el.getAttribute('aria-labelledby') || '').split(/\s+/)
+         .map(id => document.getElementById(id)?.innerText),
+       ...[...(el.labels || [])].map(l => l.innerText),
+       el.closest('label')?.innerText,
+       ...(el.getAttribute('aria-describedby') || '').split(/\s+/)
+         .map(id => document.getElementById(id)?.innerText)]
+  .filter(Boolean).join(' ')
+"""
 
 
 def _element(page: "Page", ref: str):
@@ -65,6 +85,12 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
             return False, f"'{value}' is not one of the radio options"
 
         if field_type == "checkbox":
+            # The label as it reads now, not as it read at the scan: a box
+            # relabelled since into terms, consent or anything else the
+            # backstop stops is never ticked or unticked.
+            label = element.evaluate(_CHECKBOX_LABEL_JS)
+            if any(rx.search(label or "") for rx, _ in sensitive._STOPS):
+                return False, "refused — this box now reads like terms or consent; it's yours"
             element.set_checked(bool(value), timeout=4000)
             return True, "ticked" if value else "unticked"
 
@@ -81,10 +107,12 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
         if field_type == "file":
             return False, "file uploads are handled separately"
 
-        # Ordinary text, email, tel, number, date, textarea.
+        # Ordinary text, email, tel, number, date, textarea. Outside a
+        # textarea a typed line break is Enter, which can submit the form.
+        text = str(value) if field_type == "textarea" else _one_line(str(value))
         element.click(timeout=4000)
         element.fill("", timeout=4000)               # clear anything pre-filled
-        element.type(str(value), delay=12, timeout=25_000)
+        element.type(text, delay=12, timeout=25_000)
         return True, "typed"
 
     except Exception as e:
@@ -120,16 +148,20 @@ def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool
     """
     Custom dropdown: open it, type, then CLICK the row that matches.
 
-    WHY NOT JUST PRESS ENTER: Enter takes whichever row the widget has
-    highlighted, which on a list still loading is simply the first one to
-    arrive. A school search would then quietly commit a different university
-    than the one in your profile — a wrong fact on a form you sign. If nothing
-    on screen matches what we typed, this clears the box and reports a failure
-    so the field reaches you instead.
+    WHY NEVER ENTER: Enter takes whichever row the widget has highlighted,
+    which on a list still loading is simply the first one to arrive, and in
+    a box that doesn't catch it, Enter submits the form. A school search
+    would quietly commit a different university than the one in your
+    profile, or send the application. If no row on screen can be clicked,
+    this clears the box and reports a failure so the field reaches you.
     """
+    # Checked at click time, not trusted from the scan: a typeless <button>
+    # in a form is a submit button, and opening this one would click it.
+    if element.evaluate(extract._SUBMITS_JS):
+        return False, "refused — this dropdown could submit the form; it's yours"
     element.click(timeout=4000)
     page.wait_for_timeout(250)
-    page.keyboard.type(value, delay=45)
+    page.keyboard.type(_one_line(value), delay=45)
 
     options = extract.wait_for_options(page, 3000)
     if not options:
@@ -148,17 +180,18 @@ def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool
         return False, f"'{value}' — {how}"
 
     try:
-        if page.evaluate(_MARK_OPTION_JS, choice):
+        marked = page.evaluate(_MARK_OPTION_JS, choice)
+        if marked:
             page.locator("[data-ja-opt='1']").first.click(timeout=3000)
-        else:
-            page.keyboard.press("Enter")
     except Exception:
-        page.keyboard.press("Enter")
+        marked = False
+    if not marked:
+        _abandon_combobox(page, element)
+        return False, f"couldn't click the row for '{choice}'; left empty for you"
     page.wait_for_timeout(300)
-
+    # A menu still up after the click is closed, never committed with Enter.
     if extract.read_open_options(page):
-        page.keyboard.press("Enter")          # the menu is still up; commit it
-        page.wait_for_timeout(200)
+        extract.close_dropdown(page)
 
     if how in ("exact", "normalized"):
         return True, f"selected '{choice}'"
@@ -257,5 +290,5 @@ def run_plan(page: "Page", fields: list[dict], plan: dict) -> list[dict]:
 
 
 def is_forbidden_button(text: str) -> bool:
-    """Used by the step navigator before it clicks anything."""
+    """Checked before a button-pair answer is clicked."""
     return bool(FORBIDDEN_BUTTONS.match((text or "").strip()))

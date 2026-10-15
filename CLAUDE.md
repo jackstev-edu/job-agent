@@ -60,8 +60,11 @@ How the code keeps them, and rules of its own:
 - On a login wall the agent pauses and you sign in; you press the button.
   Account creation is never automated. On a multi-page application the agent
   fills the page it's on and logs that more pages follow; you move between
-  pages. `filler.py` has no code path that clicks Submit, accepts terms or
-  signs anything, and it must stay that way.
+  pages. `filler.py` never presses Enter, never types a line break outside a
+  textarea, and checks again at click time that a dropdown can't submit the
+  form and that a checkbox's label doesn't read as terms or consent; it has
+  no code path that clicks Submit, accepts terms or signs anything. It must
+  stay that way.
 - The submit gate is shadow mode only: it logs and scores a call, and no code
   path acts on it. It never adds a click, a tick or a submit, and filling is
   routed exactly as before (classifier, policy table, HARD_STOPS). It defaults
