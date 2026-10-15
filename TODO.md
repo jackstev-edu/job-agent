@@ -357,6 +357,26 @@
       where skipping it would let one through. Also decided: "Show / Remember
       password" checkboxes match the pattern and come to you as credentials.
       That fails safe, so it stays.
+    - Labels and help text (sent to the model) are built like page_text:
+      the field itself and anything that can show a value (form controls,
+      editable regions, combobox / listbox / option widgets, react-select
+      value displays) are left out of aria-labelledby, label[for], a
+      wrapping <label>, a nearby legend / label / .label and
+      aria-describedby. Still open:
+      - **Validation/error text (aria-describedby, aria-errormessage) can
+        echo a typed value** ("'jo@x' is not a valid email"). It's plain
+        text, so the skip list doesn't catch it. aria-errormessage isn't
+        read today; aria-describedby is. Follow mode rescans after user
+        input, so this MUST be closed before follow-mode commit 6.
+      - Same deadline: a combobox's harvested options come from its open
+        menu, which a type-to-search widget filters by the text in its box,
+        and a creatable one shows as `Create "<typed text>"`. Today the
+        agent opens menus before it types anything on that step, so only
+        text already in the box when the page is scanned can get through.
+      - Residual: an aria-label or placeholder that page script rewrites to
+        include the value is sent as the label. Neither the scan nor the
+        model calls read a `title` attribute. The document title is read
+        once, as role and company, for the tracker and the cover letter.
     - Not covered by the password fix: a hostile page that moves a ref
       attribute onto its own unmarked, neutrally-labelled password box. The
       page controls its DOM and could hand over the value many other ways;

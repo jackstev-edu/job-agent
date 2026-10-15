@@ -70,12 +70,57 @@ _SECRET_JS = (r"""
   };
 """)
 
+# Everything that can show a field's value as text: form controls, editable
+# regions, dropdown and listbox widgets, and react-select-style chosen-value
+# displays (plus script and style). Text inside these never reaches the model,
+# whether it comes in as page text or as a field's label or help.
+_VALUE_SHOWN = ('input, textarea, select, option, button, '
+                '[contenteditable]:not([contenteditable="false"]), [role=combobox], '
+                '[role=listbox], [role=option], [role=textbox], [role=searchbox], '
+                '[role=spinbutton], [class*="singleValue"], [class*="single-value"], '
+                '[class*="multiValue"], [class*="multi-value"], '
+                'script, style, noscript, template')
+
+# A label or help text built like page_text: what innerText would give, minus
+# the field itself and anything _VALUE_SHOWN, so an aria-labelledby that names
+# the field's own value display (the accessible name of a combobox includes
+# its value) or a <label> wrapping an editable region can't carry a value.
+_TEXT_OF_JS = (r"""
+  const VALUE_SHOWN = """ + json.dumps(_VALUE_SHOWN) + r""";
+  const textOf = (root, field) => {
+    if (!root || root === field || (field && field.contains(root))
+        || root.closest(VALUE_SHOWN)) return '';
+    // innerText's rule: a rendered root drops unrendered text inside it; an
+    // unrendered one (a display:none label named by aria-labelledby) gives
+    // all of it.
+    const rendered = root.getClientRects().length > 0;
+    const out = [];
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      let skip = false;
+      for (let e = n.parentElement; e && e !== root; e = e.parentElement) {
+        if (e === field || e.matches(VALUE_SHOWN)) { skip = true; break; }
+      }
+      if (skip) continue;
+      if (rendered) {
+        const p = n.parentElement;
+        if (!p.getClientRects().length) continue;
+        const s = getComputedStyle(p);
+        if (s.visibility === 'hidden' || s.display === 'none') continue;
+      }
+      const t = n.textContent.replace(/\s+/g, ' ').trim();
+      if (t) out.push(t);
+    }
+    return out.join(' ');
+  };
+""")
+
 # --- the injected JavaScript -------------------------------------------------
 # This runs inside the page, in the browser, with full access to the DOM.
 _SCAN_JS = r"""
 ([GROUP, GEN]) => {
   const REF = 'data-ja-ref';
-""" + _SECRET_JS + r"""
+""" + _SECRET_JS + _TEXT_OF_JS + r"""
   // Every ref from an earlier scan goes first, hidden boxes' included, so a
   // box this scan skips can't keep a ref that a new box is about to get. The
   // generation in each new ref means an old one can never equal it anyway.
@@ -83,9 +128,10 @@ _SCAN_JS = r"""
   window.__jaGen = GEN;
   // A label from a real <label> or aria-label, never the nearby-text guess.
   // With a name attribute, it's a stable identity; an id or a placeholder
-  // alone isn't one.
+  // alone isn't one. Built by textOf like every other label, so it holds no
+  // value either.
   const explicitLabel = el => ((el.getAttribute('aria-label') || '').trim()
-      || [...(el.labels || [])].map(l => (l.innerText || '').trim()).filter(Boolean).join(' '))
+      || [...(el.labels || [])].map(l => textOf(l, el)).filter(Boolean).join(' '))
       .slice(0, 300);
   const stableIdentity = el => !!(el.getAttribute('name') || '').trim() || !!explicitLabel(el);
   let counter = 0;
@@ -100,31 +146,33 @@ _SCAN_JS = r"""
   };
 
   // Find the human-readable question for an input. Ordered hardest-first,
-  // because the accessible name is far more reliable than nearby text.
+  // because the accessible name is far more reliable than nearby text. Every
+  // text read goes through textOf, so none of them can carry a value.
   const labelFor = el => {
     if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').trim();
 
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
       const text = labelledBy.split(/\s+/)
-        .map(id => document.getElementById(id)?.innerText || '')
+        .map(id => textOf(document.getElementById(id), el))
         .join(' ').trim();
       if (text) return text;
     }
 
     if (el.id) {
-      const explicit = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-      if (explicit?.innerText.trim()) return explicit.innerText.trim();
+      const explicit = textOf(document.querySelector(`label[for="${CSS.escape(el.id)}"]`), el);
+      if (explicit) return explicit;
     }
 
-    const wrapping = el.closest('label');
-    if (wrapping?.innerText.trim()) return wrapping.innerText.trim();
+    const wrapping = textOf(el.closest('label'), el);
+    if (wrapping) return wrapping;
 
     // Last resort: climb a few levels looking for a legend or label sibling.
     let parent = el.parentElement;
     for (let i = 0; i < 4 && parent; i++, parent = parent.parentElement) {
-      const nearby = parent.querySelector(':scope > legend, :scope > label, :scope > .label');
-      if (nearby?.innerText.trim()) return nearby.innerText.trim();
+      const nearby = textOf(parent.querySelector(
+          ':scope > legend, :scope > label, :scope > .label'), el);
+      if (nearby) return nearby;
     }
 
     return (el.getAttribute('placeholder') || el.getAttribute('name') || '').trim();
@@ -135,7 +183,7 @@ _SCAN_JS = r"""
     const describedBy = el.getAttribute('aria-describedby');
     if (!describedBy) return '';
     return describedBy.split(/\s+/)
-      .map(id => document.getElementById(id)?.innerText || '')
+      .map(id => textOf(document.getElementById(id), el))
       .join(' ').trim().slice(0, 300);
   };
 
@@ -180,7 +228,7 @@ _SCAN_JS = r"""
       type: 'radio',
       widget: 'buttons',
       name: hidden?.name || '',
-      label: (title?.innerText || labelFor(box)).trim().slice(0, 300),
+      label: (textOf(title, box) || labelFor(box)).trim().slice(0, 300),
       options: buttons.map(optionText),
       option_refs: optionRefs,
       // Ashby marks required on the question title's class, not the input.
@@ -226,7 +274,7 @@ _SCAN_JS = r"""
         ref: optionRefs[0],
         type: 'radio',
         name: el.name || '',
-        label: (el.closest('fieldset')?.querySelector('legend')?.innerText
+        label: (textOf(el.closest('fieldset')?.querySelector('legend'), el)
                 || labelFor(el)).trim().slice(0, 300),
         options: peers.map(p => labelFor(p)).filter(Boolean),
         option_refs: optionRefs,
@@ -433,11 +481,7 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
 # textareas, but not an editable region's text or a widget's chosen option.
 _PAGE_TEXT_JS = r"""
 () => {
-  const SKIP = 'form, input, textarea, select, option, button, '
-    + '[contenteditable]:not([contenteditable="false"]), [role=combobox], [role=listbox], '
-    + '[role=option], [role=textbox], [role=searchbox], [role=spinbutton], '
-    + '[class*="singleValue"], [class*="single-value"], [class*="multiValue"], '
-    + '[class*="multi-value"], script, style, noscript, template';
+  const SKIP = 'form, ' + """ + json.dumps(_VALUE_SHOWN) + r""";
   const out = [];
   const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n = walk.nextNode(); n; n = walk.nextNode()) {
