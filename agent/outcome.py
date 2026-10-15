@@ -216,7 +216,7 @@ _UPLOAD_REF_JS = r"""
 (el) => {
   if (!el.isConnected) return null;
   const r = el.getAttribute('data-ja-ref');
-  if (!r) return null;
+  if (!r || !window.__jaGen || !r.startsWith(window.__jaGen + '-')) return null;
   return document.querySelectorAll(`[data-ja-ref="${CSS.escape(r)}"]`).length === 1 ? r : null;
 }
 """
@@ -232,6 +232,8 @@ def upload_ref(handle, fields: list[dict]) -> str | None:
     try:
         ref = handle.evaluate(_UPLOAD_REF_JS)
     except Exception:
+        return None
+    if not extract.is_current(ref):
         return None
     return ref if ref in {f.get("ref") for f in fields if f.get("type") == "file"} else None
 

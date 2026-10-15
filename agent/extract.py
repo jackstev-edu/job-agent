@@ -13,9 +13,10 @@ one that costs dollars and gets lost.
 
 from __future__ import annotations
 
+import itertools
 import json
-
 import re
+import unicodedata
 
 from typing import TYPE_CHECKING
 
@@ -57,7 +58,7 @@ _SECRET_JS = (r"""
       || SECRET_RX.test([el.name, el.id, label, el.getAttribute('placeholder'),
                          el.getAttribute('aria-label'),
                          ...[...(el.labels || [])].map(l => l.innerText)]
-                        .filter(Boolean).join(' '));
+                        .filter(Boolean).join(' ').normalize('NFKC'));
     if (hit) el.setAttribute(SECRET_ATTR, '1');
     return hit;
   };
@@ -66,9 +67,14 @@ _SECRET_JS = (r"""
 # --- the injected JavaScript -------------------------------------------------
 # This runs inside the page, in the browser, with full access to the DOM.
 _SCAN_JS = r"""
-(GROUP) => {
+([GROUP, GEN]) => {
   const REF = 'data-ja-ref';
 """ + _SECRET_JS + r"""
+  // Every ref from an earlier scan goes first, hidden boxes' included, so a
+  // box this scan skips can't keep a ref that a new box is about to get. The
+  // generation in each new ref means an old one can never equal it anyway.
+  document.querySelectorAll(`[${REF}]`).forEach(e => e.removeAttribute(REF));
+  window.__jaGen = GEN;
   let counter = 0;
   const fields = [];
 
@@ -120,7 +126,7 @@ _SCAN_JS = r"""
       .join(' ').trim().slice(0, 300);
   };
 
-  const stamp = el => { const r = 'f' + (counter++); el.setAttribute(REF, r); return r; };
+  const stamp = el => { const r = GEN + '-f' + (counter++); el.setAttribute(REF, r); return r; };
 
   // Radio buttons come in groups; we collapse each group into one question.
   const seenGroups = new Set();
@@ -267,6 +273,25 @@ _NOISE = ("search", "cookie", "newsletter", "subscribe", "promo code",
           "discount", "language selector")
 
 
+# Each scan's refs carry a generation ("g3-f2") unique for the whole run,
+# even across navigations, since Python, not the page, counts them. Only the
+# latest generation's refs are ever resolved; an older one is treated as
+# missing.
+_GENERATIONS = itertools.count(1)
+_current = {"gen": None}
+
+
+def current_generation() -> str | None:
+    """The generation of the latest scan, or None before the first one."""
+    return _current["gen"]
+
+
+def is_current(ref) -> bool:
+    """Is this ref from the latest scan? Anything older resolves to nothing."""
+    gen = _current["gen"]
+    return bool(gen) and isinstance(ref, str) and ref.startswith(gen + "-")
+
+
 def field_key(f: dict) -> tuple:
     """
     A field's identity across rescans and re-renders, from structure: tag,
@@ -277,6 +302,25 @@ def field_key(f: dict) -> tuple:
     tag, name = f.get("tag") or "", f.get("dom_name") or ""
     label = " ".join(str(f.get("label") or "").split()).casefold()
     return (tag, name, label) if (name or label) else (tag, "#" + (f.get("dom_id") or ""))
+
+
+def secret_keys_of(f: dict) -> set[tuple]:
+    """
+    Every key a secret field is remembered by: its name, its id and its
+    label, each on its own. A re-render that changes one of them (a framework
+    id, a "Show" button inside the label) still matches on another. A false
+    match only hands an ordinary box to you.
+    """
+    tag = f.get("tag") or ""
+    label = " ".join(unicodedata.normalize("NFKC", str(f.get("label") or "")).split()).casefold()
+    keys = set()
+    if f.get("dom_name"):
+        keys.add(("name", tag, f["dom_name"]))
+    if f.get("dom_id"):
+        keys.add(("id", tag, f["dom_id"]))
+    if label:
+        keys.add(("label", tag, label))
+    return keys
 
 
 def is_secret(f: dict) -> bool:
@@ -294,13 +338,22 @@ def extract_fields(page: "Page", secret_keys: set | None = None) -> list[dict]:
     field seen as secret here is added to it.
     """
     secret_keys = set() if secret_keys is None else secret_keys
-    fields = page.evaluate(_SCAN_JS, BUTTON_GROUP)
+    gen = f"g{next(_GENERATIONS)}"
+    fields = page.evaluate(_SCAN_JS, [BUTTON_GROUP, gen])
+    _current["gen"] = gen
+    sticky = []
     for f in fields:
-        key = field_key(f)
+        keys = secret_keys_of(f)
         if is_secret(f):
-            secret_keys.add(key)
-        elif key in secret_keys:
+            secret_keys.update(keys)
+        elif keys & secret_keys:
             f["secret"] = True
+            sticky.append(f["ref"])
+            secret_keys.update(keys)        # so a later change to another key still matches
+    if sticky:
+        # The page forgot (or never knew); mark the element again, so every
+        # in-page reader refuses it too.
+        page.evaluate(_MARK_SECRET_JS, [sticky, SECRET_ATTR])
     return [
         f for f in fields
         if not any(word in f"{f.get('label','')} {f.get('name','')}".lower()
@@ -477,8 +530,12 @@ _SNAPSHOT_JS = r"""
 """ + _SECRET_JS + r"""
   const out = {};
   for (const ref of refs) {
-    const el = document.querySelector(`[data-ja-ref="${CSS.escape(ref)}"]`);
-    if (!el) continue;
+    // Only the latest scan's refs, and only one carried by exactly one
+    // element: anything else is treated as missing, never resolved.
+    if (!window.__jaGen || !String(ref).startsWith(window.__jaGen + '-')) continue;
+    const all = document.querySelectorAll(`[data-ja-ref="${CSS.escape(ref)}"]`);
+    if (all.length !== 1) continue;
+    const el = all[0];
     const t = (el.type || '').toLowerCase();
     if (isSecret(el, '')) continue;
     let v;
@@ -509,13 +566,20 @@ _SNAPSHOT_JS = r"""
 
 
 def readable_refs(fields: list[dict]) -> list[str]:
-    """The refs a snapshot may read: never a secret field."""
+    """The refs a snapshot may read: never a secret field, never an old generation's."""
     refs: list[str] = []
     for f in fields:
         if is_secret(f):
             continue
-        refs += f.get("option_refs") or [f["ref"]]
+        refs += [r for r in (f.get("option_refs") or [f["ref"]]) if is_current(r)]
     return refs
+
+
+_MARK_SECRET_JS = r"""
+([refs, attr]) => refs.forEach(r =>
+  document.querySelectorAll(`[data-ja-ref="${CSS.escape(r)}"]`)
+    .forEach(e => e.setAttribute(attr, '1')))
+"""
 
 
 def snapshot(page: "Page", fields: list[dict]) -> dict:

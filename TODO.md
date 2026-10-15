@@ -336,6 +336,17 @@
       recognised: the agent never saw it as a password. Every reader then
       treats it as an ordinary box. A box seen as a password once stays
       secret for the run (page marker plus Python's sticky set).
+    - Decided (Jack): in compute_edits a type=password box is skipped, while
+      a box that's secret only by marker, hint, pattern or sticky key comes
+      out "unreadable". Why: a pattern match may be a mislabelled ordinary
+      field the person did edit; "unreadable" stops a false zero-edit claim,
+      where skipping it would let one through. Also decided: "Show / Remember
+      password" checkboxes match the pattern and come to you as credentials.
+      That fails safe, so it stays.
+    - Not covered by the password fix: a hostile page that moves a ref
+      attribute onto its own unmarked, neutrally-labelled password box. The
+      page controls its DOM and could hand over the value many other ways;
+      the guards are against reading one by accident.
 
 ## Deferred
 

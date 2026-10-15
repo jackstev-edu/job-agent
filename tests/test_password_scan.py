@@ -24,7 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 from _harness import TEST_HOME, Checks, mock_page, run_as_script
-from agent import config, extract, outcome, tracker
+from agent import config, extract, filler, outcome, tracker
 
 SENTINEL = "PW-SCAN-SENTINEL-3307"
 
@@ -52,7 +52,11 @@ WORDS = [("name", "kennwort"), ("name", "passwort"), ("id", "contrasena"),
          ("name", "motdepasse"), ("name", "mot_de_passe"), ("label", "Wachtwoord"),
          ("label", "Lösenord"), ("label", "Salasana"), ("label", "Hasło"), ("label", "Heslo"),
          ("label", "Jelszó"), ("label", "Пароль"), ("label", "密码"), ("label", "パスワード"),
-         ("label", "비밀번호"), ("name", "user_pwd"), ("label", "Passcode")]
+         ("label", "비밀번호"), ("name", "user_pwd"), ("label", "Passcode"),
+         ("label", "סיסמה"), ("label", "كلمة المرور"), ("label", "密碼"), ("name", "passwd"),
+         ("label", "Pass word"),
+         # Written in other Unicode forms, matched after NFKC normalisation:
+         ("label", "Contrasen\u0303a"), ("label", "Lo\u0308senord"), ("label", "ｐａｓｓｗｏｒｄ")]
 
 
 def _languages_form() -> str:
@@ -158,6 +162,132 @@ def test_text_boxes_named_like_a_password_in_many_languages():
     check.done()
 
 
+TWO_STEP = f"""<!doctype html><html><body><form>
+  <section id="s1"><label for="input-7">Choose one</label><input id="input-7" type="password"></section>
+  <section id="s2" style="display:none"><label for="ci">City</label>
+    <input id="ci" name="city" value="Springfield"></section>
+</form>
+<script>
+  document.getElementById('input-7').value = '{SENTINEL}';
+  window.next = () => {{
+    const pw = document.getElementById('input-7');
+    pw.type = 'text'; pw.removeAttribute('data-ja-secret');      // shown, marker gone
+    document.getElementById('s1').style.display = 'none';         // hidden, not removed
+    document.getElementById('s2').style.display = '';
+  }};
+</script></body></html>"""
+
+
+def test_a_hidden_stale_box_never_shares_a_ref():
+    check = Checks()
+    with mock_page(_write("pw_two_step.html", TWO_STEP)) as page:
+        real = page.evaluate
+        seen = _spy(page)
+        keys: set = set()
+        first = extract.extract_fields(page, keys)
+        old = next(f for f in first if f["label"] == "Choose one")
+        check(old.get("secret") is True, "step 1: the password box is seen and marked secret")
+        real("window.next()")
+        second = extract.extract_fields(page, keys)
+        city = next(f for f in second if f["label"] == "City")
+        check(not real("() => document.getElementById('input-7').hasAttribute('data-ja-ref')"),
+              "step 2's scan cleared the hidden step-1 box's old ref")
+        dupes = real("""() => {
+            const n = {}; document.querySelectorAll('[data-ja-ref]').forEach(e => {
+              const r = e.getAttribute('data-ja-ref'); n[r] = (n[r] || 0) + 1; });
+            return Object.values(n).filter(c => c > 1).length; }""")
+        check(dupes == 0, "no ref is carried by two elements")
+        check(city["ref"] != old["ref"], f"the new field's ref ({city['ref']}) can't equal the old one ({old['ref']})")
+        check(extract.snapshot(page, second) == {city["ref"]: "Springfield"},
+              "the snapshot reads step 2's field, and only it")
+        # A collision forced by the page: the hidden box given the new field's ref.
+        real("r => document.getElementById('input-7').setAttribute('data-ja-ref', r)", city["ref"])
+        check(city["ref"] not in extract.snapshot(page, second)
+              and city["ref"] not in page.evaluate(extract._SNAPSHOT_JS, [city["ref"]]),
+              "a ref carried by two elements is treated as missing: nothing read")
+    check(SENTINEL not in json.dumps(seen, default=str),
+          "the sentinel is nowhere in anything page.evaluate returned")
+    check.done()
+
+
+GENS = """<!doctype html><html><body><form>
+  <label for="ci">City</label><input id="ci" name="city" value="Springfield">
+  <label for="em">Email</label><input id="em" name="email" value="t@x.invalid">
+</form></body></html>"""
+
+
+def test_old_generation_refs_resolve_to_nothing():
+    check = Checks()
+    with mock_page(_write("pw_gens.html", GENS)) as page:
+        real = page.evaluate
+        first = extract.extract_fields(page)
+        old_city = next(f for f in first if f["label"] == "City")
+        second = extract.extract_fields(page)
+        new_city = next(f for f in second if f["label"] == "City")
+        print(f"  scan N ref {old_city['ref']}, scan N+1 ref {new_city['ref']}")
+        check(old_city["ref"] != new_city["ref"] and not extract.is_current(old_city["ref"])
+              and extract.is_current(new_city["ref"]), "a rescan gives a new generation of refs")
+        check(page.locator(f"[data-ja-ref='{old_city['ref']}']").count() == 0,
+              "the old ref is on no element")
+        check(extract.readable_refs(first) == [] and extract.snapshot(page, first) == {},
+              "the snapshot, given the old scan's fields, reads nothing")
+        worked, detail = filler.fill_one(page, old_city, "Shelbyville")
+        check(not worked and real("() => document.getElementById('ci').value") == "Springfield",
+              f"the filler, given the old ref, finds nothing and changes nothing ({detail[:40]})")
+        # Even if the page puts an old ref back on an element, it isn't resolved.
+        real("""r => { const e = document.createElement('input'); e.value = 'planted';
+                     e.setAttribute('data-ja-ref', r); document.forms[0].appendChild(e); }""",
+             old_city["ref"])
+        check(page.evaluate(extract._SNAPSHOT_JS, [old_city["ref"]]) == {},
+              "an old-generation ref put back by the page is still treated as missing")
+        check(extract.snapshot(page, second) == {new_city["ref"]: "Springfield",
+                                                 next(f["ref"] for f in second
+                                                      if f["label"] == "Email"): "t@x.invalid"},
+              "the current scan's refs read as before")
+    check.done()
+
+
+REKEY = f"""<!doctype html><html><body><form><div id="slot">
+  <label for="input-7">Choose one</label><input id="input-7" type="password"></div>
+</form>
+<script>
+  document.getElementById('input-7').value = '{SENTINEL}';
+  const swap = (id, label) => {{
+    document.getElementById('slot').innerHTML =
+      `<label for="${{id}}">${{label}}</label><input id="${{id}}" type="text">`;
+    document.getElementById(id).value = '{SENTINEL}';
+  }};
+  window.newId = () => swap('input-9', 'Choose one');           // a framework id changes
+  window.newLabel = () => swap('input-9', 'Choose one Show');   // then the label changes
+</script></body></html>"""
+
+
+def test_a_rerender_that_changes_one_key_is_still_secret():
+    check = Checks()
+    with mock_page(_write("pw_rekey.html", REKEY)) as page:
+        real = page.evaluate
+        seen = _spy(page)
+        keys: set = set()
+        first = extract.extract_fields(page, keys)
+        check(first[0].get("secret") is True, "seen as a password first")
+        real("window.newId()")
+        f = extract.extract_fields(page, keys)[0]
+        check(f.get("secret") is True and f["dom_id"] == "input-9",
+              "re-rendered with a new id, same label: still secret (label key)")
+        real("window.newLabel()")
+        f = extract.extract_fields(page, keys)[0]
+        check(f.get("secret") is True and f["label"] == "Choose one Show",
+              "then a new label, same id as last time: still secret (id key)")
+        check(real("() => document.getElementById('input-9').hasAttribute('data-ja-secret')"),
+              "  ...and the element is marked again, so in-page readers refuse it too")
+        check(f["ref"] not in extract.snapshot(page, [f])
+              and f["ref"] not in page.evaluate(extract._SNAPSHOT_JS, [f["ref"]]),
+              "  ...and nothing reads it")
+    check(SENTINEL not in json.dumps(seen, default=str),
+          "the sentinel is nowhere in anything page.evaluate returned")
+    check.done()
+
+
 FILL_FORM = f"""<!doctype html><html><body><form>
   <label for="fn">First Name *</label><input id="fn" name="first_name" required>
   <label for="em">Email</label><input id="em" name="email" type="email">
@@ -194,8 +324,25 @@ def test_fill_never_stores_or_returns_the_password():
             return out
         return (cls, "evaluate", spy)
     real_accept = outcome._accept
-    hook = (outcome, "_accept", lambda raw, refs: (seen.append(raw), real_accept(raw, refs))[1])
-    patches = tuple(spying(c) for c in (Page, Frame, ElementHandle, Locator)) + (hook,)
+    payloads: list = []
+    hook = (outcome, "_accept",
+            lambda raw, refs: (seen.append(raw), payloads.append(raw), real_accept(raw, refs))[2])
+    real_watch = outcome.watch
+
+    def watch(page, *, record, stop_requested, **kw):
+        # You press Submit while the agent watches: a real pointerdown, which
+        # fires the submit-time hook. Then Enter.
+        pressed = {"n": 0}
+
+        def stop():
+            pressed["n"] += 1
+            if pressed["n"] == 1:
+                page.dispatch_event("#go", "pointerdown")
+                return False
+            return True
+        return real_watch(page, record=record, stop_requested=stop, poll_ms=200, **kw)
+    patches = (tuple(spying(c) for c in (Page, Frame, ElementHandle, Locator))
+               + (hook, (outcome, "watch", watch)))
     # A password box reads as a login wall: Enter at each of its three pauses
     # (before Apply, after Apply, at step 1), then "n" at "Did you submit it?".
     text, records, error = run_fill(form, dry_run=False, answers=("", "", "", "n"),
@@ -204,6 +351,8 @@ def test_fill_never_stores_or_returns_the_password():
     check(error is None, f"the run finished ({error})")
     check(any(isinstance(x, list) and x for x in seen),
           "the spies saw the page's reads (so the next checks mean something)")
+    check(any(isinstance(p, dict) and p for p in payloads),
+          "the submit hook fired and its payload was captured (so the next check means something)")
     check(SENTINEL not in json.dumps(seen, default=str), "not in anything evaluate or the hook returned")
     check(SENTINEL not in text, "not printed")
     rec = records[0] if records else {}

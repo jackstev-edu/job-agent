@@ -375,8 +375,11 @@ def cmd_fill(args) -> None:
 
             # The policy already hands every secret box to you; this makes sure
             # no plan entry for one can ever reach the filler.
+            # Nor can an entry whose ref isn't from the latest scan: an old
+            # generation's ref is treated as missing, never filled.
             secret_refs = {f["ref"] for f in fields if extract.is_secret(f)}
-            plan = {ref: d for ref, d in plan.items() if ref not in secret_refs}
+            plan = {ref: d for ref, d in plan.items()
+                    if ref not in secret_refs and extract.is_current(ref)}
             step_rows = filler.run_plan(page, fields, plan)
             steps.append(shadow.step_entry(fields, categories, plan, flags, step_rows,
                                            prefill_census=prefill))
