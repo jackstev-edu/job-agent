@@ -257,7 +257,7 @@
       false submit resets it.
     Needs you.
 
-23. **Fix-round follow-ups (deferred from the rule-reviewer, round 10-13)**
+23. **Fix-round follow-ups (deferred from the rule-reviewer, rounds 10-13 and after)**
     Not started. One line each, with the reviewer's smallest fix.
     - Item 14a: `score._edits` crashes on an `edits_json` entry that isn't a
       dict. Fix: return None unless every element is a dict.
@@ -310,6 +310,26 @@
       current gate_version toward a streak, or show runs per version.
     - 7619f96: no test combines aria-labelledby with a hidden unticked
       native box. Fix: add `visible=False` to the aria-labelledby case.
+    - 4ec285c (MEDIUM; must fix before any portal is enabled for
+      auto-submit): the same-element check is empty on real Ashby pair
+      boxes. They have no label and no ref, so before and after always
+      compare equal; the tests used a label shape the census can't produce.
+      Fix: have the census record the box's own `name` attribute (q-auth
+      etc.) and compare it; build `_pair` boxes as the census emits them
+      (empty labels); add a test running the real census on
+      button_pairs.html.
+    - 4ec285c: the sentinel test wasn't extended, and the new test never
+      reads the raw db. Fix: add a ticked sensitive pair with pre-fill and
+      post-fill states to `test_no_answer_values_reach_gate_runs`, and assert
+      on the whole stored `prefill_census` and the raw db bytes.
+    - 4ec285c: withholding a pair's state only because its question is
+      traced is untested (both test pairs also match the regex). Fix: give
+      a pair an empty label so withholding has to come from
+      `group_ref in traced`, and add an untraced empty-label pair.
+    - 4ec285c: unticked before and after is also an unpressed pair, so on
+      a dry run a No pair is exempt while a Yes pair stops. Fix: withhold
+      the No exemption when `dry_run` is set (or note it in the
+      `_is_pair_mirror` docstring and TODO item 21).
 
 ## Deferred
 
