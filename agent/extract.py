@@ -181,6 +181,12 @@ _SCAN_JS = r"""
         || el.getAttribute('aria-autocomplete') === 'list';
 
     const tag = el.tagName.toLowerCase();
+    // A password box's value is never read. Nor is the value of a box that
+    // is hinted as one, or named as one: a "show password" toggle flips
+    // type=password to text, so the type alone can't be trusted.
+    const secret = (el.type || '').toLowerCase() === 'password'
+        || /password/i.test(el.getAttribute('autocomplete') || '')
+        || /passw|pwd|passcode/i.test(`${el.name || ''} ${el.id || ''}`);
     const field = {
       ref: stamp(el),
       type: isCustomCombobox ? 'combobox'
@@ -190,7 +196,7 @@ _SCAN_JS = r"""
       placeholder: el.getAttribute('placeholder') || '',
       required: !!el.required || el.getAttribute('aria-required') === 'true',
       help_text: helpFor(el),
-      current_value: (el.value || '').slice(0, 200),
+      current_value: secret ? '' : (el.value || '').slice(0, 200),
       maxlength: el.maxLength > 0 ? el.maxLength : null,
     };
 
