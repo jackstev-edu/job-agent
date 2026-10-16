@@ -38,32 +38,29 @@ def _one_line(text: str) -> str:
     return re.sub(r"[\r\n]+", " ", text)
 
 
-# A checkbox's label as it reads right now, from every source the scan's
-# label could come from: aria-label, aria-labelledby, its <label>s, a
-# wrapping label, and, as the scan does only when none of those has text,
-# the nearby legend / label / .label up to four levels up (only then: a box
-# with its own label would otherwise pick up a neighbour's). Plus
-# aria-describedby, the name and the placeholder, so the backstop sees at
-# least what the scan saw. Local only: never sent anywhere.
+# A checkbox's label as it reads right now: aria-label, aria-labelledby,
+# its <label>s, a wrapping label, the scan's nearby legend / label / .label
+# fallback (always: four levels up, first one with text, even when the box
+# has a label of its own; a neighbour's label it picks up only sends the box
+# to you), aria-describedby and the placeholder. The name (or id, as the
+# scan takes it) comes back on its own, so it's split into words like the
+# scan's. Local only: never sent anywhere.
 _CHECKBOX_LABEL_JS = r"""
 el => {
-  const own = [el.getAttribute('aria-label'),
-               ...(el.getAttribute('aria-labelledby') || '').split(/\s+/)
-                 .map(id => document.getElementById(id)?.innerText),
-               ...[...(el.labels || [])].map(l => l.innerText),
-               el.closest('label')?.innerText].filter(t => t && t.trim());
-  if (!own.length) {
-    let parent = el.parentElement;
-    for (let i = 0; i < 4 && parent; i++, parent = parent.parentElement) {
-      const n = parent.querySelector(':scope > legend, :scope > label, :scope > .label');
-      if (n && n.innerText.trim()) { own.push(n.innerText); break; }
-    }
+  const parts = [el.getAttribute('aria-label'),
+                 ...(el.getAttribute('aria-labelledby') || '').split(/\s+/)
+                   .map(id => document.getElementById(id)?.innerText),
+                 ...[...(el.labels || [])].map(l => l.innerText),
+                 el.closest('label')?.innerText];
+  let parent = el.parentElement;
+  for (let i = 0; i < 4 && parent; i++, parent = parent.parentElement) {
+    const n = parent.querySelector(':scope > legend, :scope > label, :scope > .label');
+    if (n && n.innerText.trim()) { parts.push(n.innerText); break; }
   }
-  return [...own,
-          ...(el.getAttribute('aria-describedby') || '').split(/\s+/)
-            .map(id => document.getElementById(id)?.innerText),
-          el.getAttribute('name'), el.getAttribute('placeholder')]
-    .filter(Boolean).join(' ');
+  parts.push(...(el.getAttribute('aria-describedby') || '').split(/\s+/)
+               .map(id => document.getElementById(id)?.innerText),
+             el.getAttribute('placeholder'));
+  return {label: parts.filter(Boolean).join(' '), name: el.getAttribute('name') || el.id || ''};
 }
 """
 
@@ -101,18 +98,21 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
             return False, f"'{value}' is not one of the radio options"
 
         if field_type == "checkbox":
-            # The label as it reads now, not as it read at the scan, on every
-            # reading of the text: a box relabelled since into terms,
-            # consent or anything else HARD_STOPS stops, or into a kind of
-            # legal question the scan didn't see, is never ticked or
-            # unticked. A legal box the scan already saw as that kind was
-            # routed by the policy (a strict fit from its own profile line).
-            label = element.evaluate(_CHECKBOX_LABEL_JS) or ""
-            if sensitive.stop_reason(label):
+            # The label as it reads now, on every reading of the text. A box
+            # that now matches HARD_STOPS, or whose PROFILE_PATHS lines or
+            # LEGAL_GUARD kinds differ at all from the scan's question text
+            # (a line or kind added, removed or changed), is a different
+            # question from the one the policy answered: never ticked or
+            # unticked.
+            now = element.evaluate(_CHECKBOX_LABEL_JS) or {}
+            label, name = str(now.get("label") or ""), str(now.get("name") or "")
+            if sensitive.stop_reason(f"{label} {name}"):
                 return False, "refused — this box now reads like terms or consent; it's yours"
-            if set(sensitive.legal_guard_kinds({"label": label})) - set(
-                    sensitive.legal_guard_kinds(field)):
-                return False, "refused — this box now reads as a legal question; it's yours"
+            if (set(sensitive.profile_lines(f"{label} {name}"))
+                    != set(sensitive.profile_lines(sensitive._question_text(field)))
+                    or set(sensitive.legal_guard_kinds({"label": label, "name": name}))
+                    != set(sensitive.legal_guard_kinds(field))):
+                return False, "refused — this box now reads as a different question; it's yours"
             element.set_checked(bool(value), timeout=4000)
             return True, "ticked" if value else "unticked"
 

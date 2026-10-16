@@ -153,14 +153,20 @@ def test_ordinary_questions_are_left_alone():
     check.done()
 
 
+# Each field in its own wrapper, as most portals lay them out. With every
+# label a direct child of the form, filler's click-time label check (which
+# always reads the nearby legend / label fallback) picks up the form's first
+# label for each box, so a box that was answered correctly comes to you
+# instead: a false positive, accepted rather than narrowing that check
+# (pinned in tests/test_filler_relabel.py).
 CHECKBOXES = """<!doctype html><html><body><form>
-  <label><input type="checkbox" name="vet" id="vet"> I am a protected veteran</label>
+  <div><label><input type="checkbox" name="vet" id="vet"> I am a protected veteran</label></div>
   <fieldset><legend>Race</legend>
     <label><input type="checkbox" name="race[]" value="w" id="r1"> White</label>
     <label><input type="checkbox" name="race[]" value="a" id="r2"> Asian</label>
     <label><input type="checkbox" name="race[]" value="b" id="r3"> Black</label></fieldset>
-  <label><input type="checkbox" name="auth" id="auth"> I am authorized to work in the United States</label>
-  <label><input type="checkbox" name="reloc" id="reloc"> I am willing to relocate if the pay is right</label>
+  <div><label><input type="checkbox" name="auth" id="auth"> I am authorized to work in the United States</label></div>
+  <div><label><input type="checkbox" name="reloc" id="reloc"> I am willing to relocate if the pay is right</label></div>
 </form></body></html>"""
 
 CHECKBOX_PROFILE_LINES = ("  willing_to_relocate: true\n"

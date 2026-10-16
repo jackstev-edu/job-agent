@@ -70,10 +70,11 @@ How the code keeps them, and rules of its own:
   button or input inside the row) and a text box can't submit the form; a
   button-pair answer must still sit in its group, be unable to submit and
   not read like Submit or I agree. Before ticking or unticking a checkbox
-  it re-reads the label (its own label sources, else the nearby legend /
-  label / .label fallback, plus aria-describedby, name and placeholder) and
-  refuses a box that now matches HARD_STOPS on any reading of the text, or
-  a LEGAL_GUARD kind the scan didn't see. After choosing a dropdown row it
+  it re-reads the label (its own label sources, the nearby legend / label /
+  .label fallback always, aria-describedby, placeholder, and the name split
+  into words) and refuses a box that now matches HARD_STOPS on any reading
+  of the text, or whose PROFILE_PATHS lines or LEGAL_GUARD kinds differ at
+  all (added, removed or changed) from the scan's question text. After choosing a dropdown row it
   checks in the page that the dropdown shows that choice, or empties the
   box and reports it unfilled. A radio option is checked with no
   click-time re-check. It has no code path that clicks Submit, accepts

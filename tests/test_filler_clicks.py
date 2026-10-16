@@ -153,7 +153,7 @@ def test_a_climb_up_label_relabelled_after_the_scan_is_not_ticked():
     print(f"  {d1} / {d2} / {state}")
     check(not ok1 and "terms or consent" in d1 and not state["news"],
           "relabelled to terms after the scan: refused, not ticked")
-    check(not ok2 and "legal question" in d2 and not state["updates"],
+    check(not ok2 and "different question" in d2 and not state["updates"],
           "relabelled to a legal question the scan didn't see: refused, not ticked")
     check(ok3 and state["offers"], "positive control: an unchanged box is still ticked")
     check.done()
