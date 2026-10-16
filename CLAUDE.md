@@ -64,11 +64,20 @@ How the code keeps them, and rules of its own:
 - On a login wall the agent pauses and you sign in; you press the button.
   Account creation is never automated. On a multi-page application the agent
   fills the page it's on and logs that more pages follow; you move between
-  pages. `filler.py` never presses Enter, never types a line break outside a
-  textarea, and checks again at click time that a dropdown can't submit the
-  form and that a checkbox's label doesn't read as terms or consent; it has
-  no code path that clicks Submit, accepts terms or signs anything. It must
-  stay that way.
+  pages. `filler.py` never presses Enter and never types a line break
+  outside a textarea. At click time it checks again, on the element and on
+  the button or input around it, that a dropdown, a dropdown row (or a
+  button or input inside the row) and a text box can't submit the form; a
+  button-pair answer must still sit in its group, be unable to submit and
+  not read like Submit or I agree. Before ticking or unticking a checkbox
+  it re-reads the label (its own label sources, else the nearby legend /
+  label / .label fallback, plus aria-describedby, name and placeholder) and
+  refuses a box that now matches HARD_STOPS on any reading of the text, or
+  a LEGAL_GUARD kind the scan didn't see. After choosing a dropdown row it
+  checks in the page that the dropdown shows that choice, or empties the
+  box and reports it unfilled. A radio option is checked with no
+  click-time re-check. It has no code path that clicks Submit, accepts
+  terms or signs anything. It must stay that way.
 - The submit gate is shadow mode only: it logs and scores a call, and no code
   path acts on it. It never adds a click, a tick or a submit, and filling is
   routed exactly as before (classifier, policy table, HARD_STOPS). It defaults

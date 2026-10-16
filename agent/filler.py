@@ -38,17 +38,33 @@ def _one_line(text: str) -> str:
     return re.sub(r"[\r\n]+", " ", text)
 
 
-# A checkbox's label as it reads right now, every source joined, so the
-# backstop sees at least what the scan saw. Local only: never sent anywhere.
+# A checkbox's label as it reads right now, from every source the scan's
+# label could come from: aria-label, aria-labelledby, its <label>s, a
+# wrapping label, and, as the scan does only when none of those has text,
+# the nearby legend / label / .label up to four levels up (only then: a box
+# with its own label would otherwise pick up a neighbour's). Plus
+# aria-describedby, the name and the placeholder, so the backstop sees at
+# least what the scan saw. Local only: never sent anywhere.
 _CHECKBOX_LABEL_JS = r"""
-el => [el.getAttribute('aria-label'),
-       ...(el.getAttribute('aria-labelledby') || '').split(/\s+/)
-         .map(id => document.getElementById(id)?.innerText),
-       ...[...(el.labels || [])].map(l => l.innerText),
-       el.closest('label')?.innerText,
-       ...(el.getAttribute('aria-describedby') || '').split(/\s+/)
-         .map(id => document.getElementById(id)?.innerText)]
-  .filter(Boolean).join(' ')
+el => {
+  const own = [el.getAttribute('aria-label'),
+               ...(el.getAttribute('aria-labelledby') || '').split(/\s+/)
+                 .map(id => document.getElementById(id)?.innerText),
+               ...[...(el.labels || [])].map(l => l.innerText),
+               el.closest('label')?.innerText].filter(t => t && t.trim());
+  if (!own.length) {
+    let parent = el.parentElement;
+    for (let i = 0; i < 4 && parent; i++, parent = parent.parentElement) {
+      const n = parent.querySelector(':scope > legend, :scope > label, :scope > .label');
+      if (n && n.innerText.trim()) { own.push(n.innerText); break; }
+    }
+  }
+  return [...own,
+          ...(el.getAttribute('aria-describedby') || '').split(/\s+/)
+            .map(id => document.getElementById(id)?.innerText),
+          el.getAttribute('name'), el.getAttribute('placeholder')]
+    .filter(Boolean).join(' ');
+}
 """
 
 
@@ -85,12 +101,18 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
             return False, f"'{value}' is not one of the radio options"
 
         if field_type == "checkbox":
-            # The label as it reads now, not as it read at the scan: a box
-            # relabelled since into terms, consent or anything else the
-            # backstop stops is never ticked or unticked.
-            label = element.evaluate(_CHECKBOX_LABEL_JS)
-            if any(rx.search(label or "") for rx, _ in sensitive._STOPS):
+            # The label as it reads now, not as it read at the scan, on every
+            # reading of the text: a box relabelled since into terms,
+            # consent or anything else HARD_STOPS stops, or into a kind of
+            # legal question the scan didn't see, is never ticked or
+            # unticked. A legal box the scan already saw as that kind was
+            # routed by the policy (a strict fit from its own profile line).
+            label = element.evaluate(_CHECKBOX_LABEL_JS) or ""
+            if sensitive.stop_reason(label):
                 return False, "refused — this box now reads like terms or consent; it's yours"
+            if set(sensitive.legal_guard_kinds({"label": label})) - set(
+                    sensitive.legal_guard_kinds(field)):
+                return False, "refused — this box now reads as a legal question; it's yours"
             element.set_checked(bool(value), timeout=4000)
             return True, "ticked" if value else "unticked"
 
@@ -110,6 +132,10 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
         # Ordinary text, email, tel, number, date, textarea. Outside a
         # textarea a typed line break is Enter, which can submit the form.
         text = str(value) if field_type == "textarea" else _one_line(str(value))
+        # Checked at click time: the box, or a button around it, may have
+        # become something that submits the form since the scan.
+        if element.evaluate(extract._SUBMITS_JS):
+            return False, "refused — this box could submit the form; it's yours"
         element.click(timeout=4000)
         element.fill("", timeout=4000)               # clear anything pre-filled
         element.type(text, delay=12, timeout=25_000)
@@ -127,9 +153,12 @@ CONFIRM = " — confirm this one"
 
 # Marks the one option row we intend to click, so Playwright can click it with
 # real mouse events — react-select and Workday listen for mousedown, and a
-# JavaScript .click() on the row does nothing on either.
+# JavaScript .click() on the row does nothing on either. A row that is, sits
+# in, or holds a button or input that could submit the form is refused
+# ("submits"), never marked: clicking it could send the application.
 _MARK_OPTION_JS = r"""
 (wanted) => {
+  const SUBMITS = """ + extract._SUBMITS_JS + r""";
   const sel = '[role=option], [role=listbox] li, [role=listbox] [data-value],'
             + 'ul[class*=menu i] li, li[class*=option i], div[class*=option i]';
   document.querySelectorAll('[data-ja-opt]').forEach(el => el.removeAttribute('data-ja-opt'));
@@ -138,10 +167,29 @@ _MARK_OPTION_JS = r"""
   const leaves = hits.filter(el => !hits.some(o => o !== el && el.contains(o)));
   const row = leaves.find(el => el.innerText.trim() === wanted);
   if (!row) return false;
+  if (SUBMITS(row) || [...row.querySelectorAll('button, input')].some(SUBMITS)) return 'submits';
   row.setAttribute('data-ja-opt', '1');
   return true;
 }
 """
+
+# After a row is clicked (and the menu closed), does the dropdown show that
+# choice? Compared in the page against the agent's own value; only true or
+# false comes back. A secret box is never read and counts as not showing it.
+_SHOWS_CHOICE_JS = ("""
+(el, choice) => {
+""" + extract._SECRET_JS + r"""
+  if (isSecret(el, '')) return false;
+  const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
+  const shown = [];
+  if ('value' in el && el.tagName !== 'BUTTON') shown.push(el.value);
+  const box = el.closest('[class*="control"], [role=combobox]') || el;
+  for (const d of box.querySelectorAll('[class*="single-value"], [class*="singleValue"]'))
+    shown.push(d.innerText);
+  if (!('value' in el)) shown.push(el.innerText);
+  return shown.some(t => norm(t) === norm(choice));
+}
+""")
 
 
 def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool, str]:
@@ -181,6 +229,9 @@ def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool
 
     try:
         marked = page.evaluate(_MARK_OPTION_JS, choice)
+        if marked == "submits":
+            _abandon_combobox(page, element)
+            return False, f"refused — the row for '{choice}' could submit the form; left empty for you"
         if marked:
             page.locator("[data-ja-opt='1']").first.click(timeout=3000)
     except Exception:
@@ -192,6 +243,14 @@ def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool
     # A menu still up after the click is closed, never committed with Enter.
     if extract.read_open_options(page):
         extract.close_dropdown(page)
+    # Some widgets undo a pending choice on Escape. Claim it only if it shows.
+    try:
+        kept = element.evaluate(_SHOWS_CHOICE_JS, choice)
+    except Exception:
+        kept = False
+    if not kept:
+        _abandon_combobox(page, element)
+        return False, f"the dropdown didn't keep '{choice}'; left empty for you"
 
     if how in ("exact", "normalized"):
         return True, f"selected '{choice}'"

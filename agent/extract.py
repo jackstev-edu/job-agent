@@ -133,9 +133,12 @@ _TEXT_OF_JS = (r"""
 """)
 
 # Can clicking this element submit a form? A <button> with no type is
-# type=submit, so a typeless button inside a form counts.
-_SUBMITS_JS = r"""el => ['BUTTON', 'INPUT'].includes(el.tagName) && !!el.form
-    && ['submit', 'image'].includes(String(el.type || '').toLowerCase())"""
+# type=submit, so a typeless button inside a form counts. Checked on the
+# element and on the button or input around it: a click on a div inside a
+# submit button is a click on that button.
+_SUBMITS_JS = r"""el => [el, el.closest('button, input')].some(e => !!e
+    && ['BUTTON', 'INPUT'].includes(e.tagName) && !!e.form
+    && ['submit', 'image'].includes(String(e.type || '').toLowerCase()))"""
 
 # Does a dropdown's box hold any text? Only true or false leaves the page,
 # never the text or its length. The password test runs first, and a box (or
