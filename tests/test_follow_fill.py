@@ -342,7 +342,17 @@ UPLOAD_THEN_HELP = f"""<!doctype html><html><head><title>Engineer - Example Co</
 </script>{CLICKS_JS}</body></html>"""
 
 
-def test_help_text_on_a_page_after_the_upload_never_reaches_a_model():
+def _helps_sent(sent, label):
+    """The help text every model call was given for the field labelled `label`."""
+    out = []
+    for s in sent:
+        for f in json.loads(s):
+            if f.get("label") == label:
+                out.append(f.get("help_text") or "")
+    return out
+
+
+def test_an_empty_fields_help_text_after_the_upload_is_classified_with_it():
     import apply
     from _fill_run import PROFILE, classify_by_label, map_from_profile
 
@@ -376,10 +386,11 @@ def test_help_text_on_a_page_after_the_upload_never_reaches_a_model():
     reasons = [fl.get("reason", "") for fl in rec.get("flags", [])
                if fl.get("label") == "Phone"]
     check(error is None and any("HELP-SENTINEL" in json.dumps(f) for f in rec.get("fields", [])),
-          f"page 2's help text was scanned (so the checks below mean something) ({error})")
-    check(all("HELP-SENTINEL" not in s for s in sent), "it reached no classify or mapper call")
-    check(reasons and "help text held back in follow mode" in reasons[0],
-          f"Phone came to you instead ({reasons})")
+          f"page 2's help text was scanned ({error})")
+    helps = _helps_sent(sent, "Phone")
+    check(helps and all("HELP-SENTINEL-4471" in h for h in helps),
+          f"empty Phone went to the model with its static help text ({helps})")
+    check(not any("held back" in r for r in reasons), f"and isn't held back for you ({reasons})")
     check.done()
 
 
@@ -412,7 +423,7 @@ def _spies():
     return sent, classify, map_fields
 
 
-def test_help_text_next_to_a_resume_box_on_a_later_page_never_reaches_a_model():
+def test_help_text_next_to_a_resume_box_on_a_later_page_goes_over_after_the_upload():
     import apply
     from _fill_run import PROFILE
 
@@ -436,12 +447,12 @@ def test_help_text_next_to_a_resume_box_on_a_later_page_never_reaches_a_model():
                  (apply.mapper, "map_fields", map_fields)))
     check(error is None and you.state.get("files") == 1,
           f"the resume was uploaded on page 2 (so the checks below mean something) ({error})")
-    check(all("HELP-SENTINEL" not in s for s in sent),
-          "page 2's help text reached no classify or mapper call, before or after the upload")
+    helps = _helps_sent(sent, "Phone")
+    check(helps and all("HELP-SENTINEL-5582" in h for h in helps),
+          f"empty Phone, scanned after the upload, went over with its help text ({helps})")
     rec = records[-1] if records else {}
     reasons = [fl.get("reason", "") for fl in rec.get("flags", []) if fl.get("label") == "Phone"]
-    check(reasons and "help text held back in follow mode" in reasons[0],
-          f"Phone came to you, with the follow-mode reason ({reasons})")
+    check(not any("held back" in r for r in reasons), f"and isn't held back for you ({reasons})")
     check.done()
 
 
@@ -468,6 +479,7 @@ def test_text_you_typed_before_the_first_scan_never_reaches_a_model():
             page.fill("#em", "jo@x")                  # you, before the agent's first scan
             state["typed"] = True
             return False
+        state["em"] = page.input_value("#em")
         state["n"] = state.get("n", 0) + 1
         return state["n"] > 25
     text, records, error, you = _follow(
@@ -479,10 +491,13 @@ def test_text_you_typed_before_the_first_scan_never_reaches_a_model():
           f"the scan did see the echoed help text (so the next check means something) ({error})")
     check(all("ECHO-SENTINEL" not in s for s in sent) and sent,
           "it reached no classify or mapper call")
+    check(not _helps_sent(sent, "Email") and _helps_sent(sent, "City"),
+          "the field you typed in is in no model input; the empty City is")
+    check(you.state.get("em") == "jo@x", "  ...and what you typed is still there")
     check.done()
 
 
-def test_a_rescan_of_page_one_after_a_failed_fill_keeps_help_text_from_the_model():
+def test_a_rescan_of_page_one_after_a_failed_fill_keeps_your_answer_from_the_model():
     import apply
 
     check = Checks()
@@ -497,10 +512,14 @@ def test_a_rescan_of_page_one_after_a_failed_fill_keeps_help_text_from_the_model
 
     def act(page, state):
         if calls["n"] >= 1 and not state.get("revealed"):
-            # Your answer reveals a follow-up question with help text.
+            # Your answer reveals a follow-up question, which you answer;
+            # its help text echoes what you typed.
             page.evaluate("""() => document.querySelector('form').insertAdjacentHTML('beforeend',
                 '<label for="x">Extra</label><input id="x" name="extra" aria-describedby="xh">' +
-                '<div id="xh">HELP-SENTINEL-6693 echoes your answer</div>')""")
+                '<div id="xh">help</div>')""")
+            page.fill("#x", "my answer")
+            page.evaluate("""() => document.getElementById('xh').textContent =
+                "'my answer' HELP-SENTINEL-6693" """)
             state["revealed"] = True
         if state.get("revealed"):
             state["n"] = state.get("n", 0) + 1
@@ -514,8 +533,9 @@ def test_a_rescan_of_page_one_after_a_failed_fill_keeps_help_text_from_the_model
     check(error is None and calls["n"] >= 2 and any(
         "HELP-SENTINEL" in json.dumps(f) for f in rec.get("fields", [])),
           f"page 1 was rescanned with the revealed field (so the next check means something) ({error})")
-    check(all("HELP-SENTINEL" not in s for s in sent),
-          "the revealed field's help text reached no model call")
+    check(all("HELP-SENTINEL" not in s and "my answer" not in s for s in sent),
+          "the echo of your answer reached no model call")
+    check(not _helps_sent(sent, "Extra"), "the field you answered is in no model input")
     check.done()
 
 
@@ -579,6 +599,51 @@ def test_follow_and_dry_run_together_are_refused():
                                     routes=_route(SINGLE))
     check(error is None and "don't go together" in text and not records,
           "refused before the browser opens")
+    check.done()
+
+
+PREFILLED = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+  <form><label for="ci">City</label>
+    <input id="ci" name="home_city" value="PREFILL-SENTINEL-3307" aria-describedby="ci-h">
+    <div id="ci-h">Saved from your draft: PREFILL-SENTINEL-3307</div>
+    <label for="fn">First Name</label><input id="fn" name="first_name"></form>
+{CLICKS_JS}</body></html>"""
+
+
+def test_a_field_already_holding_a_value_is_in_no_model_input():
+    import apply
+
+    check = Checks()
+    sent, classify, map_fields = _spies()
+
+    def act(page, state):
+        state["city"] = page.input_value("#ci")
+        state["n"] = state.get("n", 0) + (page.input_value("#fn") != "")
+        return state["n"] > 3
+    text, records, error, you = _follow(
+        PREFILLED, act, path="/prefilled",
+        patches=((apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    check(error is None and _helps_sent(sent, "First Name"),
+          f"the empty field went to the model (so the next check means something) ({error})")
+    check(all("PREFILL-SENTINEL" not in s and "home_city" not in s for s in sent),
+          "the prefilled field (label, name, help, value) is in no classify or mapper call")
+    check(you.state.get("city") == "PREFILL-SENTINEL-3307", "  ...and it's left as it was")
+    check.done()
+
+
+def test_a_normal_fill_still_classifies_every_field_with_its_help():
+    import apply
+    from _fill_run import run_fill
+
+    check = Checks()
+    sent, classify, map_fields = _spies()
+    text, records, error = run_fill(
+        None, dry_run=True, url=f"{HOST}/normal", routes=_route(PREFILLED),
+        patches=((apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    check(error is None and any("PREFILL-SENTINEL" in h for h in _helps_sent(sent, "City")),
+          f"a normal fill's first scan sends every field, with its help, as before ({error})")
     check.done()
 
 

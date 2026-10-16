@@ -181,6 +181,39 @@ class FieldLedger:
         except Exception:
             return {"present": False}
 
+    def open_fields(self, page: "Page", fields: list[dict]) -> set[str]:
+        """
+        The refs of the fields that are empty, carry no agent mark and
+        aren't yours, read now from the page (booleans only, through the
+        same secret-safe check as fillable). Only these may reach a model:
+        a field holding any value is never filled, and its own label or
+        help can echo that value. A field seen with a value, or found
+        cleared after the agent filled it, becomes yours, as fillable
+        would make it.
+        """
+        keys = self._keys(fields)
+        out: set[str] = set()
+        for f in fields:
+            if f.get("type") == "file":
+                continue
+            key = keys.get(f["ref"])
+            entry = self.entries.get(key) if key else None
+            if entry is not None and entry.get("owner") == "jack":
+                continue
+            st = self.state(page, f, mark=(entry or {}).get("mark"))
+            if not st.get("present") or st.get("secret"):
+                continue
+            if not st["empty"]:
+                if key is not None and entry is None:
+                    self.entries[key] = {"owner": "jack"}
+                continue
+            if st.get("marked"):
+                if key is not None and (entry is None or st.get("same")):
+                    self.entries[key] = {"owner": "jack"}
+                continue
+            out.add(f["ref"])
+        return out
+
     def fillable(self, page: "Page", fields: list[dict], plan: dict, step=None) -> dict:
         """
         The plan entries the agent may fill now. A field is filled only if

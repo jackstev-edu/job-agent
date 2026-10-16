@@ -459,9 +459,6 @@ _WATCH_ENDED = {
 HELD_AFTER_UPLOAD = ("Its help text changed or appeared after the resume upload (help "
                      "text held back after upload), so the classifier couldn't be shown "
                      "it. Answer it yourself.")
-HELD_IN_FOLLOW = ("Follow mode never shows a model help text (help text held back in "
-                  "follow mode), so the classifier couldn't be shown it. Answer it "
-                  "yourself.")
 
 
 def _route(fields: list[dict], categories: dict, prof, new_after_upload: set[str],
@@ -575,18 +572,10 @@ class _FollowRun:
         self.steps: list[dict] = []
         self.step_numbers: set[int] = set()
         self.last_shape: dict | None = None
-        # Follow mode never shows a model help text: you may have typed
-        # before any scan, and a page can echo what you typed in its help
-        # ("'jo@x' is not a valid email"). So every scan counts as "later".
-        self.scanned = True
 
-    def _classify(self, fields: list[dict], with_help: bool = True) -> dict[str, str]:
-        """
-        Categories, from the cache or the classifier. Without help, every
-        field goes over (and is cached) with its help text blanked.
-        """
-        fields = [f if with_help else _for_model(f, False)
-                  for f in fields if f.get("type") != "file"]
+    def _classify(self, fields: list[dict]) -> dict[str, str]:
+        """Categories, from the cache or the classifier."""
+        fields = [f for f in fields if f.get("type") != "file"]
         known, todo = self.cache.split(fields)
         fresh = classify.classify_fields(todo) if todo else {}
         self.cache.remember(todo, fresh)
@@ -600,25 +589,17 @@ class _FollowRun:
 
     def fill_step(self, number: int) -> None:
         page = self.page
-        # Quiet first, so even the first scan doesn't read help text while
-        # you're typing.
+        # Quiet first, so the scan doesn't read the page while you're typing.
         if not self.guard.wait_quiet(page):
             self.events.append({"kind": "never_quiet", "detail": f"step {number}"})
             return
-        # No help text ever goes to a model in follow mode (see scanned):
-        # every field is classified with its help blanked, and a field with
-        # help text comes to you.
-        later = bool(self.resume_done or self.steps or self.scanned)
         fields = extract.extract_fields(page, self.read_guard)
-        self.scanned = True
         if not fields:
             return
         with self.guard.filling(page):
             fields = extract.enrich_comboboxes(page, fields, contained=True)
-        new_after_upload: set[str] = set()
         box = None if self.resume_done or not self.resume else _resume_box(fields)
         if box is not None and self.ledger.state(page, box).get("empty"):
-            before_fields, before = fields, self._classify(fields, with_help=not later)
             with self.guard.filling(page):
                 worked, detail = filler.upload_file(page, box["ref"], self.resume)
             print(f"  {GREEN if worked else RED}{detail}{OFF}")
@@ -629,18 +610,17 @@ class _FollowRun:
             fields = extract.enrich_comboboxes(
                 page, extract.extract_fields(page, self.read_guard), contained=True)
             self.uploaded = None            # the baseline across steps isn't tracked yet
-            categories, new_after_upload = _reclassify_after_upload(before_fields, before, fields)
-            if later:
-                new_after_upload = {f["ref"] for f in fields if f.get("type") != "file"}
-        elif later:
-            categories = self._classify(fields, with_help=False)
-            new_after_upload = {f["ref"] for f in fields if f.get("type") != "file"}
-        else:
-            categories = self._classify(fields)
+        # Only fields read empty, unmarked and not yours, after the scan, go
+        # to a model, with their label, placeholder and help text. A field
+        # holding a value (yours, prefilled, the resume autofill's) is in no
+        # model input: it's never filled, and its own help can echo it ("'jo@x'
+        # is not a valid email"). The gate stops on it as not answered.
+        open_refs = self.ledger.open_fields(page, fields)
+        for_classifier = [f for f in fields if f["ref"] in open_refs]
+        categories = self._classify(for_classifier)
         self._note_next_step()
-        plan, flags, for_model = _route(fields, categories, self.prof, new_after_upload,
-                                        held_reason=HELD_IN_FOLLOW)
-        _ask_mapper(for_model, self.prof, self.posting_text, new_after_upload, plan)
+        plan, flags, for_model = _route(for_classifier, categories, self.prof, set())
+        _ask_mapper(for_model, self.prof, self.posting_text, set(), plan)
         plan = _fillable_plan(fields, plan)
         prefill = _prefill_census(page)
         plan = self.ledger.fillable(page, fields, plan, step=number)

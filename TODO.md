@@ -411,10 +411,11 @@
         scan, when the page already holds a value (a saved draft, a page
         that opens filled). It's plain text, so the skip list doesn't catch
         it. aria-errormessage isn't read today; aria-describedby is.
-        Follow mode sends no help text to any model: every field is
-        classified with its help blanked, and any field with help text
-        that isn't profile- or human-routed comes to you ("help text held
-        back in follow mode"). A normal fill keeps the pre-upload rule (the
+        Follow mode sends a model only the fields it reads empty, unmarked
+        and not yours, just after each scan (booleans from the ledger's
+        state check), with label, placeholder and help text; a field
+        holding any value is in no model input. A normal fill keeps the
+        pre-upload rule (the
         one scan before the upload sends help; after it, unchanged fields
         reuse that classification and the rest go without help). Still
         open, in a normal fill only: the first scan of a page that already
@@ -503,6 +504,13 @@ open once anything submits without Jack.
   sign-in page in follow mode, so nothing on it is filled.
 - The react-select mock in tests/test_shows_choice.py is unverified
   against a live Greenhouse page (real react-select picks on click).
+- Follow mode, cross-field echo: a page can copy one field's value (yours,
+  or the resume autofill's) into another, empty field's label, placeholder
+  or help text, and that empty field goes to the model with it. Also a
+  field you typed in and cleared again before the scan reads empty, so its
+  help can still echo what you typed. Close both before auto-submit (for
+  instance, send no help for any field on a page where any field holds a
+  value, or compare help against the scan before your input).
 - From review FLAGs this run:
   - scan-time decide reads the name only as written; read it split into
     words too (as click time does);

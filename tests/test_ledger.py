@@ -65,6 +65,25 @@ def test_only_an_empty_field_is_filled_and_a_prefilled_one_is_yours():
     check.done()
 
 
+def test_open_fields_are_the_empty_ones_and_a_field_seen_with_a_value_stays_yours():
+    check = Checks()
+    with mock_page(_write("ledger_open.html", FORM)) as page:
+        led = ledger.FieldLedger()
+        fields, by = _scan(page)
+        check(led.open_fields(page, fields) == {by["City"]["ref"]},
+              "only the empty City is open; the prefilled Zip isn't")
+        page.fill("#zp", "")                            # you clear the Zip later
+        fields, by = _scan(page)
+        check(by["Zip"]["ref"] not in led.open_fields(page, fields)
+              and led.fillable(page, fields, _plan(by, Zip="00000")) == {},
+              "  ...and the Zip, seen with a value, stays yours: not open, never filled")
+        _fill(page, led, fields, _plan(by, City="Springfield"))
+        fields, by = _scan(page)
+        check(by["City"]["ref"] not in led.open_fields(page, fields),
+              "City, once the agent filled it, isn't open either")
+    check.done()
+
+
 def test_a_value_you_change_is_yours_for_good():
     check = Checks()
     with mock_page(_write("ledger_change.html", FORM)) as page:
