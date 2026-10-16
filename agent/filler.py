@@ -179,22 +179,36 @@ _MARK_OPTION_JS = r"""
 """
 
 # After a row is clicked (and the menu closed), does the dropdown show that
-# choice? Compared in the page against the agent's own value; only true or
-# false comes back. A secret box is never read and counts as not showing it.
+# choice? Compared in the page against the agent's own value; only a word
+# comes back:
+#   "kept"        a committed display shows it: the widget's control
+#                 container (react-select's single-value), or a button /
+#                 div combobox's own text;
+#   "unconfirmed" no separate display, and the box's value equals it. The
+#                 agent typed that value itself, so this proves little;
+#   "missing"     anything else. A secret box is never read: "missing".
 _SHOWS_CHOICE_JS = ("""
 (el, choice) => {
 """ + extract._SECRET_JS + r"""
-  if (isSecret(el, '')) return false;
+  if (isSecret(el, '')) return 'missing';
   const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
-  const shown = [];
-  if ('value' in el && el.tagName !== 'BUTTON') shown.push(el.value);
-  const box = el.closest('[class*="control"], [role=combobox]') || el;
-  for (const d of box.querySelectorAll('[class*="single-value"], [class*="singleValue"]'))
-    shown.push(d.innerText);
-  if (!('value' in el)) shown.push(el.innerText);
-  return shown.some(t => norm(t) === norm(choice));
+  const same = t => norm(t) === norm(choice);
+  // The control container first, as the snapshot finds it; an enclosing
+  // role=combobox only as a fallback, and never the element itself.
+  const control = el.closest('[class*="control"]')
+      || el.parentElement?.closest('[role=combobox]');
+  if (control) {
+    const shown = [...control.querySelectorAll(
+        '[class*="single-value"], [class*="singleValue"]')].map(d => d.innerText);
+    return shown.some(same) ? 'kept' : 'missing';
+  }
+  if (el.tagName === 'BUTTON' || !('value' in el)) return same(el.innerText) ? 'kept' : 'missing';
+  return same(el.value) ? 'unconfirmed' : 'missing';
 }
 """)
+
+# Added to a fill's detail when the page couldn't confirm it (see above).
+UNCONFIRMED = " — unconfirmed"
 
 
 def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool, str]:
@@ -250,16 +264,17 @@ def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool
         extract.close_dropdown(page)
     # Some widgets undo a pending choice on Escape. Claim it only if it shows.
     try:
-        kept = element.evaluate(_SHOWS_CHOICE_JS, choice)
+        shown = element.evaluate(_SHOWS_CHOICE_JS, choice)
     except Exception:
-        kept = False
-    if not kept:
+        shown = "missing"
+    if shown not in ("kept", "unconfirmed"):
         _abandon_combobox(page, element)
         return False, f"the dropdown didn't keep '{choice}'; left empty for you"
+    note = UNCONFIRMED if shown == "unconfirmed" else ""
 
     if how in ("exact", "normalized"):
-        return True, f"selected '{choice}'"
-    return True, f"selected '{choice}' — {how}{CONFIRM}"
+        return True, f"selected '{choice}'{note}"
+    return True, f"selected '{choice}' — {how}{note}{CONFIRM}"
 
 
 _BUTTON_FACTS_JS = r"""
@@ -345,6 +360,7 @@ def run_plan(page: "Page", fields: list[dict], plan: dict) -> list[dict]:
             "filled": worked,
             "detail": detail,
             "needs_review": bool(decision.get("needs_review")) or CONFIRM in detail,
+            "unconfirmed": UNCONFIRMED in detail,
             "source": decision.get("source", "model"),
             "confidence": decision.get("confidence", ""),
             "note": decision.get("note", ""),

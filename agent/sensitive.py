@@ -250,7 +250,11 @@ def text_variants(raw: str) -> list[str]:
     # deleted), kept so no text that matched before can stop matching: a
     # word split by one invisible and bounded by another needs exactly it.
     earlier = _EARLIER_INVISIBLE.sub("", nfkc)
-    return list(dict.fromkeys([raw, nfkc, deleted, spaced, earlier]))
+    # Whitespace collapsed to single spaces: a page's innerText puts line
+    # breaks between block and flex children, and "." in a pattern can't
+    # cross one ("I accept the\nTerms").
+    collapsed = [re.sub(r"\s+", " ", t) for t in (deleted, spaced)]
+    return list(dict.fromkeys([raw, nfkc, deleted, spaced, earlier, *collapsed]))
 
 
 def _question_text(field: dict) -> str:

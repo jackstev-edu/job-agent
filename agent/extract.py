@@ -175,7 +175,9 @@ _RAW_RULES_JS = (r"""
   const readings = t => {
     t = String(t || '');
     const n = t.normalize('NFKC');
-    return [t, n, n.replace(INVIS, ''), n.replace(INVIS, ' '), n.replace(EARLIER, '')];
+    const deleted = n.replace(INVIS, ''), spaced = n.replace(INVIS, ' ');
+    return [t, n, deleted, spaced, n.replace(EARLIER, ''),
+            deleted.replace(/\s+/g, ' '), spaced.replace(/\s+/g, ' ')];
   };
   const anyHit = (rxs, t) => { const rs = readings(t); return rxs.some(rx => rs.some(r => rx.test(r))); };
   const rawFlags = t => ({raw_stop: anyHit(RAW_STOPS, t), raw_legal: anyHit(RAW_LEGAL, t)});

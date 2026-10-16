@@ -30,7 +30,14 @@ from . import sensitive
 # 5: a pair planned "No" is exempt when its only box stays unticked; both
 #    exemptions need the same element before and after, and every box with
 #    the group_ref counts, grouped or not.
-GATE_VERSION = 5
+# 6: every check reads every reading of the text (as written, NFKC,
+#    invisibles deleted / as spaces, the earlier deletion, whitespace
+#    collapsed); a LEGAL_GUARD match is a legal field that needs a strict
+#    fit (exact, bool, decline) from a profile line in the same area
+#    (work authorization from an explicit set of lines), and stops when it
+#    spans two or more areas; the page's raw_stop / raw_legal flags make a
+#    field legal; a dropdown fill the page couldn't confirm stops.
+GATE_VERSION = 6
 
 WOULD_SUBMIT, WOULD_STOP = "would_submit", "would_stop"
 
@@ -342,6 +349,8 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             res = results.get(ref)
             if not res or not res.get("filled"):
                 content.append(f"{name}: filling it failed")
+            elif res.get("unconfirmed"):
+                content.append(f"{name}: the page couldn't confirm the choice (unconfirmed)")
         reasons = list(decision.get("review_reasons") or [])
         draft = bool(decision.get("draft"))
         if category == "free_text" or draft:

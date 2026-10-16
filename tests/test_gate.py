@@ -342,7 +342,7 @@ def test_4_ashby_button_pairs():
     elig = _pair(label="Are you willing to relocate?")
     stops(check, elig, "'Are you willing to relocate?': legal/eligibility/EEO/pay answer not traced",
           "a model-answered eligibility button pair")
-    check(run(mirror)["gate_version"] == gate.GATE_VERSION == 5, "gate_version bumped to 5")
+    check(run(mirror)["gate_version"] == gate.GATE_VERSION >= 5, "gate_version is 5 or later")
     check.done()
 
 

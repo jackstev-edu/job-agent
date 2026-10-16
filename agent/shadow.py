@@ -46,7 +46,8 @@ def step_entry(fields: list[dict], categories: dict, plan: dict, flags: list[dic
     results = None
     if rows is not None:
         refs = [ref for ref in plan if ref in by_ref]
-        results = {ref: {"filled": bool(r.get("filled")), "detail": r.get("detail", "")}
+        results = {ref: {"filled": bool(r.get("filled")), "detail": r.get("detail", ""),
+                         "unconfirmed": bool(r.get("unconfirmed"))}
                    for ref, r in zip(refs, rows)}
     return {
         "fields": [{k: f.get(k) for k in _FIELD_KEYS if k in f} for f in fields],
