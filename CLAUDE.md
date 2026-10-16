@@ -72,14 +72,19 @@ How the code keeps them, and rules of its own:
   not read like Submit or I agree. Before ticking or unticking a checkbox
   it re-reads the label (its own label sources, the nearby legend / label /
   .label fallback always, aria-describedby and placeholder) and the name
-  (as written and split into words). It refuses a box whose label and name
-  now match HARD_STOPS on any reading of the text, or whose set of every
-  matching PROFILE_PATHS line, or set of LEGAL_GUARD kinds, differs at all
-  (added, removed or changed) from the scan's question text read the same
-  way. After choosing a dropdown row it
-  checks in the page that the dropdown shows that choice, or empties the
-  box and reports it unfilled. A radio option is checked with no
-  click-time re-check. It has no code path that clicks Submit, accepts
+  (as written and split into words). It refuses the box if, on any reading
+  of the text: the label and name now match HARD_STOPS; or the set of every
+  matching PROFILE_PATHS line differs at all (added, removed or changed)
+  between the label plus the name (as written and split) and the scan's
+  question text plus its name (as written and split); or the set of
+  LEGAL_GUARD kinds differs between the label plus the split name and the
+  scan's label, help, placeholder, split name and options. After choosing a
+  dropdown row it checks in the page that a committed display (the control
+  container's single-value, or a button / div combobox's own text) shows
+  the choice; a plain input with no separate display is accepted but marked
+  unconfirmed, which the gate stops on; otherwise it empties the box and
+  reports it unfilled. A radio option is checked with no click-time
+  re-check. It has no code path that clicks Submit, accepts
   terms or signs anything. It must stay that way.
 - The submit gate is shadow mode only: it logs and scores a call, and no code
   path acts on it. It never adds a click, a tick or a submit, and filling is
@@ -99,6 +104,10 @@ How the code keeps them, and rules of its own:
 - Accepted, documented: a hostile page that already holds a password can
   plant it into a readable field or the submit hook and get it written to
   local files in ~/.job-agent. These files never leave the machine.
+- ACCEPTED until auto-submit: a page that changes a field's label or
+  structure between scan and fill, or splits words with invisible or
+  look-alike Unicode. Jack reviews every page before Submit. Reviewer:
+  FLAG, never BLOCK; record in TODO under MUST FIX BEFORE AUTO-SUBMIT.
 - The reviewer treats accepted routes as FLAG, never BLOCK. Any route that
   sends a page value to the model or the network is a BLOCK.
 

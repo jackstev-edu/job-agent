@@ -427,6 +427,62 @@
       page controls its DOM and could hand over the value many other ways;
       the guards are against reading one by accident.
 
+## MUST FIX BEFORE AUTO-SUBMIT
+
+Accepted for now (CLAUDE.md threat model: a page that changes a field
+between scan and fill, or splits words with invisible or look-alike
+Unicode; Jack reviews every page before Submit). None of these may stay
+open once anything submits without Jack.
+
+- **Line vs none:** when one reading of the text resolves to a profile
+  line and another to none, the field should come to Jack (today the line
+  is used).
+- **Unicode \w / \b parity:** the page's copy of HARD_STOPS and LEGAL_GUARD
+  runs with ASCII-only \w and \b; rewrite them as [\p{L}\p{N}_] and
+  Unicode-aware lookarounds, and add non-ASCII parity samples (accented
+  neighbours, U+0130, U+0131). JavaScript's \s also differs from Python's
+  (U+001C-001F, U+0085), so the collapsed readings aren't identical; use one
+  explicit class on both sides, collapse the earlier reading too, and add
+  whitespace samples.
+- **raw_legal_kinds:** the page returns only raw_legal (true / false); it
+  should return the kinds, merged into the guards before the two-area and
+  same-area checks.
+- **After-upload tests:** a field with no, or a duplicate, stable identity
+  treated as new; the gate counting the raw flags.
+- **The no-match-lost sweep as a pytest test** (sampled so the default run
+  stays under 6 minutes), so the reviewer can rerun it.
+- **Next detection:** by aria-label, and by "Proceed", "Review", "Save and
+  continue", "Save & Next".
+- **Test clean-ups from earlier rounds:** test_field_text.py (hide d3 or
+  select by dom_id / type; drop the v1 docstring claim; an Ashby title with
+  a single-value sentinel); test_posting_text.py (both sentinels on the
+  live page inside the patched draft); a watch()-driven hook test;
+  _fill_run answering the Apply prompt once via a flag;
+  test_more_matches_than_it_looks_through_counts depending on the limit.
+- **Stale comments:** gate.py _question_text ("normaliser included");
+  sensitive.py PROFILE_PATHS sponsorship-row comment (the eligibility line
+  set is now explicit).
+- **Corrections log:** record no profile line when readings disagree.
+- **Work-authorization lines:** export_control_us_person in,
+  security_clearance out (to Jack). Confirmed by Jack.
+- From review FLAGs this run:
+  - scan-time decide reads the name only as written; read it split into
+    words too (as click time does);
+  - the 2+-profile-lines rule only runs for profile / guarded fields; Jack
+    to decide whether it covers every field;
+  - the gate has no 2+-profile-lines stop of its own;
+  - keep the old first-match comparison as an extra click-time refusal;
+  - a "veteranIsDisabled" rename test, and a positive single-line
+    sponsorship test ("Do you require sponsorship?");
+  - `[class*="control"]` also matches Bootstrap's form-control / controls
+    wrappers (fills abandoned, or a sibling's single-value read); Jack to
+    decide the lookup;
+  - "unconfirmed" should default to true when the key is missing;
+  - negative tests: a button combobox whose text never changes, a
+    form-control wrapper, the Python collapsed reading; pin GATE_VERSION 6
+    in a test; the react-select mock is an approximation (real
+    react-select picks on click), unchecked against a live page.
+
 ## Deferred
 
 Parked for after the MVP. Each one says what's known and what it needs.
