@@ -153,5 +153,90 @@ def test_the_classification_cache_follows_the_label():
     check.done()
 
 
+UNTRACKED = """<!doctype html><html><body><form>
+  <div id="w"><div class="label">Nickname</div><input id="nick"></div>
+  <div><label for="e1">Employer</label><input id="e1" name="employer"></div>
+  <div><label for="e2">Employer</label><input id="e2" name="employer"></div>
+</form><script>
+  window.rerender = () => {
+    document.getElementById('w').innerHTML = '<div class="label">Nickname</div><input id="nick">';
+  };
+</script></body></html>"""
+
+
+def test_a_field_that_cant_be_tracked_is_never_refilled():
+    check = Checks()
+    with mock_page(_write("ledger_untracked.html", UNTRACKED)) as page:
+        led = ledger.FieldLedger()
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        nick = next(f for f in fields if f.get("dom_id") == "nick")
+        e1 = next(f for f in fields if f.get("dom_id") == "e1")
+        check(ledger.field_identity(nick) is None
+              and led._keys(fields)[e1["ref"]] is None,
+              "no identity (Nickname), and a shared one (two Employer boxes): both untracked")
+        plan = {nick["ref"]: {"value": "Sam"}, e1["ref"]: {"value": "Acme"}}
+        allowed = led.fillable(page, fields, plan, step=1)
+        rows = filler.run_plan(page, fields, allowed)
+        led.filled(page, fields, allowed, rows, step=1)
+        check(page.input_value("#nick") == "Sam" and page.input_value("#e1") == "Acme",
+              "each is filled once while empty")
+        page.fill("#nick", "")                          # you clear it, same element
+        page.fill("#e1", "")
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        plan = {f["ref"]: {"value": "x"} for f in fields if f.get("dom_id") in ("nick", "e1")}
+        check(led.fillable(page, fields, plan, step=1) == {},
+              "cleared by you on elements the agent marked: not refilled")
+        page.evaluate("window.rerender()")              # a fresh, unmarked Nickname box
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        plan = {f["ref"]: {"value": "x"} for f in fields if f.get("dom_id") == "nick"}
+        check(led.fillable(page, fields, plan, step=1) == {},
+              "re-rendered on the same step: still not refilled")
+    check.done()
+
+
+def test_a_field_whose_mark_failed_is_yours():
+    check = Checks()
+    with mock_page(_write("ledger_markfail.html", FORM)) as page:
+        led = ledger.FieldLedger()
+        fields, by = _scan(page)
+        plan = _plan(by, City="Springfield")
+        allowed = led.fillable(page, fields, plan)
+        rows = filler.run_plan(page, fields, allowed)
+        real = ledger._elements
+        ledger._elements = lambda page, refs: [None]    # marking can't find the element
+        try:
+            led.filled(page, fields, allowed, rows)
+        finally:
+            ledger._elements = real
+        check(led.entries[ledger.field_identity(by["City"])]["owner"] == "jack",
+              "an unmarked fill is recorded as yours")
+        page.fill("#ci", "")
+        page.evaluate("window.rerender()")
+        fields, by = _scan(page)
+        check(led.fillable(page, fields, _plan(by, City="Springfield")) == {},
+              "  ...so it's never refilled")
+    check.done()
+
+
+def test_a_fresh_guard_waits_the_full_quiet_period():
+    check = Checks()
+    with mock_page(_write("ledger_fresh_guard.html", FORM)) as page:
+        guard = ledger.ActivityGuard(quiet_ms=800, echo=lambda s: None)
+        guard.install(page)
+        check(guard.quiet_for(page) < 800,
+              "just installed, with no input seen yet: not quiet (input before it can't be seen)")
+    check.done()
+
+
+def test_a_misaligned_radio_group_is_never_the_agents():
+    check = Checks()
+    f = {"type": "radio", "options": ["Yes", "No"], "option_refs": ["g1-f0", "g1-f1", "g1-f2"]}
+    check(ledger._option_index(f, "Yes") is None,
+          "three option elements, two labels: no option counts as the agent's")
+    f["option_refs"] = ["g1-f0", "g1-f1"]
+    check(ledger._option_index(f, "No") == 1, "lined up one to one: the index is used")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())

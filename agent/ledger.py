@@ -80,6 +80,7 @@ _STATE_JS = ("""
     return {present: true, secret: true};
   const norm = t => String(t ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
   const same = !!mark && els.every(e => e.getAttribute('""" + MARK_ATTR + r"""') === mark);
+  const marked = els.some(e => e.hasAttribute('""" + MARK_ATTR + r"""'));
   const el = els[0];
   let empty, mine = false;
   if (kind === 'radio' || kind === 'buttons') {
@@ -108,7 +109,7 @@ _STATE_JS = ("""
     empty = !norm(el.value);
     mine = agentValue !== null && norm(el.value) === norm(agentValue);
   }
-  return {present: true, empty, mine, same};
+  return {present: true, empty, mine, same, marked};
 }
 """)
 
@@ -127,7 +128,14 @@ def _elements(page: "Page", refs: list[str]):
 
 
 def _option_index(f: dict, value) -> int | None:
+    """
+    Which option element the agent's value is. None (never "the agent's")
+    when the options and the option elements don't line up one to one: the
+    scan drops an option with no label text, which would shift every index.
+    """
     options = f.get("options") or []
+    if len(options) != len(f.get("option_refs") or []):
+        return None
     return options.index(str(value)) if value is not None and str(value) in options else None
 
 
@@ -137,14 +145,28 @@ def _refs(f: dict) -> list[str]:
 
 class FieldLedger:
     """
-    Whose each field is, by structure. Only fields with a stable identity
-    can be tracked across re-renders; one without is filled at most once,
-    while its element is the one the agent filled, and never refilled.
+    Whose each field is, by structure. Only a field whose identity is
+    unique in the scan can be tracked across re-renders. One without (no
+    identity, or one shared with another field) is never filled while any
+    of its elements carries an agent mark, and once the agent has filled a
+    field like that on a step, none is filled on that step again.
     """
 
     def __init__(self):
         self.entries: dict[tuple, dict] = {}
         self._marks = (f"m{n}" for n in itertools.count(1))
+        self._anon_steps: set = set()               # steps where an untracked field was filled
+
+    @staticmethod
+    def _keys(fields: list[dict]) -> dict[str, tuple | None]:
+        """Each field's identity, or None when it has none or shares it in this scan."""
+        idents = {f["ref"]: field_identity(f) for f in fields}
+        counts: dict = {}
+        for k in idents.values():
+            if k is not None:
+                counts[k] = counts.get(k, 0) + 1
+        return {ref: (k if k is not None and counts[k] == 1 else None)
+                for ref, k in idents.items()}
 
     def state(self, page: "Page", f: dict, value=None, mark: str | None = None) -> dict:
         """The field's state now, from the page; {"present": False} if it can't be told."""
@@ -159,23 +181,34 @@ class FieldLedger:
         except Exception:
             return {"present": False}
 
-    def fillable(self, page: "Page", fields: list[dict], plan: dict) -> dict:
+    def fillable(self, page: "Page", fields: list[dict], plan: dict, step=None) -> dict:
         """
         The plan entries the agent may fill now. A field is filled only if
         it's empty and isn't yours; after a re-render, only if it's empty,
-        its element was replaced and the agent's value showed last time.
-        Every other field the agent has seen with a value becomes yours.
+        its element was replaced and the agent's value showed at the last
+        look. Every other field the agent has seen with a value becomes
+        yours. `step` names the step (follow mode passes it), for fields
+        that can't be tracked.
         """
         by_ref = {f["ref"]: f for f in fields}
+        keys = self._keys(fields)
         out = {}
         for ref, decision in plan.items():
             f = by_ref.get(ref)
             if f is None:
                 continue
-            key = field_identity(f)
+            key = keys.get(ref)
             entry = self.entries.get(key) if key else None
             st = self.state(page, f, mark=(entry or {}).get("mark"))
             if not st.get("present") or st.get("secret"):
+                continue
+            if key is None:
+                # Untracked: never over an element the agent marked, and
+                # never twice on one step.
+                if st.get("marked") or (step is not None and step in self._anon_steps):
+                    continue
+                if st["empty"]:
+                    out[ref] = decision
                 continue
             if entry is None:
                 if not st["empty"]:
@@ -193,9 +226,16 @@ class FieldLedger:
             # last look didn't show ours) is left alone.
         return out
 
-    def filled(self, page: "Page", fields: list[dict], plan: dict, rows: list[dict]) -> None:
-        """Record what the agent just filled (run_plan's rows, in plan order) and mark it."""
+    def filled(self, page: "Page", fields: list[dict], plan: dict, rows: list[dict],
+               step=None) -> None:
+        """
+        Record what the agent just filled (run_plan's rows, in plan order)
+        and mark it. "The agent's value showed" waits for the next look
+        (poll); a field whose mark couldn't be set is recorded as yours, so
+        it's never refilled.
+        """
         by_ref = {f["ref"]: f for f in fields}
+        keys = self._keys(fields)
         refs = [ref for ref in plan if ref in by_ref]
         for ref, row in zip(refs, rows):
             if not row.get("filled"):
@@ -203,13 +243,21 @@ class FieldLedger:
             f = by_ref[ref]
             mark = next(self._marks)
             try:
-                page.evaluate(_MARK_JS, [_elements(page, _refs(f)), mark])
+                els = _elements(page, _refs(f))
+                if None in els:
+                    raise ValueError("an element isn't unique")
+                page.evaluate(_MARK_JS, [els, mark])
+                marked = True
             except Exception:
-                pass
-            key = field_identity(f)
-            if key:
+                marked = False
+            key = keys.get(ref)
+            if key is None:
+                self._anon_steps.add(step)
+            elif not marked:
+                self.entries[key] = {"owner": "jack"}
+            else:
                 self.entries[key] = {"owner": "agent", "value": plan[ref].get("value"),
-                                     "mark": mark, "last_mine": True, "field": f}
+                                     "mark": mark, "last_mine": False, "field": f}
 
     def poll(self, page: "Page") -> None:
         """
@@ -244,7 +292,9 @@ class FieldLedger:
 _ACTIVITY_JS = r"""
 () => {
   if (window.__jaAct) return;
-  window.__jaAct = {last: -1e12, agent: false};
+  // Starts as "just now": input before this was installed can't be seen,
+  // so a fresh page always waits the full quiet period.
+  window.__jaAct = {last: performance.now(), agent: false};
   for (const t of ['keydown', 'input', 'pointerdown', 'mousedown', 'change', 'paste'])
     document.addEventListener(t, e => {
       if (e.isTrusted && !window.__jaAct.agent) window.__jaAct.last = performance.now();
