@@ -104,8 +104,8 @@ How the code keeps them, and rules of its own:
 - Put its VERDICT and FINDINGS in your report unedited. You may add your own
   response under them, but you may not drop or reword a finding.
 - On BLOCK: do not start the next item. Stop and wait for Jack.
-- On FLAG: continue only if Jack's prompt said to run several items in a
-  row; otherwise stop.
+- On FLAG: continue only if Jack's prompt asked for several items in a
+  row; always report every FLAG.
 - The reviewer is read-only. Fixes are made by the main session as a new
   commit, which is then reviewed again.
 
@@ -117,8 +117,7 @@ How the code keeps them, and rules of its own:
 - Run Python as .venv/Scripts/python.exe (use -m pip, never pip.exe).
 - Don't capture Jack's screen.
 - Rule-reviewer after each commit, output unedited; confirm the tree is
-  unchanged after each review. BLOCK: stop and report. FLAG: continue
-  and report.
+  unchanged after each review. BLOCK: stop and report.
 - Do not open, read or modify anything in ~/.job-agent.
 - Do not push, amend or rewrite commits.
 - Each new test must fail on the previous commit's code; say so per test.
