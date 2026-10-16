@@ -39,6 +39,18 @@ KINDS = {
     "verification (named otp)": ("""
       <label for="c">Enter the code we sent</label><input id="c" name="otp">""",
                                  pages.VERIFICATION),
+    "verification (named otp_code)": ("""
+      <label for="c">Code</label><input id="c" name="otp_code">""", pages.VERIFICATION),
+    "verification (id otpCode)": ("""
+      <label for="otpCode">Code</label><input id="otpCode">""", pages.VERIFICATION),
+    "sign-in (password shown as text, the hint kept)": ("""
+      <label for="em">Email</label><input id="em" type="email">
+      <label for="p1">Password</label>
+      <input id="p1" type="text" autocomplete="current-password" value="BROWSER">""",
+                                                        pages.SIGN_IN),
+    "sign-in (hidden password box)": ("""
+      <label for="em">Email</label><input id="em" type="email">
+      <input id="p1" type="password" style="display:none">""", pages.SIGN_IN),
     "an application page": ("""
       <label for="fn">First name</label><input id="fn" name="first_name">
       <label for="ph">Phone</label><input id="ph" name="phone">""", None),
@@ -51,11 +63,21 @@ def _write(name: str, html: str) -> Path:
     return path
 
 
+HOST = "https://jobs.example.com"
+
+
+def _served(html: str):
+    """A mock page at a real-looking host (a local file has no host: off_host)."""
+    routes = {f"{HOST}/**": lambda route: route.fulfill(content_type="text/html", body=html)}
+    return mock_page(_write("pages_blank.html", "<!doctype html><html></html>"), routes)
+
+
 def test_each_page_kind_is_recognised_without_touching_it():
     check = Checks()
     for i, (what, (body, want)) in enumerate(KINDS.items()):
         html = f"<!doctype html><html><body><form>{body}</form>{FOCUS_JS}</body></html>"
-        with mock_page(_write(f"kind_{i}.html", html)) as page:
+        with _served(html) as page:
+            page.goto(f"{HOST}/apply/{i}")
             seen, real = [], page.evaluate
 
             def spy(*a, **k):
@@ -67,7 +89,7 @@ def test_each_page_kind_is_recognised_without_touching_it():
             allowed = pages.fill_allowed(page, page.url)
             page.evaluate = real
             focused = page.evaluate("window.__focused")
-        check(got == want and allowed == want, f"{what}: {got}")
+        check(got == want and allowed == want, f"{what}: {got} / {allowed}")
         check(focused == [] and "BROWSER" not in repr(seen),
               f"  ...nothing focused and no value read ({focused})")
     check.done()
@@ -85,12 +107,21 @@ def test_only_the_applications_host_family_is_filled():
     check(pages.host_family("https://careers.acme.co.uk/a") == "acme.co.uk"
           and pages.host_family("https://evil.co.uk/a") != "acme.co.uk",
           "a two-part suffix (co.uk) keeps the company's name")
+    check(pages.host_family("https://acme.ne.jp/") != pages.host_family("https://evil.ne.jp/"),
+          "an unknown registry level (ne.jp) keeps the whole host, never a shared family")
+    check(pages.host_family("http://10.0.3.4/") != pages.host_family("http://192.168.3.4/"),
+          "an IP address is its own family")
 
     class FakePage:
         def __init__(self, url):
             self.url = url
     check(pages.fill_allowed(FakePage("https://evil.example.com/form"), start) == pages.OFF_HOST,
           "a page on another host family: off_host, fill nothing")
+    for start_url in ("", None, "about:blank"):
+        check(pages.fill_allowed(FakePage("https://boards.greenhouse.io/a"), start_url)
+              == pages.OFF_HOST, f"no start host ({start_url!r}): off_host")
+    check(pages.fill_allowed(FakePage("file:///C:/form.html"), "file:///C:/form.html")
+          == pages.OFF_HOST, "a local file has no host: off_host")
     check.done()
 
 
@@ -106,6 +137,27 @@ def test_linkedin_is_refused_outright():
                              "https://www.linkedin.com/jobs/view/1") == pages.LINKEDIN,
           "started from LinkedIn: refused everywhere")
     check(not pages.is_linkedin("https://notlinkedin.com/x"), "a look-alike name isn't LinkedIn")
+    check(pages.is_linkedin("https://lnkd.in/abc") and pages.is_linkedin("https://www.linkedin.cn/x"),
+          "LinkedIn's short links and its .cn site are refused too")
+    check.done()
+
+
+def test_a_page_that_cant_be_read_fills_nothing():
+    check = Checks()
+
+    class Broken:
+        url = f"{HOST}/apply"
+
+        def __init__(self, result):
+            self.result = result
+
+        def evaluate(self, *a):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+    for result in (RuntimeError("gone"), None, {"pw": "0", "newPw": False, "code": False}):
+        check(pages.page_kind(Broken(result)) == pages.ACCOUNT,
+              f"unreadable or malformed ({type(result).__name__}): treated as an account page")
     check.done()
 
 
