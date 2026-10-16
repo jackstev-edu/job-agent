@@ -80,10 +80,15 @@ def test_fit_kinds():
         def get(self, path):
             return {"eligibility.authorized_to_work_us": True}.get(path)
     v = sensitive.decide({"label": "Are you legally authorized to work in the US?",
-                          "type": "radio", "options": ["Yes, I am", "No"]},
+                          "type": "radio", "options": ["Yes", "No"]},
                          "work_authorization", P())
     check(v["action"] == "fill" and v["profile_path"] == "eligibility.authorized_to_work_us"
-          and v["fit"] == "bool_prefix", "decide records the line and the fit kind")
+          and v["fit"] == "bool", "decide records the line and the fit kind")
+    v = sensitive.decide({"label": "Are you legally authorized to work in the US?",
+                          "type": "radio", "options": ["Yes, I am", "No"]},
+                         "work_authorization", P())
+    check(v["action"] == "human",
+          "a legal question fitted only loosely (bool_prefix) comes to you, not filled")
     check.done()
 
 

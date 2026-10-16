@@ -15,6 +15,7 @@ answers to legal questions still come only from lines you wrote yourself.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 from .classify import action_for
@@ -136,7 +137,36 @@ _DECLINE = re.compile(
     re.I,
 )
 
+# ---------------------------------------------------------------------------
+#  The legal backstop. Eligibility, EEO and pay, matched on the question's
+#  own words, whole words only, locally. A field that matches never goes to
+#  the model or to draft-and-flag, whatever the classifier said: it's
+#  answered from a named profile line with an exact, yes/no or decline fit,
+#  or it comes to you. The classifier needs the right words to route these;
+#  this layer doesn't need the classifier at all.
+# ---------------------------------------------------------------------------
+LEGAL_GUARD: list[tuple[str, str]] = [
+    (r"\bwork(ing)?\s+authori[sz]\w*|\bauthori[sz]\w*\s+to\s+(work|be\s+employed)"
+     r"|\blegally\s+(authori[sz]\w*|entitled|permitted|eligible|able)"
+     r"|\beligib\w*\s+to\s+work|\bright\s+to\s+work\b|\bwork\s+permits?\b"
+     r"|\bsponsor\w*|\bvisas?\b|\bimmigra\w*|\bcitizen\w*|\bnationality\b"
+     r"|\bgreen\s+card\b|\bpermanent\s+residen\w*|\bh\s?1\s?b\b",
+     "work_authorization"),
+    (r"\bgender\w*|\bsex\b|\brace\b|\bracial\b|\bethnic\w*|\bhispanic\b"
+     r"|\blatin[oax]s?\b|\blatine\b|\bveterans?\b|\bdisab(led|ilit\w*)\b"
+     r"|\bsexual\s+orientation\b|\btransgender\b|\bpronouns?\b",
+     "eeo"),
+    (r"\bsalar(y|ies)\b|\bpay\b|\bwages?\b|\bcompensation\b"
+     r"|\b(expected|desired)\s+(rate|pay|salary|wage|compensation)\b|\bhourly\s+rate\b",
+     "compensation"),
+]
+
+# The fits a legal answer may take: the profile value as one of the form's
+# options exactly, a yes / no, or a decline option.
+LEGAL_FITS = {"exact", "bool", "decline"}
+
 _PATHS = [(re.compile(p, re.I), path) for p, path in PROFILE_PATHS]
+_LEGAL = [(re.compile(p, re.I), kind) for p, kind in LEGAL_GUARD]
 _STOPS = [(re.compile(p, re.I), why) for p, why, _ in HARD_STOPS]
 STOP_KINDS = [(re.compile(p, re.I), kind) for p, _, kind in HARD_STOPS]
 
@@ -145,6 +175,25 @@ def _question_text(field: dict) -> str:
     """Everything visible about the question — some portals hide it in help text."""
     return " ".join(str(field.get(k) or "") for k in
                     ("label", "help_text", "placeholder", "name"))
+
+
+def _identifier_words(name: str) -> str:
+    """'requiresSponsorship' / 'desired_salary' -> separate words, for the guard."""
+    name = re.sub(r"([a-z])([A-Z])", r"\1 \2", name)
+    name = re.sub(r"([A-Z])([A-Z][a-z])", r"\1 \2", name)
+    return re.sub(r"[_\-.\[\]]+", " ", name)
+
+
+def legal_guard(field: dict) -> str | None:
+    """
+    The LEGAL_GUARD kind a field matches ("work_authorization", "eeo",
+    "compensation"), or None. Read on the label, help text, placeholder and
+    name, NFKC-normalised; the name is split into words first. Local only.
+    """
+    text = unicodedata.normalize("NFKC", " ".join(
+        [str(field.get(k) or "") for k in ("label", "help_text", "placeholder")]
+        + [_identifier_words(str(field.get("name") or ""))]))
+    return next((kind for rx, kind in _LEGAL if rx.search(text)), None)
 
 
 def decide(field: dict, category: str, profile) -> dict:
@@ -179,12 +228,18 @@ def decide(field: dict, category: str, profile) -> dict:
                 "reason": f"Classified as {category.replace('_', ' ')} — "
                           f"this one is yours to answer."}
 
+    # -- layer 2b: the legal backstop. Whatever the classifier said, a
+    # question that reads as eligibility, EEO or pay is answered only from a
+    # profile line, with a strict fit, or by you.
+    guard = legal_guard(field)
+
     # -- layer 3: answers that must come from a named line in profile.yaml ---
-    if action == "profile":
+    if action == "profile" or guard:
+        kind = (guard or category).replace("_", " ")
         path = next((p for rx, p in _PATHS if rx.search(text)), None)
         if path is None:
             return {**base, "action": "human", "value": None, "source": "human",
-                    "reason": f"This is a {category.replace('_', ' ')} question, but "
+                    "reason": f"This is a {kind} question, but "
                               f"I can't tell which profile line answers it. "
                               f"Answer it yourself."}
         raw = profile.get(path)
@@ -193,10 +248,11 @@ def decide(field: dict, category: str, profile) -> dict:
                     "reason": f"`{path}` is blank in profile.yaml. Fill it in and "
                               f"this stops being manual."}
         value, fit = fit_with_kind(raw, field)
-        if value is None:
+        if value is None or (guard and fit not in LEGAL_FITS):
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"Your answer is '{raw}' but this form offers "
-                              f"{field.get('options')}. Pick one yourself."}
+                              f"{field.get('options') or 'a box to type in'}. "
+                              f"Pick one yourself."}
         return {**base, "action": "fill", "value": value, "source": "profile",
                 "profile_path": path, "fit": fit}
 

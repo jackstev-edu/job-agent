@@ -657,7 +657,8 @@ def _log_corrections(page, url, fields, plan, categories, final=None) -> None:
         # the same test that let the model near them in the first place.
         safe = (classify.action_for(cat) in ("autofill", "draft")
                 and not any(rx.search(sensitive._question_text(f))
-                            for rx, _ in sensitive._STOPS))
+                            for rx, _ in sensitive._STOPS)
+                and sensitive.legal_guard(f) is None)
         # Which profile line the question belongs to: the one that filled it,
         # else the one its wording maps to. Only the line's name is kept, never
         # its value, so this is safe to log for sensitive questions too.

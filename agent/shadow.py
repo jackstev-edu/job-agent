@@ -162,7 +162,7 @@ def _redacted_box(box: dict, traced: dict) -> dict:
     label = f"{box.get('label_inner') or ''} {box.get('label_content') or ''}"
     if box.get("ref") in traced or box.get("group_ref") in traced or any(
             rx.search(label) for rx, path in sensitive._PATHS
-            if path.startswith(_SENSITIVE_PREFIXES)):
+            if path.startswith(_SENSITIVE_PREFIXES)) or sensitive.legal_guard({"label": label}):
         out.pop("checked")
         out["checked_withheld"] = True
     return out

@@ -275,7 +275,7 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         kinds = _stop_kinds(f)
         line = _sensitive_line(f)
         sensitive_field = (category in SENSITIVE_CATEGORIES or line is not None
-                           or "legal" in kinds)
+                           or "legal" in kinds or sensitive.legal_guard(f) is not None)
 
         # 5. per-company questions are never answered from the profile yet.
         if category == "per_company" or "per_company" in kinds:
@@ -294,7 +294,7 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             consent_handoff = (category == "consent"
                                or (legal_hit and category == "legal_declaration"))
             if (idx is not None and consent_handoff and not kinds - {"legal"}
-                    and line is None):
+                    and line is None and sensitive.legal_guard(f) is None):
                 if legal_hit or category in SENSITIVE_CATEGORIES:
                     trace.append({"ref": ref, "label": label[:120], "category": category,
                                   "profile_path": None, "source": "consent_allowlist",

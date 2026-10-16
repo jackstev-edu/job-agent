@@ -16,7 +16,9 @@ sends them personally. Windows, PowerShell, venv at `.venv`, run as
 - `agent/sensitive.py` — turns categories into verdicts: fill from a named
   profile line / hand to the model / draft-and-flag / hand to the user. A
   regex backstop runs alongside; a field must clear BOTH layers to be
-  auto-filled.
+  auto-filled. A legal backstop (LEGAL_GUARD) sends any question that reads
+  as eligibility, EEO or pay to a named profile line with a strict fit, or
+  to the user, whatever the classifier said.
 - `agent/extract.py` — injects JS to pull a compact field list out of the page.
 - `agent/mapper.py` — answers ordinary fields in batches of 10, under a prompt
   that forces `null` rather than a guess.
