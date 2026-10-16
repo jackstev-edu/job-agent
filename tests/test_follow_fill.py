@@ -383,6 +383,101 @@ def test_help_text_on_a_page_after_the_upload_never_reaches_a_model():
     check.done()
 
 
+RESUME_ON_PAGE_TWO = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+  <form>
+    <section id="s1"><label for="fn">First Name</label><input id="fn" name="first_name">
+      <button type="button" id="n1">Next</button></section>
+  </form>
+<script>
+  document.getElementById('n1').onclick = () => {{
+    document.getElementById('s1').remove();
+    document.querySelector('form').insertAdjacentHTML('beforeend',
+      '<section id="s2"><label for="cv">Resume</label><input type="file" id="cv" name="resume">' +
+      '<label for="ph">Phone</label><input id="ph" name="phone" aria-describedby="ph-h">' +
+      '<div id="ph-h">HELP-SENTINEL-5582 is not a valid phone number</div></section>'); }};
+</script>{CLICKS_JS}</body></html>"""
+
+
+def _spies():
+    from _fill_run import classify_by_label, map_from_profile
+    sent = []
+
+    def classify(fields):
+        sent.append(json.dumps(fields))
+        return classify_by_label(fields)
+
+    def map_fields(fields, prof, page_text=""):
+        sent.append(json.dumps(fields))
+        return map_from_profile(fields, prof, page_text)
+    return sent, classify, map_fields
+
+
+def test_help_text_next_to_a_resume_box_on_a_later_page_never_reaches_a_model():
+    import apply
+    from _fill_run import PROFILE
+
+    check = Checks()
+    (TEST_HOME / "follow-p2-resume.pdf").write_bytes(b"%PDF-1.4 test resume\n")
+    profile = PROFILE.replace("resume_default: missing.pdf", "resume_default: follow-p2-resume.pdf")
+    sent, classify, map_fields = _spies()
+
+    def act(page, state):
+        if page.is_visible("#fn") and page.input_value("#fn"):
+            page.click("#n1")
+            return False
+        if page.is_visible("#ph"):
+            state["n"] = state.get("n", 0) + 1
+            state["files"] = page.evaluate("document.getElementById('cv').files.length")
+            return state["n"] > 25
+        return False
+    text, records, error, you = _follow(
+        RESUME_ON_PAGE_TWO, act, path="/resumep2", profile_yaml=profile,
+        patches=((apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    check(error is None and you.state.get("files") == 1,
+          f"the resume was uploaded on page 2 (so the checks below mean something) ({error})")
+    check(all("HELP-SENTINEL" not in s for s in sent),
+          "page 2's help text reached no classify or mapper call, before or after the upload")
+    check.done()
+
+
+def test_a_rescan_of_page_one_after_a_failed_fill_keeps_help_text_from_the_model():
+    import apply
+
+    check = Checks()
+    sent, classify_ok, map_fields = _spies()
+    calls = {"n": 0}
+
+    def classify(fields):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("you clicked mid-fill")   # nothing recorded for page 1
+        return classify_ok(fields)
+
+    def act(page, state):
+        if calls["n"] >= 1 and not state.get("revealed"):
+            # Your answer reveals a follow-up question with help text.
+            page.evaluate("""() => document.querySelector('form').insertAdjacentHTML('beforeend',
+                '<label for="x">Extra</label><input id="x" name="extra" aria-describedby="xh">' +
+                '<div id="xh">HELP-SENTINEL-6693 echoes your answer</div>')""")
+            state["revealed"] = True
+        if state.get("revealed"):
+            state["n"] = state.get("n", 0) + 1
+            return state["n"] > 25
+        return False
+    text, records, error, you = _follow(
+        SINGLE, act, path="/rescan",
+        patches=((apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    rec = records[-1] if records else {}
+    check(error is None and calls["n"] >= 2 and any(
+        "HELP-SENTINEL" in json.dumps(f) for f in rec.get("fields", [])),
+          f"page 1 was rescanned with the revealed field (so the next check means something) ({error})")
+    check(all("HELP-SENTINEL" not in s for s in sent),
+          "the revealed field's help text reached no model call")
+    check.done()
+
+
 def test_the_final_read_is_marked_when_it_isnt_the_filled_form():
     import apply
 

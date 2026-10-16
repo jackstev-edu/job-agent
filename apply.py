@@ -563,6 +563,7 @@ class _FollowRun:
         self.steps: list[dict] = []
         self.step_numbers: set[int] = set()
         self.last_shape: dict | None = None
+        self.scanned = False            # any page has been scanned in this run
 
     def _classify(self, fields: list[dict], with_help: bool = True) -> dict[str, str]:
         """
@@ -584,18 +585,25 @@ class _FollowRun:
 
     def fill_step(self, number: int) -> None:
         page = self.page
-        fields = extract.extract_fields(page, self.read_guard)
-        if not fields:
-            return
+        # Quiet first, so even the first scan doesn't read help text while
+        # you're typing.
         if not self.guard.wait_quiet(page):
             self.events.append({"kind": "never_quiet", "detail": f"step {number}"})
+            return
+        # Help text goes to a model only on the run's very first scan. Once
+        # anything was scanned, uploaded or filled, help text can echo a
+        # value (your input, the resume autofill, validation text).
+        later = bool(self.resume_done or self.steps or self.scanned)
+        fields = extract.extract_fields(page, self.read_guard)
+        self.scanned = True
+        if not fields:
             return
         with self.guard.filling(page):
             fields = extract.enrich_comboboxes(page, fields, contained=True)
         new_after_upload: set[str] = set()
         box = None if self.resume_done or not self.resume else _resume_box(fields)
         if box is not None and self.ledger.state(page, box).get("empty"):
-            before_fields, before = fields, self._classify(fields)
+            before_fields, before = fields, self._classify(fields, with_help=not later)
             with self.guard.filling(page):
                 worked, detail = filler.upload_file(page, box["ref"], self.resume)
             print(f"  {GREEN if worked else RED}{detail}{OFF}")
@@ -607,7 +615,9 @@ class _FollowRun:
                 page, extract.extract_fields(page, self.read_guard), contained=True)
             self.uploaded = None            # the baseline across steps isn't tracked yet
             categories, new_after_upload = _reclassify_after_upload(before_fields, before, fields)
-        elif self.resume_done or self.steps:
+            if later:
+                new_after_upload = {f["ref"] for f in fields if f.get("type") != "file"}
+        elif later:
             # After the resume upload, or once any page was filled, help text
             # can echo a value (validation text, an autofilled summary): none
             # is sent to a model, and a field with help comes to you.

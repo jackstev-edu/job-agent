@@ -410,9 +410,13 @@
         echo a typed value** ("'jo@x' is not a valid email") in the FIRST
         scan, when the page already holds a value (a saved draft, a page
         that opens filled). It's plain text, so the skip list doesn't catch
-        it. aria-errormessage isn't read today; aria-describedby is. Follow
-        mode rescans after user input, so this MUST be closed before
-        follow-mode commit 6.
+        it. aria-errormessage isn't read today; aria-describedby is.
+        Follow mode (since 8d23bbf and its fix) sends help text to a model
+        only on the run's very first scan, taken after two seconds without
+        your input; every later scan, upload or filled page classifies with
+        help blanked and sends any field with help text to you. Still open:
+        the first scan of a page that opens already filled, in both
+        modes.
       - The skip list is a deny-list. A widget library that shows a chosen
         value in none of its selectors still shows through, in labels,
         help and page text.
