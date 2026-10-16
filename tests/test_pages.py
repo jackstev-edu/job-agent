@@ -48,6 +48,14 @@ KINDS = {
       <label for="p1">Password</label>
       <input id="p1" type="text" autocomplete="current-password" value="BROWSER">""",
                                                         pages.SIGN_IN),
+    "sign-in (no-hint box shown as text)": ("""
+      <label for="em">Email</label><input id="em" type="email">
+      <label for="p1">Password</label><input id="p1" type="text" name="password" value="BROWSER">""",
+                                            pages.SIGN_IN),
+    "account (two no-hint boxes shown as text)": ("""
+      <label for="p1">Password</label><input id="p1" type="text" name="password">
+      <label for="p2">Confirm password</label><input id="p2" type="text" name="confirmPassword">""",
+                                                  pages.ACCOUNT),
     "sign-in (hidden password box)": ("""
       <label for="em">Email</label><input id="em" type="email">
       <input id="p1" type="password" style="display:none">""", pages.SIGN_IN),
@@ -139,6 +147,31 @@ def test_linkedin_is_refused_outright():
     check(not pages.is_linkedin("https://notlinkedin.com/x"), "a look-alike name isn't LinkedIn")
     check(pages.is_linkedin("https://lnkd.in/abc") and pages.is_linkedin("https://www.linkedin.cn/x"),
           "LinkedIn's short links and its .cn site are refused too")
+    check.done()
+
+
+def test_a_credential_page_stays_one_for_the_run():
+    check = Checks()
+    html = f"""<!doctype html><html><body><form>
+      <label for="em">Email</label><input id="em" type="email">
+      <label for="p1">Pass</label><input id="p1" type="password"></form>
+      <script>window.toggle = () => {{ const b = document.getElementById('p1');
+        b.type = 'text'; b.removeAttribute('id'); b.setAttribute('aria-label', 'Show'); }};</script>
+      </body></html>"""
+    seen: dict = {}
+    with _served(html) as page:
+        page.goto(f"{HOST}/login")
+        first = pages.fill_allowed(page, f"{HOST}/apply", seen)
+        page.evaluate("window.toggle()")               # now no password box, no hint, no words
+        check(pages.page_kind(page) is None, "after the toggle the page no longer looks like one "
+                                             "(so the next check means something)")
+        later = pages.fill_allowed(page, f"{HOST}/apply", seen)
+    check(first == later == pages.SIGN_IN, f"remembered as a sign-in page for the run ({first}, {later})")
+
+    class FakePage:
+        url = "https://jobs.example.com/x"
+    check(pages.fill_allowed(FakePage(), "http://[::1") == pages.OFF_HOST,
+          "a malformed start address: off_host, not an error")
     check.done()
 
 

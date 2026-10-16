@@ -15,8 +15,11 @@ or anything on LinkedIn, is never what you asked for.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+
+from . import extract
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -24,18 +27,31 @@ if TYPE_CHECKING:
 ACCOUNT, SIGN_IN, VERIFICATION = "account_page", "sign_in_page", "verification_page"
 OFF_HOST, LINKEDIN = "off_host", "linkedin_refused"
 
-# Counts only. A password box is what every reader in extract.py refuses: a
-# type=password box, a password autocomplete hint (a show-password toggle
-# leaves type=text but keeps the hint) or the sticky data-ja-secret mark.
+# Counts only. A password box is any box an extract.py reader would refuse
+# as one: a type=password box, a password autocomplete hint (a
+# show-password toggle leaves type=text but keeps the hint), the sticky
+# data-ja-secret mark, or a box whose name, id, aria-label, placeholder or
+# label says password in any of SECRET_WORDS' languages (as written and
+# camelCase-split): a toggled box with no hint is still a password box.
+# Nothing is marked here.
 # A one-time-code box is the autocomplete hint, or a box whose name, id,
 # aria-label or placeholder (camelCase split) says one-time / OTP / 2FA /
 # MFA / two-factor / passcode / a verification, security, auth, SMS,
 # confirmation or access code. Hidden boxes count too: a page can show
 # them later.
-_KIND_JS = r"""
+_KIND_JS = (r"""
 () => {
-  const pw = document.querySelectorAll(
-      'input[type=password i], [autocomplete*="password" i], [data-ja-secret]').length;
+  const SECRET_RX = new RegExp(""" + json.dumps(extract.SECRET_WORDS) + r""", 'iu');
+  const camel = t => t.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
+  const boxes = new Set(document.querySelectorAll(
+      'input[type=password i], [autocomplete*="password" i], [data-ja-secret]'));
+  for (const el of document.querySelectorAll('input')) {
+    const t = [el.name, el.id, el.getAttribute('aria-label'), el.getAttribute('placeholder'),
+               ...[...(el.labels || [])].map(l => l.innerText)]
+              .filter(Boolean).join(' ').normalize('NFKC');
+    if (SECRET_RX.test(t) || SECRET_RX.test(camel(t))) boxes.add(el);
+  }
+  const pw = boxes.size;
   const newPw = !!document.querySelector('[autocomplete*="new-password" i]');
   const split = t => t.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
   const codeRx = /one\s?time|(?<![a-z])otp(?![a-z])|(?<![a-z])2fa(?![a-z])|(?<![a-z])mfa(?![a-z])|two\s?factor|passcode|(verification|verify|security|auth\w*|sms|confirmation|access)\s*code/i;
@@ -45,7 +61,7 @@ _KIND_JS = r"""
                             el.getAttribute('placeholder')].filter(Boolean).join(' '))));
   return {pw, newPw, code};
 }
-"""
+""")
 
 
 def page_kind(page: "Page") -> str | None:
@@ -104,22 +120,30 @@ def is_linkedin(url: str) -> bool:
             or host.endswith((".linkedin.com", ".linkedin.cn", ".lnkd.in")))
 
 
-def fill_allowed(page: "Page", start_url: str) -> str | None:
+def fill_allowed(page: "Page", start_url: str, seen: dict | None = None) -> str | None:
     """
     None if the agent may fill this page; otherwise the event to log and
     the reason it fills nothing: LinkedIn, another host family, or an
-    account / sign-in / verification page.
+    account / sign-in / verification page. `seen` (follow mode passes one
+    for the whole run) remembers each page (host and path) found to be an
+    account, sign-in or verification page, so a later look, after a
+    show-password toggle say, can't make it fillable.
     """
     try:
         url = page.url
+        if is_linkedin(url) or is_linkedin(start_url):
+            return LINKEDIN
+        # No host on either side (a missing start, about:blank, a local
+        # file) is never "the same site".
+        here, there = host_family(url), host_family(start_url)
+        key = extract.page_key(url)
     except Exception:
+        return OFF_HOST                             # a malformed address
+    if not here or not there or here != there:
         return OFF_HOST
-    if is_linkedin(url) or is_linkedin(start_url):
-        return LINKEDIN
-    # No host on either side (a missing start, about:blank, a local file)
-    # is never "the same site".
-    if not host_family(url) or not host_family(start_url):
-        return OFF_HOST
-    if host_family(url) != host_family(start_url):
-        return OFF_HOST
-    return page_kind(page)
+    if seen is not None and key in seen:
+        return seen[key]
+    kind = page_kind(page)
+    if kind is not None and seen is not None:
+        seen[key] = kind
+    return kind
