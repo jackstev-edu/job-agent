@@ -202,6 +202,12 @@ def cmd_fill(args) -> None:
     prof = Profile.load(args.profile)
     url = args.url
 
+    if getattr(args, "follow", False) and args.dry_run:
+        # A dry run touches nothing; follow mode fills as you go.
+        print(f"{RED}--follow and --dry-run don't go together.{OFF} "
+              f"Use --dry-run alone to see the plan for one page.")
+        return
+
     if (existing := tracker.find(url)) and not args.force:
         print(f"{AMBER}Already logged: status '{existing['status']}', "
               f"{existing['created_at'][:10]}.{OFF}")
@@ -556,12 +562,25 @@ class _FollowRun:
         self.flags: list[dict] = []
         self.steps: list[dict] = []
         self.step_numbers: set[int] = set()
+        self.last_shape: dict | None = None
 
-    def _classify(self, fields: list[dict]) -> dict[str, str]:
-        known, todo = self.cache.split([f for f in fields if f.get("type") != "file"])
+    def _classify(self, fields: list[dict], with_help: bool = True) -> dict[str, str]:
+        """
+        Categories, from the cache or the classifier. Without help, every
+        field goes over (and is cached) with its help text blanked.
+        """
+        fields = [f if with_help else _for_model(f, False)
+                  for f in fields if f.get("type") != "file"]
+        known, todo = self.cache.split(fields)
         fresh = classify.classify_fields(todo) if todo else {}
         self.cache.remember(todo, fresh)
         return {**known, **fresh}
+
+    def _note_next_step(self) -> None:
+        """A visible Next or Continue control: multi_step, as a normal fill logs it."""
+        if adapters.has_next_step(self.page, self.key) and not any(
+                e.get("kind") == "multi_step" for e in self.events):
+            self.events.append({"kind": "multi_step", "detail": "a Next or Continue control"})
 
     def fill_step(self, number: int) -> None:
         page = self.page
@@ -588,8 +607,15 @@ class _FollowRun:
                 page, extract.extract_fields(page, self.read_guard), contained=True)
             self.uploaded = None            # the baseline across steps isn't tracked yet
             categories, new_after_upload = _reclassify_after_upload(before_fields, before, fields)
+        elif self.resume_done or self.steps:
+            # After the resume upload, or once any page was filled, help text
+            # can echo a value (validation text, an autofilled summary): none
+            # is sent to a model, and a field with help comes to you.
+            categories = self._classify(fields, with_help=False)
+            new_after_upload = {f["ref"] for f in fields if f.get("type") != "file"}
         else:
             categories = self._classify(fields)
+        self._note_next_step()
         plan, flags, for_model = _route(fields, categories, self.prof, new_after_upload)
         _ask_mapper(for_model, self.prof, self.posting_text, new_after_upload, plan)
         plan = _fillable_plan(fields, plan)
@@ -603,7 +629,9 @@ class _FollowRun:
             with self.guard.filling(page):
                 rows = filler.run_plan(page, fields, plan, contained=True)
             self.ledger.filled(page, fields, plan, rows, step=number)
+        self._note_next_step()
         self.watcher.filled()
+        self.last_shape = follow.read_shape(page)
         self.steps.append(shadow.step_entry(fields, categories, plan, flags, rows,
                                             prefill_census=prefill))
         self.rows += rows
@@ -652,7 +680,15 @@ class _FollowRun:
                           f"I fill nothing here{OFF}")
                 else:
                     self.guard.install(page)
-                    self.fill_step(number)
+                    try:
+                        self.fill_step(number)
+                    except Exception as e:
+                        # You clicked on, or closed the tab, mid-fill. Logged
+                        # (it stops the gate), and following carries on.
+                        self.events.append({"kind": "fill_step_failed",
+                                            "detail": f"step {number}: {type(e).__name__}"})
+                        if page.is_closed():
+                            return "tab_closed", detection
             else:
                 self.ledger.poll(page)
             try:
@@ -681,6 +717,17 @@ def _follow(page, args, prof, url, key, ats, detected_by, events, posting_text,
     enter = _EnterWatcher()
     ended, detection = run.loop(enter)
     print(f"\n{_WATCH_ENDED.get(ended, 'Stopped following.')}")
+    # The gate's record is read now, from whatever page is showing. Unless
+    # you pressed Enter on the form the agent last filled, that isn't the
+    # form, so the read can't vouch for it.
+    try:
+        now_shape = None if page.is_closed() else follow.read_shape(page)
+    except Exception:
+        now_shape = None
+    if (ended != "enter" or run.last_shape is None or now_shape is None
+            or (now_shape["url"], now_shape["fields"])
+            != (run.last_shape["url"], run.last_shape["fields"])):
+        events.append({"kind": "final_read_off_form", "detail": ended})
 
     record = _build_record(page, url, key, detected_by, company, run.steps, events,
                            dry_run=False, uploads=run.uploaded)

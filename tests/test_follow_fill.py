@@ -304,5 +304,147 @@ def test_idle_and_a_closed_tab_end_the_run_and_still_ask():
     check.done()
 
 
+ONE_PAGE_WITH_NEXT = SINGLE.replace("</form>", '<button type="button" id="nx">Next</button></form>')
+
+
+def _gate(url):
+    run = [r for r in tracker.gate_runs() if r["application_url"] == url][-1]
+    return run["verdict"], json.loads(run["reasons_json"])
+
+
+def test_a_next_control_on_the_only_page_seen_still_stops_the_gate():
+    check = Checks()
+
+    def act(page, state):
+        state["n"] = state.get("n", 0) + (page.input_value("#fn") != "")
+        return state["n"] > 3                          # Enter while still on page 1
+    text, records, error, you = _follow(ONE_PAGE_WITH_NEXT, act, path="/nextonly")
+    verdict, reasons = _gate(f"{HOST}/nextonly")
+    check(error is None and verdict == "would_stop"
+          and any("multi_step" in r for r in reasons),
+          f"one page seen, but a Next control on it: would_stop with multi_step ({reasons})")
+    check.done()
+
+
+UPLOAD_THEN_HELP = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+  <form>
+    <section id="s1"><label for="cv">Resume</label><input type="file" id="cv" name="resume">
+      <label for="fn">First Name</label><input id="fn" name="first_name">
+      <button type="button" id="n1">Next</button></section>
+  </form>
+<script>
+  document.getElementById('n1').onclick = () => {{
+    document.getElementById('s1').remove();
+    document.querySelector('form').insertAdjacentHTML('beforeend',
+      '<section id="s2"><label for="ph">Phone</label>' +
+      '<input id="ph" name="phone" aria-describedby="ph-h">' +
+      '<div id="ph-h">HELP-SENTINEL-4471 is not a valid phone number</div></section>'); }};
+</script>{CLICKS_JS}</body></html>"""
+
+
+def test_help_text_on_a_page_after_the_upload_never_reaches_a_model():
+    import apply
+    from _fill_run import PROFILE, classify_by_label, map_from_profile
+
+    check = Checks()
+    (TEST_HOME / "follow-help-resume.pdf").write_bytes(b"%PDF-1.4 test resume\n")
+    profile = PROFILE.replace("resume_default: missing.pdf",
+                              "resume_default: follow-help-resume.pdf")
+    sent = []
+
+    def classify(fields):
+        sent.append(json.dumps(fields))
+        return classify_by_label(fields)
+
+    def map_fields(fields, prof, page_text=""):
+        sent.append(json.dumps(fields))
+        return map_from_profile(fields, prof, page_text)
+
+    def act(page, state):
+        if page.is_visible("#fn") and page.input_value("#fn"):
+            page.click("#n1")
+            return False
+        if page.is_visible("#ph"):
+            state["n"] = state.get("n", 0) + 1
+            return state["n"] > 25
+        return False
+    text, records, error, you = _follow(
+        UPLOAD_THEN_HELP, act, path="/uploadhelp", profile_yaml=profile,
+        patches=((apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    rec = records[-1] if records else {}
+    reasons = [fl.get("reason", "") for fl in rec.get("flags", [])
+               if fl.get("label") == "Phone"]
+    check(error is None and any("HELP-SENTINEL" in json.dumps(f) for f in rec.get("fields", [])),
+          f"page 2's help text was scanned (so the checks below mean something) ({error})")
+    check(all("HELP-SENTINEL" not in s for s in sent), "it reached no classify or mapper call")
+    check(reasons and "help text held back after upload" in reasons[0],
+          f"Phone came to you instead ({reasons})")
+    check.done()
+
+
+def test_the_final_read_is_marked_when_it_isnt_the_filled_form():
+    import apply
+
+    check = Checks()
+
+    def never(page, state):
+        return False
+    text, records, error, you = _follow(SINGLE, never, path="/offform",
+                                        patches=((apply, "FOLLOW_IDLE_S", 1),))
+    rec = records[-1] if records else {}
+    check(any(e.get("kind") == "final_read_off_form" for e in rec.get("events", [])),
+          "ended by idle time: the final read is marked as not vouching for the form")
+    verdict, reasons = _gate(f"{HOST}/offform")
+    check(verdict == "would_stop" and any("final_read_off_form" in r for r in reasons),
+          "  ...and the gate stops on it")
+
+    def enter_when_filled(page, state):
+        state["n"] = state.get("n", 0) + (page.input_value("#fn") != "")
+        return state["n"] > 3
+    text, records, error, you = _follow(SINGLE, enter_when_filled, path="/onform")
+    rec = records[-1] if records else {}
+    check(not any(e.get("kind") == "final_read_off_form" for e in rec.get("events", [])),
+          "Enter on the form the agent filled: no mark")
+    check.done()
+
+
+def test_a_failed_page_fill_is_logged_and_the_run_still_ends_properly():
+    import apply
+
+    check = Checks()
+    asked = []
+
+    def boom(fields, prof, page_text=""):
+        raise RuntimeError("the page changed under us")
+
+    def ask(prompt=""):
+        asked.append(prompt)
+        return "n"
+
+    def act(page, state):
+        state["n"] = state.get("n", 0) + 1
+        return state["n"] > 30
+    text, records, error, you = _follow(SINGLE, act, path="/boom",
+                                        patches=((apply.mapper, "map_fields", boom),
+                                                 (apply, "input", ask)))
+    rec = records[-1] if records else {}
+    check(error is None and any(e.get("kind") == "fill_step_failed" for e in rec.get("events", [])),
+          f"a fill_step_failed event is logged ({error})")
+    check(any("Did you submit" in a for a in asked), "  ...and you're still asked whether you submitted")
+    check.done()
+
+
+def test_follow_and_dry_run_together_are_refused():
+    from _fill_run import run_fill
+
+    check = Checks()
+    text, records, error = run_fill(None, dry_run=True, follow=True, url=f"{HOST}/dry",
+                                    routes=_route(SINGLE))
+    check(error is None and "don't go together" in text and not records,
+          "refused before the browser opens")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())
