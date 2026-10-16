@@ -713,12 +713,34 @@ def wait_for_options(page: "Page", timeout_ms: int = 2500) -> list[str]:
     return []
 
 
-def close_dropdown(page: "Page") -> None:
-    """Escape, and if the widget ignores Escape, take the focus off it."""
+# Is the keyboard focus on this element, or inside it? Checked before every
+# keystroke in contained mode (follow mode), so none lands anywhere else.
+FOCUS_IN_JS = ("el => !!document.activeElement && "
+               "(document.activeElement === el || el.contains(document.activeElement))")
+
+
+def focus_in(element) -> bool:
+    """Does `element` (a Playwright handle or locator) hold the focus? False if it can't be told."""
     try:
+        return bool(element.evaluate(FOCUS_IN_JS))
+    except Exception:
+        return False
+
+
+def close_dropdown(page: "Page", element=None) -> None:
+    """
+    Escape, and if the widget ignores Escape, take the focus off it. With
+    `element` (contained mode), both happen only while the focus is on it:
+    the agent never presses a key into, or blurs, anything else.
+    """
+    try:
+        if element is not None and not focus_in(element):
+            return
         page.keyboard.press("Escape")
         page.wait_for_timeout(120)
         if read_open_options(page):
+            if element is not None and not focus_in(element):
+                return
             # Deliberately not a click somewhere neutral: on a real portal
             # "somewhere neutral" can turn out to be a link.
             page.evaluate("() => document.activeElement?.blur()")
@@ -727,7 +749,7 @@ def close_dropdown(page: "Page") -> None:
         pass
 
 
-def enrich_comboboxes(page: "Page", fields: list[dict]) -> list[dict]:
+def enrich_comboboxes(page: "Page", fields: list[dict], contained: bool = False) -> list[dict]:
     """
     Read the choices out of custom dropdowns.
 
@@ -763,7 +785,7 @@ def enrich_comboboxes(page: "Page", fields: list[dict]) -> list[dict]:
             box.click(timeout=3000)
             options = wait_for_options(page)
 
-            if not options:
+            if not options and (not contained or focus_in(box)):
                 # Some widgets stay shut on a click and open on a key.
                 page.keyboard.press("ArrowDown")
                 options = wait_for_options(page, 1200)
@@ -778,7 +800,7 @@ def enrich_comboboxes(page: "Page", fields: list[dict]) -> list[dict]:
         except Exception:
             continue
         finally:
-            close_dropdown(page)
+            close_dropdown(page, box if contained else None)
     return fields
 
 

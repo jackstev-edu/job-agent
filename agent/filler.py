@@ -70,8 +70,34 @@ def _element(page: "Page", ref: str):
     return page.locator(f"[{REF_ATTR}='{ref}']").first
 
 
-def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
-    """Fill a single field. Returns (did_it_work, what_happened)."""
+# Sets a text box's value on the element itself, with the input and change
+# events a framework listens for, and no keystrokes at all. The native
+# setter is used because React watches it. True if the box now holds it.
+_SET_VALUE_JS = r"""
+(el, v) => {
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+                                                  : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+  if (!setter) return false;
+  setter.call(el, v);
+  el.dispatchEvent(new Event('input', {bubbles: true}));
+  el.dispatchEvent(new Event('change', {bubbles: true}));
+  return el.value === v;
+}
+"""
+
+
+def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple[bool, str]:
+    """
+    Fill a single field. Returns (did_it_work, what_happened).
+
+    `contained` (follow mode, where you may be typing too): no agent
+    keystroke may reach any element but the one being filled. A text box
+    gets its value set on the element itself; a dropdown is typed into
+    only while it holds the focus, checked before every keystroke, and
+    abandoned the moment it doesn't. Off (the default), filling is exactly
+    as it always was.
+    """
     if value is None or value == "":
         return False, "skipped — no value"
 
@@ -129,7 +155,7 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
             return True, "selected"
 
         if field_type == "combobox":
-            return _fill_combobox(page, element, field, str(value))
+            return _fill_combobox(page, element, field, str(value), contained)
 
         if field_type == "file":
             return False, "file uploads are handled separately"
@@ -141,6 +167,10 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
         # become something that submits the form since the scan.
         if element.evaluate(extract._SUBMITS_JS):
             return False, "refused — this box could submit the form; it's yours"
+        if contained:
+            if element.evaluate(_SET_VALUE_JS, text):
+                return True, "set"
+            return False, "the box didn't take the value; left for you"
         element.click(timeout=4000)
         element.fill("", timeout=4000)               # clear anything pre-filled
         element.type(text, delay=12, timeout=25_000)
@@ -211,7 +241,8 @@ _SHOWS_CHOICE_JS = ("""
 UNCONFIRMED = " — unconfirmed"
 
 
-def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool, str]:
+def _fill_combobox(page: "Page", element, field: dict, value: str,
+                   contained: bool = False) -> tuple[bool, str]:
     """
     Custom dropdown: open it, type, then CLICK the row that matches.
 
@@ -228,7 +259,20 @@ def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool
         return False, "refused — this dropdown could submit the form; it's yours"
     element.click(timeout=4000)
     page.wait_for_timeout(250)
-    page.keyboard.type(_one_line(value), delay=45)
+    if not contained:
+        page.keyboard.type(_one_line(value), delay=45)
+    else:
+        # Every keystroke only while this dropdown holds the focus. A widget
+        # that doesn't take it can't be filled without risking your field.
+        if not extract.focus_in(element):
+            _abandon_combobox(page, element, contained)
+            return False, "can't keep keystrokes in this dropdown; left for you"
+        for ch in _one_line(value):
+            if not extract.focus_in(element):
+                _abandon_combobox(page, element, contained)
+                return False, "the focus moved away while typing; left empty for you"
+            page.keyboard.type(ch)
+            page.wait_for_timeout(45)
 
     options = extract.wait_for_options(page, 3000)
     if not options:
@@ -236,39 +280,39 @@ def _fill_combobox(page: "Page", element, field: dict, value: str) -> tuple[bool
             # The form searched and came back with nothing. Typing a value it
             # doesn't recognise leaves text in a box that hasn't actually been
             # answered, which reads as filled on screen and is blank underneath.
-            _abandon_combobox(page, element)
+            _abandon_combobox(page, element, contained)
             return False, f"the form's search found no match for '{value}'"
         # Some boxes take free text. Leave it, but don't claim it was picked.
         return True, f"typed '{value}' — nothing offered to pick from{CONFIRM}"
 
     choice, how = matching.best_match_for_field(field.get("label"), value, options)
     if choice is None:
-        _abandon_combobox(page, element)
+        _abandon_combobox(page, element, contained)
         return False, f"'{value}' — {how}"
 
     try:
         marked = page.evaluate(_MARK_OPTION_JS, choice)
         if marked == "submits":
-            _abandon_combobox(page, element)
+            _abandon_combobox(page, element, contained)
             return False, f"refused — the row for '{choice}' could submit the form; left empty for you"
         if marked:
             page.locator("[data-ja-opt='1']").first.click(timeout=3000)
     except Exception:
         marked = False
     if not marked:
-        _abandon_combobox(page, element)
+        _abandon_combobox(page, element, contained)
         return False, f"couldn't click the row for '{choice}'; left empty for you"
     page.wait_for_timeout(300)
     # A menu still up after the click is closed, never committed with Enter.
     if extract.read_open_options(page):
-        extract.close_dropdown(page)
+        extract.close_dropdown(page, element if contained else None)
     # Some widgets undo a pending choice on Escape. Claim it only if it shows.
     try:
         shown = element.evaluate(_SHOWS_CHOICE_JS, choice)
     except Exception:
         shown = "missing"
     if shown not in ("kept", "unconfirmed"):
-        _abandon_combobox(page, element)
+        _abandon_combobox(page, element, contained)
         return False, f"the dropdown didn't keep '{choice}'; left empty for you"
     note = UNCONFIRMED if shown == "unconfirmed" else ""
 
@@ -321,13 +365,16 @@ def _press_option_button(page: "Page", field: dict, value: str) -> tuple[bool, s
     return True, "selected"
 
 
-def _abandon_combobox(page: "Page", element) -> None:
+def _abandon_combobox(page: "Page", element, contained: bool = False) -> None:
     """Leave no half-typed text behind in a box we couldn't answer."""
     try:
-        element.fill("", timeout=2000)
+        if contained:
+            element.evaluate(_SET_VALUE_JS, "")      # on the element: no keystrokes
+        else:
+            element.fill("", timeout=2000)
     except Exception:
         pass
-    extract.close_dropdown(page)
+    extract.close_dropdown(page, element if contained else None)
 
 
 def upload_file(page: "Page", ref: str, path: Path) -> tuple[bool, str]:
@@ -340,9 +387,11 @@ def upload_file(page: "Page", ref: str, path: Path) -> tuple[bool, str]:
         return False, f"upload failed: {str(e)[:110]}"
 
 
-def run_plan(page: "Page", fields: list[dict], plan: dict) -> list[dict]:
+def run_plan(page: "Page", fields: list[dict], plan: dict,
+             contained: bool = False) -> list[dict]:
     """
-    Execute the whole plan and return a line-by-line report.
+    Execute the whole plan and return a line-by-line report. `contained`
+    is follow mode's keystroke containment (see fill_one).
 
     Does not submit. There is no argument that makes it submit.
     """
@@ -353,7 +402,7 @@ def run_plan(page: "Page", fields: list[dict], plan: dict) -> list[dict]:
         field = by_ref.get(ref)
         if field is None:
             continue
-        worked, detail = fill_one(page, field, decision.get("value"))
+        worked, detail = fill_one(page, field, decision.get("value"), contained)
         report.append({
             "label": field.get("label") or field.get("name") or "(unlabelled)",
             "value": decision.get("value"),
