@@ -314,7 +314,8 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
                 content.append(f"{name}: legal/eligibility/EEO/pay answer not traced to a "
                                f"profile line (left for you)")
                 continue
-            if entry["fit"] not in STRICT_FITS:
+            fits = sensitive.LEGAL_FITS if sensitive.legal_guard(f) else STRICT_FITS
+            if entry["fit"] not in fits:
                 content.append(f"{name}: profile answer matched the options loosely "
                                f"({entry['fit']}), not exactly")
 

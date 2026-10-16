@@ -23,16 +23,21 @@ from .classify import action_for
 # ---------------------------------------------------------------------------
 #  Which line of profile.yaml answers which question.
 #
-#  Only consulted for fields the classifier routed to "profile". If nothing
-#  here matches, the field goes to you rather than being guessed at — so a
-#  gap in this table costs you a manual answer, never a wrong one.
+#  Consulted for fields the classifier routed to "profile", and for any
+#  field the legal backstop (LEGAL_GUARD, below) matches, whatever the
+#  classifier said. In the second case the line found must be in the same
+#  area as the guard's match (eligibility / eeo / compensation), or the
+#  field comes to you. If nothing here matches, the field goes to you rather
+#  than being guessed at — so a gap in this table costs you a manual answer,
+#  never a wrong one.
 # ---------------------------------------------------------------------------
 PROFILE_PATHS: list[tuple[str, str]] = [
     # Order matters: "now or in the future" is a different question from "now".
     # "commence an immigration case" is one portal's wording for sponsorship; other
     # portals say "petition", "work permit" or "immigration support". Kept
-    # broad because the classifier has already told us this is a work
-    # authorization question before we get here.
+    # broad because only a work-authorization question reaches it: one the
+    # classifier routed here, or one LEGAL_GUARD matched as work
+    # authorization, since an eligibility.* line is used only then.
     (r"now\s+or\s+in\s+the\s+future|will\s+you\s+in\s+the\s+future"
      r"|future.{0,30}(sponsor|immigration|petition|work\s+permit)"
      r"|(sponsor\w*|immigration|petition).{0,30}(future|later|any\s+time)",
@@ -150,20 +155,33 @@ LEGAL_GUARD: list[tuple[str, str]] = [
      r"|\blegally\s+(authori[sz]\w*|entitled|permitted|eligible|able)"
      r"|\beligib\w*\s+to\s+work|\bright\s+to\s+work\b|\bwork\s+permits?\b"
      r"|\bsponsor\w*|\bvisas?\b|\bimmigra\w*|\bcitizen\w*|\bnationality\b"
-     r"|\bgreen\s+card\b|\bpermanent\s+residen\w*|\bh\s?1\s?b\b",
+     r"|\bgreen\s+card\b|\bpermanent\s+residen\w*|\bh[\s\-]?1[\s\-]?b\b",
      "work_authorization"),
-    (r"\bgender\w*|\bsex\b|\brace\b|\bracial\b|\bethnic\w*|\bhispanic\b"
+    # "race" as in a contest ("Race to the finish") is left alone.
+    (r"\bgender\w*|\bsex\b|\brace\b(?!\s+(to|for|against|car|track|day)\b)"
+     r"|\bracial\b|\bethnic\w*|\bhispanic\b"
      r"|\blatin[oax]s?\b|\blatine\b|\bveterans?\b|\bdisab(led|ilit\w*)\b"
      r"|\bsexual\s+orientation\b|\btransgender\b|\bpronouns?\b",
      "eeo"),
-    (r"\bsalar(y|ies)\b|\bpay\b|\bwages?\b|\bcompensation\b"
-     r"|\b(expected|desired)\s+(rate|pay|salary|wage|compensation)\b|\bhourly\s+rate\b",
+    (r"\bsalar(y|ies)\b|\bpay\b|\bwages?\b|\bcompensation\b|\bremuneration\b"
+     r"|\b(expected|desired)\s+(rate|pay|salary|wage|compensation|earnings|income)\b"
+     r"|\bhourly\s+rate\b|\bote\b|\bctc\b",
      "compensation"),
 ]
 
 # The fits a legal answer may take: the profile value as one of the form's
-# options exactly, a yes / no, or a decline option.
+# options exactly, a yes / no (from a real true / false profile value), or
+# a decline option.
 LEGAL_FITS = {"exact", "bool", "decline"}
+
+# Which profile lines answer which kind of guard match.
+LEGAL_AREAS = {"work_authorization": "eligibility.", "eeo": "eeo.",
+               "compensation": "compensation."}
+
+# Invisible characters a page can put inside a word (soft hyphens,
+# zero-width spaces and joiners, word joiners, byte-order marks). NFKC
+# keeps them, and "Spon­sorship" would otherwise slip past.
+_INVISIBLE = re.compile("[\\u00ad\\u200b-\\u200d\\u2060\\ufeff]")
 
 _PATHS = [(re.compile(p, re.I), path) for p, path in PROFILE_PATHS]
 _LEGAL = [(re.compile(p, re.I), kind) for p, kind in LEGAL_GUARD]
@@ -184,16 +202,25 @@ def _identifier_words(name: str) -> str:
     return re.sub(r"[_\-.\[\]]+", " ", name)
 
 
-def legal_guard(field: dict) -> str | None:
+def legal_guard_kinds(field: dict) -> list[str]:
     """
-    The LEGAL_GUARD kind a field matches ("work_authorization", "eeo",
-    "compensation"), or None. Read on the label, help text, placeholder and
-    name, NFKC-normalised; the name is split into words first. Local only.
+    Every LEGAL_GUARD kind a field matches ("work_authorization", "eeo",
+    "compensation"), in table order. Read on the label, help text,
+    placeholder, name and option texts, NFKC-normalised with invisible
+    characters removed; the name is split into words first. Local only.
     """
-    text = unicodedata.normalize("NFKC", " ".join(
+    text = " ".join(
         [str(field.get(k) or "") for k in ("label", "help_text", "placeholder")]
-        + [_identifier_words(str(field.get("name") or ""))]))
-    return next((kind for rx, kind in _LEGAL if rx.search(text)), None)
+        + [_identifier_words(str(field.get("name") or ""))]
+        + [str(o) for o in field.get("options") or []])
+    text = _INVISIBLE.sub("", unicodedata.normalize("NFKC", text))
+    return [kind for rx, kind in _LEGAL if rx.search(text)]
+
+
+def legal_guard(field: dict) -> str | None:
+    """The first LEGAL_GUARD kind a field matches, or None."""
+    kinds = legal_guard_kinds(field)
+    return kinds[0] if kinds else None
 
 
 def decide(field: dict, category: str, profile) -> dict:
@@ -231,7 +258,8 @@ def decide(field: dict, category: str, profile) -> dict:
     # -- layer 2b: the legal backstop. Whatever the classifier said, a
     # question that reads as eligibility, EEO or pay is answered only from a
     # profile line, with a strict fit, or by you.
-    guard = legal_guard(field)
+    guards = legal_guard_kinds(field)
+    guard = guards[0] if guards else None
 
     # -- layer 3: answers that must come from a named line in profile.yaml ---
     if action == "profile" or guard:
@@ -241,6 +269,15 @@ def decide(field: dict, category: str, profile) -> dict:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This is a {kind} question, but "
                               f"I can't tell which profile line answers it. "
+                              f"Answer it yourself."}
+        if guards and not path.startswith(tuple(LEGAL_AREAS[g] for g in guards)):
+            return {**base, "action": "human", "value": None, "source": "human",
+                    "reason": f"This reads as a {kind} question, but the closest "
+                              f"profile line is `{path}`. Answer it yourself."}
+        ftype = (field.get("type") or "").lower()
+        if guard and not field.get("options") and ftype != "checkbox":
+            return {**base, "action": "human", "value": None, "source": "human",
+                    "reason": f"A {kind} question with a box to type in. "
                               f"Answer it yourself."}
         raw = profile.get(path)
         if raw is None:
@@ -274,13 +311,14 @@ def fit_with_kind(raw: Any, field: dict) -> tuple[Any, str | None]:
     fit_to_widget, plus HOW the value was fitted. The submit gate trusts only
     the strict kinds for legal answers: "exact", "bool", "decline" and
     "verbatim" (no options, the profile value as written). "bool_prefix" and
-    "substring" are looser guesses at which option you meant.
+    "substring" are looser guesses at which option you meant. A checkbox
+    takes only a real true / false: "Prefer not to say" is not a tick.
     """
     options = field.get("options") or []
     ftype = (field.get("type") or "").lower()
 
     if ftype == "checkbox":
-        return bool(raw), "bool"
+        return (raw, "bool") if isinstance(raw, bool) else (None, None)
 
     if not options:
         if isinstance(raw, bool):
