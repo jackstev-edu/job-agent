@@ -375,13 +375,30 @@
       value displays) are left out of aria-labelledby, label[for], a
       wrapping <label>, a nearby legend / label / .label and
       aria-describedby. Closed (fix round after 2c7a1ab):
-      - Validation text echoing a value after the resume upload: the
-        post-upload rescan sends no help text to the classifier or the
-        mapper. The policy still reads it locally.
+      - Validation text echoing a value after the resume upload (fixed
+        properly after the 0a2523e BLOCK): fields are classified once
+        before the upload, with their help text. After it, a field keeps
+        that category only if it's the one field with its identity (name
+        attribute or explicit label, tag, type) before and after, and its
+        label and help text are exactly the same. Every other field is
+        classified again with no help text. COST: such a field with any
+        help text comes to you ("help text held back after upload")
+        unless its category is answered from your profile or by you. A
+        portal that rewrites help text on upload, or fields with no name
+        or explicit label, will send more questions to you. No post-upload
+        help text ever reaches a model; a reused field's mapper input
+        carries its identical pre-upload help.
+      - The page also checks each field's label and help read whole
+        (before value displays are skipped) against HARD_STOPS and
+        LEGAL_GUARD, on every reading of the text, and returns only
+        raw_stop / raw_legal booleans. A stop or legal word styled as a
+        tag inside a label still stops. Patterns and invisible characters
+        come from sensitive.py (one source), with a parity test.
       - A dropdown's options filtered by text in its box (or a creatable
         `Create "<text>"` row): a box already holding text isn't opened.
         The in-page check runs after the password test and returns only
-        true or false.
+        true or false. Only a visible text box or editable region counts
+        (a hidden input's default value no longer keeps it shut).
       - Value displays in `[role=button]`, `[role=slider]`,
         `[aria-selected=true]` rows, and the chip / tag / selected-item
         displays of MUI, Ant, Select2, Choices, Chosen and Workday

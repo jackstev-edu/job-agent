@@ -21,6 +21,8 @@ import unicodedata
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+from . import sensitive
+
 if TYPE_CHECKING:
     from playwright.sync_api import Page
 
@@ -144,10 +146,36 @@ el => {
 """ + _SECRET_JS + r"""
   const boxes = [el, ...el.querySelectorAll('input, textarea, [contenteditable]')];
   if (boxes.some(b => isSecret(b, ''))) return true;
-  return boxes.some(b => ('value' in b && b.tagName !== 'BUTTON')
-      ? String(b.value) !== ''
-      : b.isContentEditable && b.textContent.trim() !== '');
+  // Only what you could see and type into: a visible text box or editable
+  // region. A hidden input's default value or a checkbox's "on" isn't
+  // search text, and counting it kept the menu shut for nothing.
+  const shown = b => b.getClientRects().length > 0
+      && getComputedStyle(b).visibility !== 'hidden';
+  const typed = b => b.tagName === 'TEXTAREA' || (b.tagName === 'INPUT'
+      && ['text', 'search', 'email', 'tel', 'url', 'number'].includes(
+           String(b.type || 'text').toLowerCase()));
+  return boxes.some(b => shown(b) && (typed(b) ? String(b.value) !== ''
+      : b.isContentEditable && b.textContent.trim() !== ''));
 }
+""")
+
+# The page's copy of the stop and guard checks, built from sensitive.py's
+# patterns and invisible characters (one source). Run on a field's label
+# and help read whole, as innerText, before any value display is skipped;
+# only true / false ever comes back.
+_RAW_RULES_JS = (r"""
+  const RAW_STOPS = """ + json.dumps(sensitive.RAW_PATTERNS["stops"]) + r""".map(p => new RegExp(p, 'iu'));
+  const RAW_LEGAL = """ + json.dumps(sensitive.RAW_PATTERNS["legal"]) + r""".map(p => new RegExp(p, 'iu'));
+  const INVIS = new RegExp(""" + json.dumps(sensitive.INVISIBLE_JS) + r""", 'gu');
+  const EARLIER = new RegExp(""" + json.dumps(sensitive.EARLIER_INVISIBLE_JS) + r""", 'gu');
+  // Every reading of a text, as sensitive.text_variants gives them.
+  const readings = t => {
+    t = String(t || '');
+    const n = t.normalize('NFKC');
+    return [t, n, n.replace(INVIS, ''), n.replace(INVIS, ' '), n.replace(EARLIER, '')];
+  };
+  const anyHit = (rxs, t) => { const rs = readings(t); return rxs.some(rx => rs.some(r => rx.test(r))); };
+  const rawFlags = t => ({raw_stop: anyHit(RAW_STOPS, t), raw_legal: anyHit(RAW_LEGAL, t)});
 """)
 
 # --- the injected JavaScript -------------------------------------------------
@@ -156,7 +184,7 @@ _SCAN_JS = r"""
 ([GROUP, GEN]) => {
   const REF = 'data-ja-ref';
   const SUBMITS = """ + _SUBMITS_JS + r""";
-""" + _SECRET_JS + _TEXT_OF_JS + r"""
+""" + _SECRET_JS + _TEXT_OF_JS + _RAW_RULES_JS + r"""
   // Every ref from an earlier scan goes first, hidden boxes' included, so a
   // box this scan skips can't keep a ref that a new box is about to get. The
   // generation in each new ref means an old one can never equal it anyway.
@@ -219,6 +247,9 @@ _SCAN_JS = r"""
   // never leaves the page: page text may only ever add secrecy, so the test
   // sees at least what it saw before labels were filtered.
   const rawLabelFor = el => labelWith(el, r => (r?.innerText || '').trim());
+  // Help text read whole, for the raw-label check only.
+  const rawHelpFor = el => (el.getAttribute('aria-describedby') || '').split(/\s+/)
+      .map(id => document.getElementById(id)?.innerText || '').join(' ');
 
   // Helper text under a field often contains the real question.
   const helpFor = el => {
@@ -278,6 +309,7 @@ _SCAN_JS = r"""
              || box.getAttribute('aria-required') === 'true',
       help_text: helpFor(box),
       current_value: pressed ? optionText(pressed) : '',
+      ...rawFlags([title?.innerText, rawLabelFor(box), rawHelpFor(box)].join(' ')),
     });
   };
 
@@ -322,6 +354,8 @@ _SCAN_JS = r"""
         option_refs: optionRefs,
         required: peers.some(p => p.required),
         help_text: helpFor(el),
+        ...rawFlags([el.closest('fieldset')?.querySelector('legend')?.innerText,
+                     rawLabelFor(el), rawHelpFor(el)].join(' ')),
       });
       return;
     }
@@ -353,6 +387,7 @@ _SCAN_JS = r"""
       tag, dom_name: el.name || '', dom_id: el.id || '',
       explicit_label: explicitLabel(el),
       stable_identity: stableIdentity(el),
+      ...rawFlags([rawLabelFor(el), rawHelpFor(el)].join(' ')),
     };
     if (secret) field.secret = true;
 
@@ -379,6 +414,7 @@ _SCAN_JS = r"""
       // A typeless <button> in a form is a submit button. Opening this
       // dropdown would click it, so it's handed to you and never clicked.
       submits: SUBMITS(el),
+      ...rawFlags([el.getAttribute('aria-label'), rawLabelFor(el), rawHelpFor(el)].join(' ')),
     });
   });
 

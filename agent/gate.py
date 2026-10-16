@@ -274,7 +274,8 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         kinds = _stop_kinds(f)
         line = _sensitive_line(f)
         sensitive_field = (category in SENSITIVE_CATEGORIES or line is not None
-                           or "legal" in kinds or sensitive.legal_guard(f) is not None)
+                           or "legal" in kinds or sensitive.legal_guard(f) is not None
+                           or bool(f.get("raw_stop") or f.get("raw_legal")))
 
         # 5. per-company questions are never answered from the profile yet.
         if category == "per_company" or "per_company" in kinds:

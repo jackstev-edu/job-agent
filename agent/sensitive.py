@@ -223,6 +223,15 @@ def is_invisible(ch: str) -> bool:
 _EARLIER_INVISIBLE = re.compile("[\\u00ad\\u034f\\u200b-\\u200d\\u2060-\\u2064\\ufeff]")
 
 
+# The page's own copy of the stop and guard checks (extract.py, the
+# raw-label check) is built from these, so the patterns and the invisible
+# characters have one source. INVISIBLE_JS is is_invisible as a JavaScript
+# class (\p{Cf} needs the u flag).
+INVISIBLE_JS = "[\\p{Cf}\\uFE00-\\uFE0F\\u034F\\u00AD]"
+EARLIER_INVISIBLE_JS = _EARLIER_INVISIBLE.pattern
+RAW_PATTERNS = {"stops": [p for p, _, _ in HARD_STOPS], "legal": [p for p, _ in LEGAL_GUARD]}
+
+
 def text_variants(raw: str) -> list[str]:
     """
     Every reading of a page text the pattern tables are matched against:
@@ -330,6 +339,13 @@ def decide(field: dict, category: str, profile) -> dict:
     if why:
         return {**base, "action": "human", "value": None,
                 "source": "human", "reason": why}
+    # The page's own check of the label and help read whole, before any
+    # value display was skipped (a "background check" styled as a tag).
+    # Only a true / false came back from the page.
+    if field.get("raw_stop"):
+        return {**base, "action": "human", "value": None, "source": "human",
+                "reason": "Read in full on the page, this question matches a stop "
+                          "(terms, consent, a credential or a legal declaration)."}
 
     # -- layer 2: a password input is refused on type alone, however labelled,
     # and so is any box the scan marked secret (toggled to text, hinted or
@@ -350,6 +366,10 @@ def decide(field: dict, category: str, profile) -> dict:
     # profile line, with a strict fit, or by you.
     guards = legal_guard_kinds(field)
     guard = guards[0] if guards else None
+    if field.get("raw_legal") and not guards:
+        return {**base, "action": "human", "value": None, "source": "human",
+                "reason": "Read in full on the page, this reads as an eligibility, "
+                          "EEO or pay question. Answer it yourself."}
 
     # -- layer 3: answers that must come from a named line in profile.yaml ---
     if action == "profile" or guard:

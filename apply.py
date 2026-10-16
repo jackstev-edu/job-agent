@@ -275,11 +275,11 @@ def cmd_fill(args) -> None:
         # of its keys) and every page seen with a password box on it.
         guard = extract.ReadGuard()
         resume = prof.resume_path(args.resume)
-        # What the model may see of each field's help text. After the resume
-        # upload the portal may have autofilled fields, and help text there
-        # can be validation text echoing a value ("'(555) 12' is not a valid
-        # phone number"), so none is sent. The policy still reads it locally.
-        send_help = True
+        # Fields whose help text was read after the resume upload and never
+        # seen before it. The portal may have autofilled fields by then, and
+        # help text can be validation text echoing a value ("'(555) 12' is
+        # not a valid phone number"), so none of it is ever sent to a model.
+        new_after_upload: set[str] = set()
         # And once more just before the scan: a page can ask you to sign in late.
         if _get_past_login_wall(page):
             events.append({"kind": "login_wall", "detail": "step 1"})
@@ -297,7 +297,14 @@ def cmd_fill(args) -> None:
 
         # 1. Resume first: portals autofill from it and would overwrite us.
         uploads = [f for f in fields if f.get("type") == "file"]
-        if uploads and resume and not args.dry_run:
+        upload_now = bool(uploads and resume and not args.dry_run)
+        if upload_now:
+            # Classified now, with help text read before the upload changed
+            # anything, so an unchanged field keeps this answer after it.
+            before_fields = fields
+            before = classify.classify_fields(
+                [f for f in before_fields if f.get("type") != "file"])
+        if upload_now:
             try:
                 box = page.query_selector(
                     f"[{extract.REF_ATTR}='{uploads[0]['ref']}']")
@@ -310,7 +317,6 @@ def cmd_fill(args) -> None:
             browser_mod.settle(page, 2500)
             fields = extract.enrich_comboboxes(
                 page, extract.extract_fields(page, guard))
-            send_help = False
             # A failed upload put nothing there, or nothing known; either
             # way the baseline can't be trusted.
             ref = outcome.upload_ref(box, fields) if worked else None
@@ -318,8 +324,12 @@ def cmd_fill(args) -> None:
 
         # 2. Ask the model what KIND of question each field is. It never
         #    sees your data here and never answers anything.
-        categories = classify.classify_fields(
-            [_for_model(f, send_help) for f in fields if f.get("type") != "file"])
+        if upload_now:
+            categories, new_after_upload = _reclassify_after_upload(before_fields, before,
+                                                                    fields)
+        else:
+            categories = classify.classify_fields(
+                [f for f in fields if f.get("type") != "file"])
 
         # 3. Apply the policy. Sensitive fields never reach the mapper.
         plan: dict[str, dict] = {}
@@ -338,6 +348,17 @@ def cmd_fill(args) -> None:
                               "category": categories.get(field["ref"], "unknown"),
                               "reason": "This dropdown is a button that could submit "
                                         "the form, so I don't click it. Answer it yourself."})
+                continue
+            category = categories.get(field["ref"], "unknown")
+            if (field["ref"] in new_after_upload and (field.get("help_text") or "").strip()
+                    and classify.action_for(category) not in ("profile", "human")):
+                # Its question may be in help text the classifier wasn't shown.
+                flags.append({"ref": field["ref"], "label": field.get("label"),
+                              "options": field.get("options"), "action": "human",
+                              "value": None, "source": "human", "category": category,
+                              "reason": "Its help text changed or appeared after the resume "
+                                        "upload (help text held back after upload), so the "
+                                        "classifier couldn't be shown it. Answer it yourself."})
                 continue
             verdict = sensitive.decide(
                 field, categories.get(field["ref"], "unknown"), prof)
@@ -359,8 +380,9 @@ def cmd_fill(args) -> None:
 
         # 4. The mapper answers only what's left.
         if for_model:
-            mapped = mapper.map_fields([_for_model(f, send_help) for f in for_model],
-                                       prof, posting_text[:3000])
+            mapped = mapper.map_fields(
+                [_for_model(f, f["ref"] not in new_after_upload) for f in for_model],
+                prof, posting_text[:3000])
             for ref, decision in mapped.items():
                 if next((f for f in for_model
                          if f["ref"] == ref and f.get("_draft")), None):
@@ -562,6 +584,55 @@ def _shadow_gate(record, prof, url, portal, detected_by, *,
 def _for_model(field: dict, send_help: bool) -> dict:
     """A field as a model call is given it: a copy, without its help text unless allowed."""
     return dict(field) if send_help else {**field, "help_text": ""}
+
+
+def _identity(f: dict) -> tuple | None:
+    """
+    What a field is known by across a rescan: its kind, tag, name attribute
+    and explicit label (a real <label> or aria-label). None without a name
+    or an explicit label: an id or a nearby-text label isn't an identity.
+    """
+    name = f.get("dom_name") if "dom_name" in f else (
+        f.get("name") if f.get("type") == "radio" else "")
+    label = f.get("explicit_label") or ""
+    if not (name or label):
+        return None
+    return (f.get("type"), f.get("tag") or "", name or "", label)
+
+
+def _reclassify_after_upload(before: list[dict], before_categories: dict,
+                             after: list[dict]) -> tuple[dict, set[str]]:
+    """
+    The categories for the post-upload scan, and the refs treated as new.
+    A field keeps its pre-upload category only when it's the one field with
+    its identity before and after, and its label AND help text are exactly
+    the same (compared here, never sent). Every other field is classified
+    again with no help text at all.
+    """
+    def unique(fields):
+        seen: dict = {}
+        for f in fields:
+            key = _identity(f)
+            if key is not None and f.get("type") != "file":
+                seen.setdefault(key, []).append(f)
+        return {k: v[0] for k, v in seen.items() if len(v) == 1}
+    was, now = unique(before), unique(after)
+    categories: dict[str, str] = {}
+    new: list[dict] = []
+    for f in after:
+        if f.get("type") == "file":
+            continue
+        key = _identity(f)
+        old = was.get(key) if key in now else None
+        if (old is not None and old.get("ref") in before_categories
+                and old.get("label") == f.get("label")
+                and (old.get("help_text") or "") == (f.get("help_text") or "")):
+            categories[f["ref"]] = before_categories[old["ref"]]
+        else:
+            new.append(f)
+    if new:
+        categories.update(classify.classify_fields([_for_model(f, False) for f in new]))
+    return categories, {f["ref"] for f in new}
 
 
 def _fillable_plan(fields: list[dict], plan: dict) -> dict:
