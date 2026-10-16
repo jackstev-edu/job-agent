@@ -71,7 +71,9 @@ def _same_text(a: Any, b: Any) -> bool:
 
 
 def _question_text(f: dict) -> str:
-    return " ".join(str(f.get(k) or "") for k in ("label", "help_text", "placeholder", "name"))
+    # The policy's own text, normaliser included, so the gate reads a
+    # question exactly as sensitive.decide did.
+    return sensitive._question_text(f)
 
 
 def _stop_kinds(f: dict) -> set[str]:

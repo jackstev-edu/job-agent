@@ -146,7 +146,7 @@ def _line_for(row: dict, facts: dict[str, Any]) -> tuple[str | None, str]:
     """Which profile line this correction involved, and how we know."""
     if row.get("profile_path"):
         return row["profile_path"], "logged"
-    label = row.get("label") or ""
+    label = sensitive.normalize_text(row.get("label") or "")
     for rx, path in sensitive._PATHS:
         if rx.search(label):
             return path, "wording"

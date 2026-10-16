@@ -192,10 +192,19 @@ _STOPS = [(re.compile(p, re.I), why) for p, why, _ in HARD_STOPS]
 STOP_KINDS = [(re.compile(p, re.I), kind) for p, _, kind in HARD_STOPS]
 
 
+def normalize_text(text: str) -> str:
+    """
+    The one normaliser for every pattern table here (HARD_STOPS,
+    PROFILE_PATHS, LEGAL_GUARD): NFKC, then invisible characters removed, so
+    "con\u00advict" reads as "convict". Matching only; nothing is stored.
+    """
+    return _INVISIBLE.sub("", unicodedata.normalize("NFKC", str(text or "")))
+
+
 def _question_text(field: dict) -> str:
     """Everything visible about the question — some portals hide it in help text."""
-    return " ".join(str(field.get(k) or "") for k in
-                    ("label", "help_text", "placeholder", "name"))
+    return normalize_text(" ".join(str(field.get(k) or "") for k in
+                                   ("label", "help_text", "placeholder", "name")))
 
 
 def _identifier_words(name: str) -> str:
@@ -216,7 +225,7 @@ def legal_guard_kinds(field: dict) -> list[str]:
         [str(field.get(k) or "") for k in ("label", "help_text", "placeholder")]
         + [_identifier_words(str(field.get("name") or ""))]
         + [str(o) for o in field.get("options") or []])
-    text = _INVISIBLE.sub("", unicodedata.normalize("NFKC", text))
+    text = normalize_text(text)
     return [kind for rx, kind in _LEGAL if rx.search(text)]
 
 
