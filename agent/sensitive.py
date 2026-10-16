@@ -285,6 +285,16 @@ def profile_lines(text: str) -> list[str]:
     return out
 
 
+def all_profile_lines(text: str) -> set[str]:
+    """
+    Every PROFILE_PATHS line any reading of `text` matches, not just the
+    first in table order. Can only add matches: two or more means the
+    question touches more than one profile line.
+    """
+    variants = text_variants(text)
+    return {p for rx, p in _PATHS if any(rx.search(v) for v in variants)}
+
+
 def sensitive_line(text: str, prefixes: tuple[str, ...]) -> str | None:
     """A PROFILE_PATHS line under `prefixes` that any reading of `text` matches."""
     for v in text_variants(text):
@@ -374,22 +384,23 @@ def decide(field: dict, category: str, profile) -> dict:
     # -- layer 3: answers that must come from a named line in profile.yaml ---
     if action == "profile" or guard:
         kind = (guard or category).replace("_", " ")
+        if len(set(guards)) > 1:
+            return {**base, "action": "human", "value": None, "source": "human",
+                    "reason": "This reads as more than one kind of legal question "
+                              f"({', '.join(g.replace('_', ' ') for g in guards)}). "
+                              "Answer it yourself."}
         lines = profile_lines(text)
-        if len(lines) > 1:
+        every = all_profile_lines(text)
+        if len(lines) > 1 or len(every) > 1:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This could be answered by more than one profile line "
-                              f"({', '.join(lines)}). Answer it yourself."}
+                              f"({', '.join(sorted(every | set(lines)))}). Answer it yourself."}
         path = lines[0] if lines else None
         if path is None:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This is a {kind} question, but "
                               f"I can't tell which profile line answers it. "
                               f"Answer it yourself."}
-        if len(set(guards)) > 1:
-            return {**base, "action": "human", "value": None, "source": "human",
-                    "reason": "This reads as more than one kind of legal question "
-                              f"({', '.join(g.replace('_', ' ') for g in guards)}). "
-                              "Answer it yourself."}
         if guards and not in_legal_area(path, guards):
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This reads as a {kind} question, but the closest "

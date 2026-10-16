@@ -71,10 +71,12 @@ How the code keeps them, and rules of its own:
   button-pair answer must still sit in its group, be unable to submit and
   not read like Submit or I agree. Before ticking or unticking a checkbox
   it re-reads the label (its own label sources, the nearby legend / label /
-  .label fallback always, aria-describedby, placeholder, and the name split
-  into words) and refuses a box that now matches HARD_STOPS on any reading
-  of the text, or whose PROFILE_PATHS lines or LEGAL_GUARD kinds differ at
-  all (added, removed or changed) from the scan's question text. After choosing a dropdown row it
+  .label fallback always, aria-describedby and placeholder) and the name
+  (as written and split into words). It refuses a box whose label and name
+  now match HARD_STOPS on any reading of the text, or whose set of every
+  matching PROFILE_PATHS line, or set of LEGAL_GUARD kinds, differs at all
+  (added, removed or changed) from the scan's question text read the same
+  way. After choosing a dropdown row it
   checks in the page that the dropdown shows that choice, or empties the
   box and reports it unfilled. A radio option is checked with no
   click-time re-check. It has no code path that clicks Submit, accepts

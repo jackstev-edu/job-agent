@@ -106,10 +106,15 @@ def fill_one(page: "Page", field: dict, value) -> tuple[bool, str]:
             # unticked.
             now = element.evaluate(_CHECKBOX_LABEL_JS) or {}
             label, name = str(now.get("label") or ""), str(now.get("name") or "")
-            if sensitive.stop_reason(f"{label} {name}"):
+            # Both sides read the same way: the text plus the name as written
+            # and split into words ("backgroundCheck" -> "background Check").
+            now_text = f"{label} {name} {sensitive._identifier_words(name)}"
+            scan_name = str(field.get("name") or "")
+            scan_text = (f"{sensitive._question_text(field)} "
+                         f"{sensitive._identifier_words(scan_name)}")
+            if sensitive.stop_reason(now_text):
                 return False, "refused — this box now reads like terms or consent; it's yours"
-            if (set(sensitive.profile_lines(f"{label} {name}"))
-                    != set(sensitive.profile_lines(sensitive._question_text(field)))
+            if (sensitive.all_profile_lines(now_text) != sensitive.all_profile_lines(scan_text)
                     or set(sensitive.legal_guard_kinds({"label": label, "name": name}))
                     != set(sensitive.legal_guard_kinds(field))):
                 return False, "refused — this box now reads as a different question; it's yours"

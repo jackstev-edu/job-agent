@@ -113,8 +113,12 @@ def test_routing():
               f"{v.get('profile_path', '')}")
     check(sensitive.decide(auth, "work_authorization", prof)["value"] == "Yes",
           "authorization fills 'Yes' from the profile")
-    check(sensitive.decide(visa, "work_authorization", prof)["value"] == "No",
-          "sponsorship fills 'No' from the profile")
+    # "Now or in the future ... sponsorship" matches both the future and the
+    # now sponsorship lines, and a question touching two profile lines comes
+    # to you (Jack's rule since the all-lines check).
+    v = sensitive.decide(visa, "work_authorization", prof)
+    check(v["action"] == "human" and "more than one profile line" in v.get("reason", ""),
+          "sponsorship (two profile lines) comes to you")
     check(sensitive.decide(commute, "per_company", prof)["action"] == "human",
           "commute declaration comes to you")
     check.done()

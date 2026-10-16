@@ -37,6 +37,12 @@ BOXES = """<!doctype html><html><body><form>
     <span id="t6">Email me news</span></label></div>
   <div><label><input type="checkbox" name="news" id="c7">
     <span id="t7">Send me offers</span></label></div>
+  <div><label><input type="checkbox" name="c8" id="c8">
+    <span id="t8">I am a protected veteran</span></label></div>
+  <div><label><input type="checkbox" name="c9" id="c9">
+    <span id="t9">I will require sponsorship</span></label></div>
+  <div><label><input type="checkbox" name="offers" id="c10">
+    <span id="t10">Send me offers</span></label></div>
 </form></body></html>"""
 
 
@@ -55,23 +61,38 @@ def test_a_box_relabelled_after_the_scan_is_not_ticked():
           t('t1', 'I will require visa sponsorship');
           t('t2', 'I have a disability');
           t('t3', 'Subscribe to marketing');
-          t('t6', 'I agree to the Terms{ZWSP}and Conditions');
+          t('t6', 'Terms{ZWSP}and Conditions');
           document.getElementById('c7').setAttribute('name', 'requiresSponsorship');
+          t('t8', 'I am a protected veteran and I have a disability');
+          t('t9', 'I will require sponsorship and am authorized to work in the US');
+          document.getElementById('c10').setAttribute('name', 'backgroundCheck');
         }}""")
         results = {i: filler.fill_one(page, fields[i], True) for i in
-                   ("c1", "c2", "c3", "c4", "c5", "c6", "c7")}
+                   ("c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10")}
         ticked = {i: page.is_checked(f"#{i}") for i in results}
     for i, (ok, detail) in results.items():
         print(f"  {i}: {ok} {detail} ticked={ticked[i]}")
-    cases = {"c1": "'legally authorized' relabelled to 'visa sponsorship' (same kind)",
-             "c2": "'protected veteran' relabelled to 'I have a disability' (same kind)",
-             "c3": "an authorization box relabelled to 'Subscribe to marketing'",
-             "c5": "its own aria-label kept, the nearby .label now terms",
-             "c6": "relabelled to 'I agree to the Terms<zwsp>and Conditions'",
-             "c7": "name changed to 'requiresSponsorship' after the scan"}
-    for i, what in cases.items():
-        check(not results[i][0] and "refused" in results[i][1] and not ticked[i],
-              f"{what}: refused, not ticked")
+    # (box, what happened to it, which refusal must fire)
+    cases = {
+        "c1": ("'legally authorized' relabelled to 'visa sponsorship' (same kind)",
+               "different question"),
+        "c2": ("'protected veteran' relabelled to 'I have a disability' (same kind)",
+               "different question"),
+        "c3": ("an authorization box relabelled to 'Subscribe to marketing'",
+               "different question"),
+        "c5": ("its own aria-label kept, the nearby .label now terms", "terms or consent"),
+        "c6": ("relabelled to 'Terms<zwsp>and Conditions' (only the spaced reading matches)",
+               "terms or consent"),
+        "c7": ("name changed to 'requiresSponsorship' after the scan", "different question"),
+        "c8": ("'protected veteran' relabelled to '... and I have a disability' (a line added "
+               "further down the table)", "different question"),
+        "c9": ("'require sponsorship' relabelled to '... and am authorized to work'",
+               "different question"),
+        "c10": ("name changed to 'backgroundCheck' after the scan", "terms or consent"),
+    }
+    for i, (what, branch) in cases.items():
+        check(not results[i][0] and branch in results[i][1] and not ticked[i],
+              f"{what}: refused ({branch}), not ticked")
     check(results["c4"][0] and ticked["c4"],
           "an unchanged authorization box (the policy's true line) is still ticked")
     check.done()
@@ -120,6 +141,22 @@ def test_a_neighbouring_label_sends_a_box_to_you():
     print(f"  -> {ok} {detail}")
     check(not ok and "different question" in detail and not ticked,
           "the authorization box comes to you, unticked (a false positive, kept)")
+    check.done()
+
+
+def test_a_box_touching_two_profile_lines_comes_to_you_at_the_scan():
+    from agent import sensitive
+
+    class _Profile:
+        def get(self, path):
+            return {"eeo.veteran_status": False, "eeo.disability_status": False}.get(path)
+    check = Checks()
+    field = {"label": "I am a protected veteran and I have a disability", "type": "checkbox"}
+    check(len(sensitive.all_profile_lines(field["label"])) == 2,
+          "the label matches two profile lines (so the next check means something)")
+    v = sensitive.decide(field, "eeo", _Profile())
+    check(v["action"] == "human" and "more than one profile line" in v.get("reason", ""),
+          f"a combined veteran + disability box comes to you ({v['action']})")
     check.done()
 
 
