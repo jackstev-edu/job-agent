@@ -99,11 +99,18 @@ GUARDED = [
     ("Current work visa", None),
     ("Do you hold an H-1B?", None),
     ("H1B status", None),
+    ("H‑1B status", None),            # non-breaking hyphen
+    ("H–1B holder", None),            # en dash
+    ("Will we need to file a petition for you?", None),
     ("Country of citizenship", None),
     ("Are you a permanent resident?", None),
     (f"Spon{SOFT}sorship required?", None),
     ("Which applies to you?", ["I am a U.S. citizen", "I will require sponsorship"]),
     ("Gender", None), ("Sex", None), ("Race", None), ("Ethnicity", None),
+    ("Race for reporting purposes", None), ("Race for EEO-1 / statistical purposes", None),
+    # A false positive, kept: a guard is never narrowed to let a project
+    # name through.
+    ("Race to the finish", None),
     ("Are you Hispanic or Latino?", None), ("Latinx", None),
     ("Are you a protected veteran?", None), ("Veteran status", None),
     ("Do you have a disability?", None), ("I am disabled", None),
@@ -116,8 +123,8 @@ GUARDED = [
 ]
 
 NOT_GUARDED = ["PayPal email", "Start date", "Embrace change", "Sussex", "Shipping address",
-               "Race to the finish", "Previous employer", "Years of experience",
-               "Desired start date", "Portfolio URL"]
+               "Previous employer", "Years of experience", "Desired start date",
+               "Portfolio URL"]
 
 
 def test_every_pattern_family_matches():
@@ -125,7 +132,7 @@ def test_every_pattern_family_matches():
     for label, options in GUARDED:
         field = {"label": label, **({"options": options} if options else {})}
         check(sensitive.legal_guard(field) is not None,
-              f"guarded: {label!r}" + (f" with options {options}" if options else ""))
+              f"guarded: {ascii(label)}" + (f" with options {options}" if options else ""))
     check.done()
 
 
@@ -210,6 +217,69 @@ def test_the_gate_stops_on_a_verbatim_fit_for_a_guarded_question():
     rec["snapshot"]["f9"] = "x"
     tg.stops(check, rec, "matched the options loosely (verbatim)",
              "a guarded question answered verbatim from its profile line")
+    check.done()
+
+
+class _Profile:
+    def __init__(self, data):
+        self.data = data
+
+    def get(self, path):
+        return self.data.get(path)
+
+
+def test_a_typed_box_or_a_two_area_box_comes_to_you():
+    check = Checks()
+    prof = _Profile({"eligibility.authorized_to_work_us": True,
+                     "eeo.veteran_status": False})
+    v = sensitive.decide({"label": "Are you authorized to work in the US?", "type": "text"},
+                         "personal_fact", prof)
+    check(v["action"] == "human",
+          f"a guarded box to type in, with a true/false line in the same area: yours ({v['action']})")
+    two = {"label": "I am authorized to work in the US and am not a protected veteran",
+           "type": "checkbox"}
+    check(sorted(set(sensitive.legal_guard_kinds(two))) == ["eeo", "work_authorization"],
+          "the two-area box matches both areas (so the next check means something)")
+    v = sensitive.decide(two, "personal_fact", prof)
+    check(v["action"] == "human" and "more than one kind" in v.get("reason", ""),
+          f"a checkbox asking two legal things at once: yours, not ticked ({v['action']})")
+    one = {"label": "I am authorized to work in the US", "type": "checkbox"}
+    check(sensitive.decide(one, "personal_fact", prof)["action"] == "fill",
+          "the one-area box is still ticked from its line (so the refusal above is the two areas')")
+    check.done()
+
+
+def _gate_record(label, category, plan):
+    import test_gate as tg
+
+    rec = copy.deepcopy(tg.base())
+    rec["fields"].append({"ref": "f9", "type": "text", "label": label})
+    rec["categories"]["f9"] = category
+    rec["plan"]["f9"] = plan
+    rec["results"]["f9"] = {"filled": True, "detail": "typed"}
+    rec["snapshot"]["f9"] = plan.get("value")
+    return rec
+
+
+def test_the_gate_holds_a_guarded_field_to_the_policy():
+    import test_gate as tg
+
+    check = Checks()
+    rec = _gate_record("Wage expectations", "personal_fact",
+                       {"value": "x", "source": "profile", "fit": "verbatim",
+                        "profile_path": "compensation.desired_base_min"})
+    tg.stops(check, rec, "matched the options loosely (verbatim)",
+             "classifier said personal_fact, a verbatim fit: the guard alone stops it")
+    rec = _gate_record("Are you a protected veteran?", "personal_fact",
+                       {"value": "No", "source": "profile", "fit": "exact",
+                        "profile_path": "eligibility.authorized_to_work_us"})
+    tg.stops(check, rec, "which isn't a eeo profile line",
+             "an EEO question answered from an eligibility line: stops")
+    rec = _gate_record("Are you a protected veteran?", "personal_fact",
+                       {"value": "No", "source": "profile", "fit": "exact",
+                        "profile_path": "eeo.veteran_status"})
+    check(tg.run(rec)["content_verdict"] == "would_submit",
+          "the same answer from its own eeo line passes (so the stops above mean something)")
     check.done()
 
 

@@ -35,9 +35,12 @@ PROFILE_PATHS: list[tuple[str, str]] = [
     # Order matters: "now or in the future" is a different question from "now".
     # "commence an immigration case" is one portal's wording for sponsorship; other
     # portals say "petition", "work permit" or "immigration support". Kept
-    # broad because only a work-authorization question reaches it: one the
-    # classifier routed here, or one LEGAL_GUARD matched as work
-    # authorization, since an eligibility.* line is used only then.
+    # broad. A question reaches these rows only when the classifier routed
+    # it to a profile-answered category (work authorization, EEO or pay) or
+    # LEGAL_GUARD matched it. With a guard match, an eligibility.* line is
+    # used only if the guard matched as work authorization and nothing
+    # else. Without one, the classifier's routing is all that keeps these
+    # patterns off an unrelated question.
     (r"now\s+or\s+in\s+the\s+future|will\s+you\s+in\s+the\s+future"
      r"|future.{0,30}(sponsor|immigration|petition|work\s+permit)"
      r"|(sponsor\w*|immigration|petition).{0,30}(future|later|any\s+time)",
@@ -154,11 +157,10 @@ LEGAL_GUARD: list[tuple[str, str]] = [
     (r"\bwork(ing)?\s+authori[sz]\w*|\bauthori[sz]\w*\s+to\s+(work|be\s+employed)"
      r"|\blegally\s+(authori[sz]\w*|entitled|permitted|eligible|able)"
      r"|\beligib\w*\s+to\s+work|\bright\s+to\s+work\b|\bwork\s+permits?\b"
-     r"|\bsponsor\w*|\bvisas?\b|\bimmigra\w*|\bcitizen\w*|\bnationality\b"
-     r"|\bgreen\s+card\b|\bpermanent\s+residen\w*|\bh[\s\-]?1[\s\-]?b\b",
+     r"|\bsponsor\w*|\bpetition\w*|\bvisas?\b|\bimmigra\w*|\bcitizen\w*|\bnationality\b"
+     r"|\bgreen\s+card\b|\bpermanent\s+residen\w*|\bh[\s\-\u2010-\u2015]?1[\s\-\u2010-\u2015]?b\b",
      "work_authorization"),
-    # "race" as in a contest ("Race to the finish") is left alone.
-    (r"\bgender\w*|\bsex\b|\brace\b(?!\s+(to|for|against|car|track|day)\b)"
+    (r"\bgender\w*|\bsex\b|\brace\b"
      r"|\bracial\b|\bethnic\w*|\bhispanic\b"
      r"|\blatin[oax]s?\b|\blatine\b|\bveterans?\b|\bdisab(led|ilit\w*)\b"
      r"|\bsexual\s+orientation\b|\btransgender\b|\bpronouns?\b",
@@ -178,10 +180,11 @@ LEGAL_FITS = {"exact", "bool", "decline"}
 LEGAL_AREAS = {"work_authorization": "eligibility.", "eeo": "eeo.",
                "compensation": "compensation."}
 
-# Invisible characters a page can put inside a word (soft hyphens,
-# zero-width spaces and joiners, word joiners, byte-order marks). NFKC
-# keeps them, and "Spon­sorship" would otherwise slip past.
-_INVISIBLE = re.compile("[\\u00ad\\u200b-\\u200d\\u2060\\ufeff]")
+# Invisible characters a page can put inside a word (soft hyphens, the
+# combining grapheme joiner, zero-width spaces and joiners, word joiners
+# and invisible operators, byte-order marks). NFKC
+# keeps them, and "Spon\u00adsorship" (a soft hyphen) would otherwise slip past.
+_INVISIBLE = re.compile("[\\u00ad\\u034f\\u200b-\\u200d\\u2060-\\u2064\\ufeff]")
 
 _PATHS = [(re.compile(p, re.I), path) for p, path in PROFILE_PATHS]
 _LEGAL = [(re.compile(p, re.I), kind) for p, kind in LEGAL_GUARD]
@@ -270,6 +273,11 @@ def decide(field: dict, category: str, profile) -> dict:
                     "reason": f"This is a {kind} question, but "
                               f"I can't tell which profile line answers it. "
                               f"Answer it yourself."}
+        if len(set(guards)) > 1:
+            return {**base, "action": "human", "value": None, "source": "human",
+                    "reason": "This reads as more than one kind of legal question "
+                              f"({', '.join(g.replace('_', ' ') for g in guards)}). "
+                              "Answer it yourself."}
         if guards and not path.startswith(tuple(LEGAL_AREAS[g] for g in guards)):
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This reads as a {kind} question, but the closest "

@@ -314,7 +314,12 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
                 content.append(f"{name}: legal/eligibility/EEO/pay answer not traced to a "
                                f"profile line (left for you)")
                 continue
-            fits = sensitive.LEGAL_FITS if sensitive.legal_guard(f) else STRICT_FITS
+            guards = sensitive.legal_guard_kinds(f)
+            if guards and not str(entry["profile_path"]).startswith(
+                    tuple(sensitive.LEGAL_AREAS[g] for g in guards)):
+                content.append(f"{name}: answered from {entry['profile_path']}, which isn't "
+                               f"a {'/'.join(guards)} profile line")
+            fits = sensitive.LEGAL_FITS if guards else STRICT_FITS
             if entry["fit"] not in fits:
                 content.append(f"{name}: profile answer matched the options loosely "
                                f"({entry['fit']}), not exactly")
