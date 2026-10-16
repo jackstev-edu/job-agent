@@ -146,10 +146,12 @@ def _line_for(row: dict, facts: dict[str, Any]) -> tuple[str | None, str]:
     """Which profile line this correction involved, and how we know."""
     if row.get("profile_path"):
         return row["profile_path"], "logged"
-    label = sensitive.normalize_text(row.get("label") or "")
-    for rx, path in sensitive._PATHS:
-        if rx.search(label):
-            return path, "wording"
+    # Every reading of the label; a sensitive line wins if any reading finds
+    # one, so a correction to an EEO or eligibility answer is never taken
+    # for an ordinary one.
+    lines = sensitive.profile_lines(row.get("label") or "")
+    if lines:
+        return next((p for p in lines if p.startswith(SENSITIVE_PREFIXES)), lines[0]), "wording"
     held = _lines_holding(row.get("agent_value"), facts)
     if len(held) == 1:
         return held[0], "value"

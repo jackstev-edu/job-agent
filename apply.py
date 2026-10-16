@@ -656,15 +656,13 @@ def _log_corrections(page, url, fields, plan, categories, final=None) -> None:
         # Values are only kept for fields both layers agreed were ordinary --
         # the same test that let the model near them in the first place.
         safe = (classify.action_for(cat) in ("autofill", "draft")
-                and not any(rx.search(sensitive._question_text(f))
-                            for rx, _ in sensitive._STOPS)
+                and sensitive.stop_reason(sensitive._question_text(f)) is None
                 and sensitive.legal_guard(f) is None)
         # Which profile line the question belongs to: the one that filled it,
         # else the one its wording maps to. Only the line's name is kept, never
         # its value, so this is safe to log for sensitive questions too.
         line = ((plan.get(f["ref"]) or {}).get("profile_path")
-                or next((p for rx, p in sensitive._PATHS
-                         if rx.search(sensitive._question_text(f))), None))
+                or next(iter(sensitive.profile_lines(sensitive._question_text(f))), None))
         rows.append({
             "url": url, "label": f.get("label"), "type": f.get("type"),
             "category": cat,

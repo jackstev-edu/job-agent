@@ -159,11 +159,10 @@ def _redacted_box(box: dict, traced: dict) -> dict:
     # A checkbox that IS an EEO or eligibility question ("I identify as a
     # protected veteran") answers it by being ticked, so its state is an
     # answer value and isn't kept.
-    label = sensitive.normalize_text(
-        f"{box.get('label_inner') or ''} {box.get('label_content') or ''}")
-    if box.get("ref") in traced or box.get("group_ref") in traced or any(
-            rx.search(label) for rx, path in sensitive._PATHS
-            if path.startswith(_SENSITIVE_PREFIXES)) or sensitive.legal_guard({"label": label}):
+    label = f"{box.get('label_inner') or ''} {box.get('label_content') or ''}"
+    if (box.get("ref") in traced or box.get("group_ref") in traced
+            or sensitive.sensitive_line(label, _SENSITIVE_PREFIXES)
+            or sensitive.legal_guard({"label": label})):
         out.pop("checked")
         out["checked_withheld"] = True
     return out

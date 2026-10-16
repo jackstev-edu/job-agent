@@ -77,14 +77,11 @@ def _question_text(f: dict) -> str:
 
 
 def _stop_kinds(f: dict) -> set[str]:
-    text = _question_text(f)
-    return {kind for rx, kind in sensitive.STOP_KINDS if rx.search(text)}
+    return sensitive.stop_kinds(_question_text(f))
 
 
 def _sensitive_line(f: dict) -> str | None:
-    text = _question_text(f)
-    return next((p for rx, p in sensitive._PATHS
-                 if rx.search(text) and p.startswith(SENSITIVE_PREFIXES)), None)
+    return sensitive.sensitive_line(_question_text(f), SENSITIVE_PREFIXES)
 
 
 def _is_required(f: dict) -> bool:
@@ -317,6 +314,9 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
                                f"profile line (left for you)")
                 continue
             guards = sensitive.legal_guard_kinds(f)
+            if len(set(guards)) > 1:
+                content.append(f"{name}: reads as more than one kind of legal question "
+                               f"({'/'.join(guards)})")
             if guards and not str(entry["profile_path"]).startswith(
                     tuple(sensitive.LEGAL_AREAS[g] for g in guards)):
                 content.append(f"{name}: answered from {entry['profile_path']}, which isn't "

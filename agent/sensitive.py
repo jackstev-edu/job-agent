@@ -158,7 +158,7 @@ LEGAL_GUARD: list[tuple[str, str]] = [
      r"|\blegally\s+(authori[sz]\w*|entitled|permitted|eligible|able)"
      r"|\beligib\w*\s+to\s+work|\bright\s+to\s+work\b|\bwork\s+permits?\b"
      r"|\bsponsor\w*|\bpetition\w*|\bvisas?\b|\bimmigra\w*|\bcitizen\w*|\bnationality\b"
-     r"|\bgreen\s+card\b|\bpermanent\s+residen\w*|\bh[\s\-\u2010-\u2015]?1[\s\-\u2010-\u2015]?b\b",
+     r"|\bgreen\s+card\b|\bpermanent\s+residen\w*|\bh[\s\-\u2010-\u2015\u2212\u2043]?1[\s\-\u2010-\u2015\u2212\u2043]?b\b",
      "work_authorization"),
     (r"\bgender\w*|\bsex\b|\brace\b"
      r"|\bracial\b|\bethnic\w*|\bhispanic\b"
@@ -180,31 +180,88 @@ LEGAL_FITS = {"exact", "bool", "decline"}
 LEGAL_AREAS = {"work_authorization": "eligibility.", "eeo": "eeo.",
                "compensation": "compensation."}
 
-# Invisible characters a page can put inside a word (soft hyphens, the
-# combining grapheme joiner, zero-width spaces and joiners, word joiners
-# and invisible operators, byte-order marks). NFKC
-# keeps them, and "Spon\u00adsorship" (a soft hyphen) would otherwise slip past.
-_INVISIBLE = re.compile("[\\u00ad\\u034f\\u200b-\\u200d\\u2060-\\u2064\\ufeff]")
-
 _PATHS = [(re.compile(p, re.I), path) for p, path in PROFILE_PATHS]
 _LEGAL = [(re.compile(p, re.I), kind) for p, kind in LEGAL_GUARD]
 _STOPS = [(re.compile(p, re.I), why) for p, why, _ in HARD_STOPS]
 STOP_KINDS = [(re.compile(p, re.I), kind) for p, _, kind in HARD_STOPS]
 
 
-def normalize_text(text: str) -> str:
+def is_invisible(ch: str) -> bool:
     """
-    The one normaliser for every pattern table here (HARD_STOPS,
-    PROFILE_PATHS, LEGAL_GUARD): NFKC, then invisible characters removed, so
-    "con\u00advict" reads as "convict". Matching only; nothing is stored.
+    A character a page can put inside or between words without it showing:
+    every Unicode format character (category Cf: soft hyphens, zero-width
+    spaces and joiners, direction marks, bidi controls, invisible operators,
+    tags, byte-order marks), the variation selectors U+FE00-U+FE0F and the
+    combining grapheme joiner U+034F.
     """
-    return _INVISIBLE.sub("", unicodedata.normalize("NFKC", str(text or "")))
+    return (unicodedata.category(ch) == "Cf" or "\ufe00" <= ch <= "\ufe0f"
+            or ch in "\u034f\u00ad")
+
+
+# The invisible characters the previous normaliser deleted.
+_EARLIER_INVISIBLE = re.compile("[\\u00ad\\u034f\\u200b-\\u200d\\u2060-\\u2064\\ufeff]")
+
+
+def text_variants(raw: str) -> list[str]:
+    """
+    Every reading of a page text the pattern tables are matched against:
+    the text as written, then NFKC-normalised as is, with invisible
+    characters deleted ("con\u00advict" -> "convict"), and with them as spaces
+    ("Security\u200bPIN" -> "Security PIN"). A check that means stop,
+    sensitive, guard or redact counts a hit on ANY of them, so normalising
+    can only add matches, never lose one: the text as written is always
+    still there.
+    """
+    raw = str(raw or "")
+    nfkc = unicodedata.normalize("NFKC", raw)
+    deleted = "".join(c for c in nfkc if not is_invisible(c))
+    spaced = "".join(" " if is_invisible(c) else c for c in nfkc)
+    # The reading the previous normaliser gave (NFKC, a narrower set
+    # deleted), kept so no text that matched before can stop matching: a
+    # word split by one invisible and bounded by another needs exactly it.
+    earlier = _EARLIER_INVISIBLE.sub("", nfkc)
+    return list(dict.fromkeys([raw, nfkc, deleted, spaced, earlier]))
 
 
 def _question_text(field: dict) -> str:
-    """Everything visible about the question — some portals hide it in help text."""
-    return normalize_text(" ".join(str(field.get(k) or "") for k in
-                                   ("label", "help_text", "placeholder", "name")))
+    """Everything visible about the question, as written — some portals hide it in help text."""
+    return " ".join(str(field.get(k) or "") for k in
+                    ("label", "help_text", "placeholder", "name"))
+
+
+def stop_reason(text: str) -> str | None:
+    """The HARD_STOPS reason that any reading of `text` hits, or None."""
+    variants = text_variants(text)
+    return next((why for rx, why in _STOPS if any(rx.search(v) for v in variants)), None)
+
+
+def stop_kinds(text: str) -> set[str]:
+    """Every HARD_STOPS kind any reading of `text` hits."""
+    variants = text_variants(text)
+    return {kind for rx, kind in STOP_KINDS if any(rx.search(v) for v in variants)}
+
+
+def profile_lines(text: str) -> list[str]:
+    """
+    The PROFILE_PATHS line each reading of `text` resolves to (first match
+    in table order), distinct, in reading order. More than one means the
+    readings disagree about which line answers the question.
+    """
+    out = []
+    for v in text_variants(text):
+        path = next((p for rx, p in _PATHS if rx.search(v)), None)
+        if path and path not in out:
+            out.append(path)
+    return out
+
+
+def sensitive_line(text: str, prefixes: tuple[str, ...]) -> str | None:
+    """A PROFILE_PATHS line under `prefixes` that any reading of `text` matches."""
+    for v in text_variants(text):
+        hit = next((p for rx, p in _PATHS if rx.search(v) and p.startswith(prefixes)), None)
+        if hit:
+            return hit
+    return None
 
 
 def _identifier_words(name: str) -> str:
@@ -218,15 +275,15 @@ def legal_guard_kinds(field: dict) -> list[str]:
     """
     Every LEGAL_GUARD kind a field matches ("work_authorization", "eeo",
     "compensation"), in table order. Read on the label, help text,
-    placeholder, name and option texts, NFKC-normalised with invisible
-    characters removed; the name is split into words first. Local only.
+    placeholder, name and option texts, every reading of them
+    (text_variants); the name is split into words first. Local only.
     """
     text = " ".join(
         [str(field.get(k) or "") for k in ("label", "help_text", "placeholder")]
         + [_identifier_words(str(field.get("name") or ""))]
         + [str(o) for o in field.get("options") or []])
-    text = normalize_text(text)
-    return [kind for rx, kind in _LEGAL if rx.search(text)]
+    variants = text_variants(text)
+    return [kind for rx, kind in _LEGAL if any(rx.search(v) for v in variants)]
 
 
 def legal_guard(field: dict) -> str | None:
@@ -247,11 +304,11 @@ def decide(field: dict, category: str, profile) -> dict:
     base = {"label": field.get("label"), "options": field.get("options"),
             "category": category}
 
-    # -- layer 1: the backstop overrides everything --------------------------
-    for rx, why in _STOPS:
-        if rx.search(text):
-            return {**base, "action": "human", "value": None,
-                    "source": "human", "reason": why}
+    # -- layer 1: the backstop overrides everything, on any reading ---------
+    why = stop_reason(text)
+    if why:
+        return {**base, "action": "human", "value": None,
+                "source": "human", "reason": why}
 
     # -- layer 2: a password input is refused on type alone, however labelled,
     # and so is any box the scan marked secret (toggled to text, hinted or
@@ -276,7 +333,12 @@ def decide(field: dict, category: str, profile) -> dict:
     # -- layer 3: answers that must come from a named line in profile.yaml ---
     if action == "profile" or guard:
         kind = (guard or category).replace("_", " ")
-        path = next((p for rx, p in _PATHS if rx.search(text)), None)
+        lines = profile_lines(text)
+        if len(lines) > 1:
+            return {**base, "action": "human", "value": None, "source": "human",
+                    "reason": f"This could be answered by more than one profile line "
+                              f"({', '.join(lines)}). Answer it yourself."}
+        path = lines[0] if lines else None
         if path is None:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This is a {kind} question, but "

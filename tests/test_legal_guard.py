@@ -120,6 +120,16 @@ GUARDED = [
     ("Total compensation", None), ("Expected remuneration", None),
     ("Expected earnings", None), ("Desired income", None), ("OTE", None),
     ("Current CTC", None), ("Desired hourly rate", None),
+    ("H" + chr(0x2212) + "1B status", None),    # minus sign
+    ("H" + chr(0x2043) + "1B status", None),    # hyphen bullet
+] + [
+    # One per class of invisible character now stripped: a direction mark,
+    # a bidi embedding and an isolate, the Mongolian vowel separator, a tag
+    # character, a variation selector, the combining grapheme joiner and an
+    # invisible operator.
+    (f"Spon{c}sorship required?", None)
+    for c in (chr(0x200E), chr(0x202A), chr(0x2066), chr(0x180E), chr(0xE0041),
+              chr(0xFE0F), chr(0x034F), chr(0x2062))
 ]
 
 NOT_GUARDED = ["PayPal email", "Start date", "Embrace change", "Sussex", "Shipping address",
@@ -234,8 +244,9 @@ def test_a_typed_box_or_a_two_area_box_comes_to_you():
                      "eeo.veteran_status": False})
     v = sensitive.decide({"label": "Are you authorized to work in the US?", "type": "text"},
                          "personal_fact", prof)
-    check(v["action"] == "human",
-          f"a guarded box to type in, with a true/false line in the same area: yours ({v['action']})")
+    check(v["action"] == "human" and "box to type in" in (v.get("reason") or ""),
+          f"a guarded box to type in, with a true/false line in the same area: yours "
+          f"({v['action']}, {v.get('reason')})")
     two = {"label": "I am authorized to work in the US and am not a protected veteran",
            "type": "checkbox"}
     check(sorted(set(sensitive.legal_guard_kinds(two))) == ["eeo", "work_authorization"],
