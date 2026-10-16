@@ -488,6 +488,21 @@ open once anything submits without Jack.
 - **Corrections log:** record no profile line when readings disagree.
 - **Work-authorization lines:** export_control_us_person in,
   security_clearance out (to Jack). Confirmed by Jack.
+- Host family on shared ATS domains: every Workday / Greenhouse tenant is
+  one family, so a link to another employer's form would be filled.
+  Compare whole hosts for known ATS domains; Lever and Greenhouse put
+  tenants on one host (jobs.lever.co/<company>, job-boards.greenhouse.io/
+  <company>), so they also need the path's tenant segment.
+- The shows-choice lookup's `[class*="control"]` also matches Bootstrap's
+  form-control / controls wrappers.
+- A step that fails partway (fill_step_failed) loses the rows already
+  filled from the review sheet and tracker.
+- The gate treats a results entry with no "unconfirmed" key as confirmed;
+  it should default to unconfirmed.
+- An Indian "PIN code" (or a token / secret field) makes a page read as a
+  sign-in page in follow mode, so nothing on it is filled.
+- The react-select mock in tests/test_shows_choice.py is unverified
+  against a live Greenhouse page (real react-select picks on click).
 - From review FLAGs this run:
   - scan-time decide reads the name only as written; read it split into
     words too (as click time does);

@@ -546,9 +546,12 @@ _COVER = re.compile(r"\bcover\b", re.I)
 
 
 def _resume_box(fields: list[dict]) -> dict | None:
+    """The one file box labelled or named as the resume (resume_file, resumeUpload too)."""
+    def words(f):
+        name = str(f.get("name") or "")
+        return f"{f.get('label') or ''} {name} {sensitive._identifier_words(name)}"
     boxes = [f for f in fields if f.get("type") == "file"
-             and _RESUME_BOX.search(f"{f.get('label') or ''} {f.get('name') or ''}")
-             and not _COVER.search(f"{f.get('label') or ''} {f.get('name') or ''}")]
+             and _RESUME_BOX.search(words(f)) and not _COVER.search(words(f))]
     return boxes[0] if len(boxes) == 1 else None
 
 
@@ -688,6 +691,9 @@ class _FollowRun:
             event = self.watcher.observe(follow.read_shape(page))
             if event is not None:
                 last = now
+                # On every page, refused ones included: a navigation drops
+                # the listener, and without it the idle ending never fires.
+                self.guard.install(page)
                 kind, number = event
                 self.step_numbers.add(number)
                 if len(self.step_numbers) > 1 and not any(
@@ -727,6 +733,10 @@ def _follow(page, args, prof, url, key, ats, detected_by, events, posting_text,
     verification, other-site or LinkedIn pages. One record and one review
     sheet cover every page.
     """
+    # You open the form first, as in a normal fill: nothing is filled
+    # before this, so nothing on the posting page itself is touched.
+    print(f"\n{BOLD}Click Apply if the form isn't open, then press Enter.{OFF}")
+    input()
     print(f"\n{BOLD}Follow mode.{OFF} You click Apply, Next, Continue, sign in and "
           f"Submit yourself;")
     print("I fill each page as it appears, only empty fields, and only once you've "
@@ -759,6 +769,11 @@ def _follow(page, args, prof, url, key, ats, detected_by, events, posting_text,
                    report_path=str(sheet))
     print(f"Review sheet: {sheet}")
     run_id, gate_result = _shadow_gate(record, prof, url, key, detected_by, dry_run=False)
+    if ended != "enter":
+        # The Enter watcher is still reading the terminal; let it take its
+        # line, so your y/n below isn't swallowed by it.
+        print("Press Enter to continue.")
+        enter.wait()
     answer = _ask_submitted()
     if answer == "y":
         tracker.mark_submitted(url)

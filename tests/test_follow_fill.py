@@ -582,5 +582,171 @@ def test_follow_and_dry_run_together_are_refused():
     check.done()
 
 
+POSTING = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+  <h1>Engineer</h1>
+  <label for="alert">Get job alerts by email</label><input id="alert" name="alert_email">
+  <form id="app" style="display:none"><label for="fn">First Name</label>
+    <input id="fn" name="first_name"></form>
+  <button type="button" id="apply" onclick="document.getElementById('app').style.display=''">Apply</button>
+{CLICKS_JS}</body></html>"""
+
+
+def test_nothing_is_filled_before_you_open_the_form():
+    import apply
+
+    check = Checks()
+    seen_at_prompt = []
+    pages_ref = []
+    real_open = apply.browser_mod.open_page
+
+    def open_page(ctx, u):
+        page = real_open(ctx, u)
+        pages_ref.append(page)
+        return page
+
+    def ask(prompt=""):
+        page = pages_ref[-1]
+        if not seen_at_prompt:
+            # The Apply prompt: what the page holds before you press Enter.
+            seen_at_prompt.append((page.input_value("#alert"), page.evaluate("window.__keys")))
+            page.click("#apply")                      # you open the form
+            return ""
+        return "n"
+
+    def act(page, state):
+        state["n"] = state.get("n", 0) + (page.is_visible("#fn") and page.input_value("#fn") != "")
+        return state["n"] > 3
+    text, records, error, you = _follow(
+        POSTING, act, path="/posting",
+        patches=((apply.browser_mod, "open_page", open_page), (apply, "input", ask)))
+    check(error is None and "Click Apply if the form isn't open, then press Enter." in text,
+          f"follow mode asks you to open the form first ({error})")
+    check(seen_at_prompt and seen_at_prompt[0] == ("", 0),
+          f"nothing was filled or typed before you pressed Enter ({seen_at_prompt})")
+    check.done()
+
+
+def test_an_ending_other_than_enter_lets_the_watcher_take_its_line_first():
+    import apply
+
+    check = Checks()
+    order = []
+    real_ask = apply._ask_submitted
+
+    class _Waits(_You):
+        def wait(self):
+            order.append("watcher took its line")
+
+    def ask():
+        order.append("y/n asked")
+        return real_ask()
+
+    def never(page, state):
+        return False
+    pages = []
+    real_open = apply.browser_mod.open_page
+
+    def open_page(ctx, u):
+        page = real_open(ctx, u)
+        pages.append(page)
+        return page
+    text, records, error, you = _follow(
+        SINGLE, never, path="/race",
+        patches=((apply, "FOLLOW_IDLE_S", 1), (apply, "_ask_submitted", ask),
+                 (apply, "_EnterWatcher", _Waits(pages, never)),
+                 (apply.browser_mod, "open_page", open_page)))
+    check(error is None and "Press Enter to continue." in text,
+          f"ended by idle time: you're asked to press Enter ({error})")
+    check(order == ["watcher took its line", "y/n asked"],
+          f"the watcher takes its line before the y/n question ({order})")
+    check.done()
+
+
+def _files_page(boxes: str) -> str:
+    return (f"<!doctype html><html><head><title>Engineer - Example Co</title></head><body>"
+            f"<form>{boxes}<label for='fn'>First Name</label><input id='fn' name='first_name'>"
+            f"</form>{CLICKS_JS}</body></html>")
+
+
+def test_the_resume_box_rules():
+    from _fill_run import PROFILE
+
+    check = Checks()
+    resume = TEST_HOME / "rules-resume.pdf"
+    resume.write_bytes(b"%PDF-1.4 test resume\n")
+    own = TEST_HOME / "jacks-own.pdf"
+    own.write_bytes(b"%PDF-1.4 your own\n")
+    profile = PROFILE.replace("resume_default: missing.pdf", "resume_default: rules-resume.pdf")
+    files_js = "() => [...document.querySelectorAll('input[type=file]')].map(b => [...b.files].map(f => f.name))"
+    cases = {
+        "two boxes both say resume: no upload": (
+            "<label for='a'>Resume</label><input type='file' id='a' name='resume'>"
+            "<label for='b'>CV</label><input type='file' id='b' name='cv'>", [[], []], False),
+        "no box says resume: no upload": (
+            "<label for='a'>Attachments</label><input type='file' id='a' name='attachments'>",
+            [[]], False),
+        "a camelCase name behind a generic label: uploaded": (
+            "<label for='a'>Attach</label><input type='file' id='a' name='resumeUpload'>",
+            [["rules-resume.pdf"]], False),
+        "the box already holds your file: left alone": (
+            "<label for='a'>Resume</label><input type='file' id='a' name='resume'>",
+            [["jacks-own.pdf"]], True),
+    }
+    for i, (what, (boxes, want, yours_first)) in enumerate(cases.items()):
+        def act(page, state, yours_first=yours_first):
+            if yours_first and not state.get("yours"):
+                page.set_input_files("#a", str(own))  # you, before the agent's scan
+                state["yours"] = True
+            state["files"] = page.evaluate(files_js)
+            state["n"] = state.get("n", 0) + (page.input_value("#fn") != "")
+            return state["n"] > 3
+        text, records, error, you = _follow(_files_page(boxes), act, path=f"/rules{i}",
+                                            profile_yaml=profile)
+        check(error is None and you.state.get("files") == want,
+              f"{what} ({you.state.get('files')})")
+    check.done()
+
+
+START_THEN_SIGN_IN = {
+    "/start": SINGLE,
+    "/signin": f"""<!doctype html><html><body><form>
+      <label for="em">Email</label><input id="em" type="email">
+      <label for="pw">Password</label><input id="pw" type="password"></form>{CLICKS_JS}</body></html>""",
+}
+
+
+def test_the_idle_ending_works_on_a_refused_page_after_you_navigate():
+    import apply
+    from _fill_run import run_fill
+
+    check = Checks()
+
+    def serve(route):
+        path = "/" + route.request.url.split("/", 3)[3].split("?")[0]
+        route.fulfill(content_type="text/html", body=START_THEN_SIGN_IN.get(path, SINGLE))
+
+    def act(page, state):
+        if not state.get("moved") and page.input_value("#fn"):
+            page.goto(f"{HOST}/signin")                # you, to a sign-in page
+            state["moved"] = True
+        return False
+    pages = []
+    real_open = apply.browser_mod.open_page
+
+    def open_page(ctx, u):
+        page = real_open(ctx, u)
+        pages.append(page)
+        return page
+    you = _You(pages, act, limit=200)
+    text, records, error = run_fill(
+        None, dry_run=False, follow=True, url=f"{HOST}/start", routes={f"{HOST}/**": serve},
+        patches=(*_speed(apply), (apply.browser_mod, "open_page", open_page),
+                 (apply, "_EnterWatcher", you), (apply, "FOLLOW_IDLE_S", 2)))
+    check(error is None and you.state.get("moved"), f"you moved to the sign-in page ({error})")
+    check("No new page and no input from you" in text,
+          "the idle ending fired there (the guard was installed on the refused page)")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())
