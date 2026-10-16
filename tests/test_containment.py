@@ -116,6 +116,25 @@ def test_a_dropdown_that_wont_hold_the_focus_is_skipped():
     check.done()
 
 
+TOGGLED = """<!doctype html><html><body><form>
+  <label for="ci">City</label><input id="ci" name="city">
+</form></body></html>"""
+
+
+def test_a_box_that_became_a_password_box_is_never_set():
+    check = Checks()
+    with mock_page(_write("toggled.html", TOGGLED)) as page:
+        city = _field(page, "City")
+        # After the scan the page turns the box into a password box, and the
+        # browser's password manager fills it.
+        page.evaluate("""() => { const el = document.getElementById('ci');
+                                 el.type = 'password'; el.value = 'BROWSER-FILLED'; }""")
+        ok, detail = filler.fill_one(page, city, "Springfield", contained=True)
+        still = page.evaluate("() => document.getElementById('ci').value === 'BROWSER-FILLED'")
+    check(not ok and still, f"refused, and the browser-filled value is untouched ({detail})")
+    check.done()
+
+
 PLAIN = f"""<!doctype html><html><body><form>
   <label for="ci">City</label><input id="ci" name="city">
 </form><script>{KEYS_JS}</script></body></html>"""

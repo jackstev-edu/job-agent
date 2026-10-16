@@ -3,7 +3,8 @@ filler.py — typing the answers in.
 
 WHAT THIS DOES: Takes the plan (which answer goes in which box) and actually
 enters it into the page, typing character by character because many forms
-only register input they see as real keystrokes.
+only register input they see as real keystrokes. In follow mode
+(contained) a text box is set on the element instead, with no keystrokes.
 
 WHY IT MATTERS: This file contains the hard stop. It has no code path that
 clicks Submit, presses Enter, or types a line break outside a textarea — not
@@ -73,8 +74,16 @@ def _element(page: "Page", ref: str):
 # Sets a text box's value on the element itself, with the input and change
 # events a framework listens for, and no keystrokes at all. The native
 # setter is used because React watches it. True if the box now holds it.
-_SET_VALUE_JS = r"""
+# Before anything is written or read: refused (false) for anything but a
+# text input or textarea, for an element that is now secret (a
+# show-password toggle, a re-render into a password box), and while any
+# password box or password hint is on the page, as every reader refuses.
+_SET_VALUE_JS = ("""
 (el, v) => {
+""" + extract._SECRET_JS + r"""
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return false;
+  if (isSecret(el, '')) return false;
+  if (document.querySelector('input[type=password i], [autocomplete*="password" i]')) return false;
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
                                                   : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
@@ -84,7 +93,7 @@ _SET_VALUE_JS = r"""
   el.dispatchEvent(new Event('change', {bubbles: true}));
   return el.value === v;
 }
-"""
+""")
 
 
 def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple[bool, str]:
@@ -272,6 +281,11 @@ def _fill_combobox(page: "Page", element, field: dict, value: str,
                 _abandon_combobox(page, element, contained)
                 return False, "the focus moved away while typing; left empty for you"
             page.keyboard.type(ch)
+            # And again right after: a focus change during this keystroke
+            # stops the typing before the next one.
+            if not extract.focus_in(element):
+                _abandon_combobox(page, element, contained)
+                return False, "the focus moved away while typing; left empty for you"
             page.wait_for_timeout(45)
 
     options = extract.wait_for_options(page, 3000)
