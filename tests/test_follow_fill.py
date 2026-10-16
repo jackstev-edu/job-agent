@@ -378,7 +378,7 @@ def test_help_text_on_a_page_after_the_upload_never_reaches_a_model():
     check(error is None and any("HELP-SENTINEL" in json.dumps(f) for f in rec.get("fields", [])),
           f"page 2's help text was scanned (so the checks below mean something) ({error})")
     check(all("HELP-SENTINEL" not in s for s in sent), "it reached no classify or mapper call")
-    check(reasons and "help text held back after upload" in reasons[0],
+    check(reasons and "help text held back in follow mode" in reasons[0],
           f"Phone came to you instead ({reasons})")
     check.done()
 
@@ -438,6 +438,47 @@ def test_help_text_next_to_a_resume_box_on_a_later_page_never_reaches_a_model():
           f"the resume was uploaded on page 2 (so the checks below mean something) ({error})")
     check(all("HELP-SENTINEL" not in s for s in sent),
           "page 2's help text reached no classify or mapper call, before or after the upload")
+    rec = records[-1] if records else {}
+    reasons = [fl.get("reason", "") for fl in rec.get("flags", []) if fl.get("label") == "Phone"]
+    check(reasons and "help text held back in follow mode" in reasons[0],
+          f"Phone came to you, with the follow-mode reason ({reasons})")
+    check.done()
+
+
+ECHO = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+  <form><label for="em">Email</label><input id="em" name="email" aria-describedby="em-h">
+    <div id="em-h">We'll use this to contact you</div>
+    <label for="ci">City</label><input id="ci" name="city"></form>
+<script>
+  // The page echoes what you type into its validation text.
+  document.getElementById('em').addEventListener('input', e => {{
+    document.getElementById('em-h').textContent =
+      "'" + e.target.value + "' ECHO-SENTINEL-7714 is not a valid email"; }});
+</script>{CLICKS_JS}</body></html>"""
+
+
+def test_text_you_typed_before_the_first_scan_never_reaches_a_model():
+    import apply
+
+    check = Checks()
+    sent, classify, map_fields = _spies()
+
+    def act(page, state):
+        if not state.get("typed"):
+            page.fill("#em", "jo@x")                  # you, before the agent's first scan
+            state["typed"] = True
+            return False
+        state["n"] = state.get("n", 0) + 1
+        return state["n"] > 25
+    text, records, error, you = _follow(
+        ECHO, act, path="/echo",
+        patches=((apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    rec = records[-1] if records else {}
+    check(error is None and any("ECHO-SENTINEL" in json.dumps(f) for f in rec.get("fields", [])),
+          f"the scan did see the echoed help text (so the next check means something) ({error})")
+    check(all("ECHO-SENTINEL" not in s for s in sent) and sent,
+          "it reached no classify or mapper call")
     check.done()
 
 

@@ -455,12 +455,23 @@ _WATCH_ENDED = {
     "hard_cap": "Stopped following after 90 minutes.",
 }
 
-def _route(fields: list[dict], categories: dict, prof,
-           new_after_upload: set[str]) -> tuple[dict, list[dict], list[dict]]:
+# Why a field whose help text the classifier wasn't shown comes to you.
+HELD_AFTER_UPLOAD = ("Its help text changed or appeared after the resume upload (help "
+                     "text held back after upload), so the classifier couldn't be shown "
+                     "it. Answer it yourself.")
+HELD_IN_FOLLOW = ("Follow mode never shows a model help text (help text held back in "
+                  "follow mode), so the classifier couldn't be shown it. Answer it "
+                  "yourself.")
+
+
+def _route(fields: list[dict], categories: dict, prof, new_after_upload: set[str],
+           held_reason: str = HELD_AFTER_UPLOAD) -> tuple[dict, list[dict], list[dict]]:
     """
     The policy for one page's fields: (plan from the profile, flags for you,
     fields for the mapper). Sensitive fields never reach the mapper. Shared
     by a normal fill and follow mode, so both route a field the same way.
+    `new_after_upload` holds the fields whose help text the classifier
+    wasn't shown; `held_reason` says why, on the review sheet.
     """
     plan: dict[str, dict] = {}
     flags: list[dict] = []
@@ -485,9 +496,7 @@ def _route(fields: list[dict], categories: dict, prof,
             flags.append({"ref": field["ref"], "label": field.get("label"),
                           "options": field.get("options"), "action": "human",
                           "value": None, "source": "human", "category": category,
-                          "reason": "Its help text changed or appeared after the resume "
-                                    "upload (help text held back after upload), so the "
-                                    "classifier couldn't be shown it. Answer it yourself."})
+                          "reason": held_reason})
             continue
         verdict = sensitive.decide(
             field, categories.get(field["ref"], "unknown"), prof)
@@ -563,7 +572,10 @@ class _FollowRun:
         self.steps: list[dict] = []
         self.step_numbers: set[int] = set()
         self.last_shape: dict | None = None
-        self.scanned = False            # any page has been scanned in this run
+        # Follow mode never shows a model help text: you may have typed
+        # before any scan, and a page can echo what you typed in its help
+        # ("'jo@x' is not a valid email"). So every scan counts as "later".
+        self.scanned = True
 
     def _classify(self, fields: list[dict], with_help: bool = True) -> dict[str, str]:
         """
@@ -590,9 +602,9 @@ class _FollowRun:
         if not self.guard.wait_quiet(page):
             self.events.append({"kind": "never_quiet", "detail": f"step {number}"})
             return
-        # Help text goes to a model only on the run's very first scan. Once
-        # anything was scanned, uploaded or filled, help text can echo a
-        # value (your input, the resume autofill, validation text).
+        # No help text ever goes to a model in follow mode (see scanned):
+        # every field is classified with its help blanked, and a field with
+        # help text comes to you.
         later = bool(self.resume_done or self.steps or self.scanned)
         fields = extract.extract_fields(page, self.read_guard)
         self.scanned = True
@@ -618,15 +630,13 @@ class _FollowRun:
             if later:
                 new_after_upload = {f["ref"] for f in fields if f.get("type") != "file"}
         elif later:
-            # After the resume upload, or once any page was filled, help text
-            # can echo a value (validation text, an autofilled summary): none
-            # is sent to a model, and a field with help comes to you.
             categories = self._classify(fields, with_help=False)
             new_after_upload = {f["ref"] for f in fields if f.get("type") != "file"}
         else:
             categories = self._classify(fields)
         self._note_next_step()
-        plan, flags, for_model = _route(fields, categories, self.prof, new_after_upload)
+        plan, flags, for_model = _route(fields, categories, self.prof, new_after_upload,
+                                        held_reason=HELD_IN_FOLLOW)
         _ask_mapper(for_model, self.prof, self.posting_text, new_after_upload, plan)
         plan = _fillable_plan(fields, plan)
         prefill = _prefill_census(page)

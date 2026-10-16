@@ -113,6 +113,9 @@ How the code keeps them, and rules of its own:
   structure between scan and fill, or splits words with invisible or
   look-alike Unicode. Jack reviews every page before Submit. Reviewer:
   FLAG, never BLOCK; record in TODO under MUST FIX BEFORE AUTO-SUBMIT.
+  This never covers password reads, any route that sends a page value to
+  the model or the network, the gate's missing-key defaults, or narrowing
+  HARD_STOPS, LEGAL_GUARD, PROFILE_PATHS or SECRET_WORDS.
 - The reviewer treats accepted routes as FLAG, never BLOCK. Any route that
   sends a page value to the model or the network is a BLOCK.
 
