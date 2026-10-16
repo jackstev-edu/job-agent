@@ -51,6 +51,8 @@ sends them personally. Windows, PowerShell, venv at `.venv`, run as
 - No code path clicks Submit, Next, Continue, Sign in, Create account or SSO,
   ticks a consent/terms checkbox, or accepts terms.
 - Nothing auto-submits.
+- A field must clear BOTH layers (classifier routing AND the local regex
+  backstop) before the model may answer it.
 
 How the code keeps them, and rules of its own:
 
@@ -106,6 +108,33 @@ How the code keeps them, and rules of its own:
   row; otherwise stop.
 - The reviewer is read-only. Fixes are made by the main session as a new
   commit, which is then reviewed again.
+
+## Working rules
+
+- One commit per item; tests pass before each commit.
+- Before each commit, run git status and confirm nothing from
+  ~/.job-agent is staged.
+- Run Python as .venv/Scripts/python.exe (use -m pip, never pip.exe).
+- Don't capture Jack's screen.
+- Rule-reviewer after each commit, output unedited; confirm the tree is
+  unchanged after each review. BLOCK: stop and report. FLAG: continue
+  and report.
+- Do not open, read or modify anything in ~/.job-agent.
+- Do not push, amend or rewrite commits.
+- Each new test must fail on the previous commit's code; say so per test.
+- Before claiming "no caution is lost" or similar, show the check that
+  proves it.
+- Never narrow a stop, guard or secret pattern (HARD_STOPS, LEGAL_GUARD,
+  PROFILE_PATHS routing, SECRET_WORDS) or make any check fail toward a
+  pass without Jack's explicit approval. False positives there are
+  acceptable; if a negative test conflicts with a pattern, report it
+  instead of narrowing.
+- If a full test run takes over 20 minutes, stop and report which test
+  hung; do not just rerun.
+- Big features are plan-first: propose and wait for Jack's go.
+- Report: table hash | summary | tests | reviewer verdict | full-run
+  time; each reviewer output unedited; a separate "not asked for" list;
+  decisions needed, each with a recommendation.
 
 ## Current work
 
