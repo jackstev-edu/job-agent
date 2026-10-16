@@ -294,5 +294,32 @@ def test_the_gate_holds_a_guarded_field_to_the_policy():
     check.done()
 
 
+RELOCATE_SPONSOR = "Are you willing to relocate if we sponsor your visa?"
+
+
+def test_a_work_authorization_question_is_never_answered_from_a_relocation_line():
+    import test_gate as tg
+
+    check = Checks()
+    prof = _Profile({"eligibility.willing_to_relocate": True,
+                     "eligibility.authorized_to_work_us": True})
+    v = sensitive.decide({"label": RELOCATE_SPONSOR, "type": "radio", "options": ["Yes", "No"]},
+                         "personal_fact", prof)
+    check(v["action"] == "human" and "eligibility.willing_to_relocate" in (v.get("reason") or ""),
+          f"guarded as work authorization, closest line willing_to_relocate: yours ({v['action']})")
+    v = sensitive.decide({"label": "Are you authorized to work in the US?", "type": "radio",
+                          "options": ["Yes", "No"]}, "personal_fact", prof)
+    check(v["action"] == "fill", "a real work-authorization line still answers its own question")
+    for plan, needle, what in (
+            ({"value": "Yes", "source": "profile", "fit": "bool",
+              "profile_path": "eligibility.willing_to_relocate"},
+             "which isn't a work_authorization profile line", "answered from the relocation line"),
+            ({"value": "Yes", "source": "model", "confidence": "high", "needs_review": False,
+              "review_reasons": []}, "not traced to a profile line", "answered by the model")):
+        tg.stops(check, _gate_record(RELOCATE_SPONSOR, "personal_fact", plan), needle,
+                 f"the gate, {what}")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())

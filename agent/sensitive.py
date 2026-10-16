@@ -176,9 +176,30 @@ LEGAL_GUARD: list[tuple[str, str]] = [
 # a decline option.
 LEGAL_FITS = {"exact", "bool", "decline"}
 
-# Which profile lines answer which kind of guard match.
-LEGAL_AREAS = {"work_authorization": "eligibility.", "eeo": "eeo.",
-               "compensation": "compensation."}
+# Which profile lines answer which kind of guard match. Work authorization
+# is a fixed list, not the "eligibility." prefix: that prefix also holds
+# relocation, driving and travel lines, and "Are you willing to relocate if
+# we sponsor your visa?" must not be answered from willing_to_relocate.
+LEGAL_AREAS = {
+    "work_authorization": frozenset({
+        "eligibility.requires_sponsorship_future",
+        "eligibility.requires_sponsorship_now",
+        "eligibility.authorized_to_work_us",
+        "eligibility.work_authorization_type",
+        "eligibility.export_control_us_person",
+    }),
+    "eeo": "eeo.",
+    "compensation": "compensation.",
+}
+
+
+def in_legal_area(path: str | None, kinds) -> bool:
+    """Is this profile line one that answers a guard match of any of these kinds?"""
+    for kind in kinds:
+        area = LEGAL_AREAS[kind]
+        if (path in area) if isinstance(area, frozenset) else str(path or "").startswith(area):
+            return True
+    return False
 
 _PATHS = [(re.compile(p, re.I), path) for p, path in PROFILE_PATHS]
 _LEGAL = [(re.compile(p, re.I), kind) for p, kind in LEGAL_GUARD]
@@ -349,7 +370,7 @@ def decide(field: dict, category: str, profile) -> dict:
                     "reason": "This reads as more than one kind of legal question "
                               f"({', '.join(g.replace('_', ' ') for g in guards)}). "
                               "Answer it yourself."}
-        if guards and not path.startswith(tuple(LEGAL_AREAS[g] for g in guards)):
+        if guards and not in_legal_area(path, guards):
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This reads as a {kind} question, but the closest "
                               f"profile line is `{path}`. Answer it yourself."}

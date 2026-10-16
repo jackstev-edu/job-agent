@@ -317,8 +317,7 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             if len(set(guards)) > 1:
                 content.append(f"{name}: reads as more than one kind of legal question "
                                f"({'/'.join(guards)})")
-            if guards and not str(entry["profile_path"]).startswith(
-                    tuple(sensitive.LEGAL_AREAS[g] for g in guards)):
+            if guards and not sensitive.in_legal_area(entry["profile_path"], guards):
                 content.append(f"{name}: answered from {entry['profile_path']}, which isn't "
                                f"a {'/'.join(guards)} profile line")
             fits = sensitive.LEGAL_FITS if guards else STRICT_FITS
