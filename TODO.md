@@ -427,6 +427,22 @@
       page controls its DOM and could hand over the value many other ways;
       the guards are against reading one by accident.
 
+## Follow mode: deferred
+
+- A per-step breakdown in the review sheet (today one sheet lists every
+  page's rows together).
+- Frames: follow mode, like the scan, sees only the top document. An
+  iCIMS-style form inside an iframe isn't filled, and its sign-in pages
+  aren't recognised there (run pages.fill_allowed on every frame first).
+- The corrections log and the outcome read-back don't run in follow mode
+  (no final snapshot; edits are unknown, so runs score unknown).
+- The resume upload's baseline isn't tracked across pages (uploads=None).
+- The activity guard only guarantees quiet before a fill starts: while
+  the agent fills, your input isn't watched (a field is re-checked as
+  empty only at plan time).
+- A page whose structure changes faster than the watcher settles may be
+  skipped; real-portal timing unchecked.
+
 ## MUST FIX BEFORE AUTO-SUBMIT
 
 Accepted for now (CLAUDE.md threat model: a page that changes a field

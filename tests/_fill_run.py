@@ -85,12 +85,15 @@ def map_from_profile(fields, profile, page_text=""):
 
 
 @contextmanager
-def _headless():
+def _headless(routes: dict | None = None):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
-            yield browser.new_context()
+            ctx = browser.new_context()
+            for pattern, handler in (routes or {}).items():
+                ctx.route(pattern, handler)
+            yield ctx
         finally:
             browser.close()
 
@@ -113,15 +116,17 @@ def is_apply_prompt(printed: str) -> bool:
     return re.sub(r"\x1b\[[0-9;]*m", "", printed).rstrip().endswith(APPLY_PROMPT)
 
 
-def run_fill(form: Path, *, dry_run: bool, answers=("n",), profile_yaml: str = PROFILE,
+def run_fill(form: Path | None, *, dry_run: bool, answers=("n",), profile_yaml: str = PROFILE,
              classify=classify_by_label, map_fields=map_from_profile, patches=(),
-             cover_letter: bool = False):
+             cover_letter: bool = False, follow: bool = False, url: str | None = None,
+             routes: dict | None = None):
     """
     Run cmd_fill on `form`. Returns (printed text, records built, error or None).
     `answers` are what you'd type at each terminal prompt, in order; by
     default just "n" at "Did you submit it?". The "Click Apply" prompt is
     answered with Enter on its own and takes no answer from the list: the
-    mock forms are already open.
+    mock forms are already open. `follow` runs follow mode; `url` and
+    `routes` (URL glob -> handler) serve a mock at a real-looking host.
     """
     import apply
     from agent import shadow
@@ -137,8 +142,8 @@ def run_fill(form: Path, *, dry_run: bool, answers=("n",), profile_yaml: str = P
         records.append(rec)
         return rec
 
-    args = Namespace(profile=str(profile_path), url=form.resolve().as_uri(), force=True,
-                     dry_run=dry_run, resume=None, cover_letter=cover_letter)
+    args = Namespace(profile=str(profile_path), url=url or form.resolve().as_uri(), force=True,
+                     dry_run=dry_run, resume=None, cover_letter=cover_letter, follow=follow)
     out, error = io.StringIO(), None
 
     def reply(*a):
@@ -148,7 +153,7 @@ def run_fill(form: Path, *, dry_run: bool, answers=("n",), profile_yaml: str = P
     with ExitStack() as stack:
         for target, name, value in (
                 (apply.config, "check_api_key", lambda: ("ok", "")),
-                (apply.browser_mod, "browser", _headless),
+                (apply.browser_mod, "browser", lambda: _headless(routes)),
                 (apply.classify, "classify_fields", classify),
                 (apply.mapper, "map_fields", map_fields),
                 (apply.report, "open_in_browser", lambda path: None),

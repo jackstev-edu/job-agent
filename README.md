@@ -173,6 +173,34 @@ Enter…" prompt, anything you type into its terminal is read as that Enter:
 the run carries on as if you'd finished, and your command never runs. Keep
 `fill` in one terminal and run other commands in another.
 
+### Follow mode: multi-page applications
+
+```
+python apply.py fill <posting url> --follow
+```
+
+Off by default. Use it for applications that run over several pages.
+
+**You do:** click Apply, Next, Continue and Submit; sign in or create the
+account (Chrome may fill a saved password); type any verification code;
+answer what the agent leaves for you; press Enter in the terminal when
+you're done, then answer "Did you submit it?".
+
+**The agent does:** stays on its own tab and, each time a new page
+settles, fills that page. It fills only empty fields that aren't yours (a
+field that had a value, or that you changed, is never touched again), only
+after you've been idle for two seconds (it prints "hands off — filling"
+while it works), and it never types anywhere but the field it's filling.
+On sign-in, account, verification, other-site or LinkedIn pages it fills
+nothing and reads nothing. It never clicks Apply, Next, Continue, Sign in or
+Submit. Your resume goes only into a box labelled as the resume.
+
+One review sheet and one tracker record cover the whole application. The
+run ends at the portal's confirmation page, when you press Enter, after 20
+minutes with no new page and no input from you, or after 90 minutes; a
+closed tab still asks whether you submitted. The shadow gate always says
+would_stop for a multi-page run.
+
 ### The submit gate (shadow mode)
 
 The agent still never submits. But after each real fill it works out whether

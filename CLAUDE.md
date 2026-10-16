@@ -28,6 +28,11 @@ sends them personally. Windows, PowerShell, venv at `.venv`, run as
 - `agent/browser.py` — launches Playwright's bundled Chromium on a persistent
   profile; CAPTCHA and login-wall detection.
 - `agent/learn.py` — report-only suggestions from the corrections log.
+- `agent/follow.py` — follow mode's step detection (structure only).
+- `agent/ledger.py` — follow mode's never-overwrite ledger, activity guard
+  and classification cache.
+- `agent/pages.py` — follow mode's credential / verification page and
+  host-family rules (fill nothing there).
 - `agent/shadow.py` — the record of one fill run for the submit gate, and
   its redacted form for `gate_runs` (no answer values).
 - `agent/gate.py` — the submit gate: a pure function of that record plus the

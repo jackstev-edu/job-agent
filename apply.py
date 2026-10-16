@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import threading
+import time
 from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
-                   filler, gate, learn, letters, mapper, outcome, report, score,
-                   sensitive, shadow, template, tracker)
+                   filler, follow, gate, learn, ledger, letters, mapper, outcome,
+                   pages, report, score, sensitive, shadow, template, tracker)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
@@ -256,6 +258,10 @@ def cmd_fill(args) -> None:
         # Role and company from the posting's title, for the same reason: a
         # later page's title can carry an answer, and the letter is sent both.
         role, company = extract.guess_role_and_company(page)
+        if getattr(args, "follow", False):
+            _follow(page, args, prof, url, key, ats, detected_by, events, posting_text,
+                    role, company)
+            return
         # You open the form: on a portal you're signed in to, "Apply" can be
         # a one-click submit, so the agent never presses it.
         print(f"\n{BOLD}Click Apply if the form isn't open, then press Enter.{OFF}")
@@ -332,43 +338,7 @@ def cmd_fill(args) -> None:
                 [f for f in fields if f.get("type") != "file"])
 
         # 3. Apply the policy. Sensitive fields never reach the mapper.
-        plan: dict[str, dict] = {}
-        flags: list[dict] = []
-        for_model: list[dict] = []
-
-        for field in fields:
-            if field.get("type") == "file":
-                continue
-            if field.get("submits"):
-                # Opening this dropdown means clicking a button that can
-                # submit the form, so it's never touched.
-                flags.append({"ref": field["ref"], "label": field.get("label"),
-                              "options": field.get("options"), "action": "human",
-                              "value": None, "source": "human",
-                              "category": categories.get(field["ref"], "unknown"),
-                              "reason": "This dropdown is a button that could submit "
-                                        "the form, so I don't click it. Answer it yourself."})
-                continue
-            category = categories.get(field["ref"], "unknown")
-            if (field["ref"] in new_after_upload and (field.get("help_text") or "").strip()
-                    and classify.action_for(category) not in ("profile", "human")):
-                # Its question may be in help text the classifier wasn't shown.
-                flags.append({"ref": field["ref"], "label": field.get("label"),
-                              "options": field.get("options"), "action": "human",
-                              "value": None, "source": "human", "category": category,
-                              "reason": "Its help text changed or appeared after the resume "
-                                        "upload (help text held back after upload), so the "
-                                        "classifier couldn't be shown it. Answer it yourself."})
-                continue
-            verdict = sensitive.decide(
-                field, categories.get(field["ref"], "unknown"), prof)
-            if verdict["action"] == "human":
-                flags.append({**verdict, "ref": field["ref"]})
-            elif verdict["action"] == "fill":
-                plan[field["ref"]] = verdict
-            else:
-                field["_draft"] = verdict["action"] == "draft"
-                for_model.append(field)
+        plan, flags, for_model = _route(fields, categories, prof, new_after_upload)
 
         counts = {}
         for f in fields:
@@ -379,22 +349,7 @@ def cmd_fill(args) -> None:
               f"· {len(for_model)} to the model{OFF}")
 
         # 4. The mapper answers only what's left.
-        if for_model:
-            mapped = mapper.map_fields(
-                [_for_model(f, f["ref"] not in new_after_upload) for f in for_model],
-                prof, posting_text[:3000])
-            for ref, decision in mapped.items():
-                if next((f for f in for_model
-                         if f["ref"] == ref and f.get("_draft")), None):
-                    decision["needs_review"] = True
-                    decision["draft"] = True
-                    # The mapper prompt tells the model to flag every
-                    # draft, so its own flag on one is the draft's flag.
-                    # Flags raised in code (too long, approximate option,
-                    # low confidence) keep their own names.
-                    decision["review_reasons"] = ["draft"] + [
-                        r for r in decision.get("review_reasons", []) if r != "model"]
-                plan[ref] = decision
+        _ask_mapper(for_model, prof, posting_text, new_after_upload, plan)
 
         # The checkboxes as they stand just before the agent fills this
         # step's answers, so the gate can tell a box the agent's answer
@@ -490,7 +445,261 @@ _WATCH_ENDED = {
     "success": "The portal's confirmation page appeared.",
     "tab_closed": "The tab closed.",
     "timeout": "Stopped watching after 30 minutes.",
+    "idle": "No new page and no input from you for 20 minutes.",
+    "hard_cap": "Stopped following after 90 minutes.",
 }
+
+def _route(fields: list[dict], categories: dict, prof,
+           new_after_upload: set[str]) -> tuple[dict, list[dict], list[dict]]:
+    """
+    The policy for one page's fields: (plan from the profile, flags for you,
+    fields for the mapper). Sensitive fields never reach the mapper. Shared
+    by a normal fill and follow mode, so both route a field the same way.
+    """
+    plan: dict[str, dict] = {}
+    flags: list[dict] = []
+    for_model: list[dict] = []
+    for field in fields:
+        if field.get("type") == "file":
+            continue
+        if field.get("submits"):
+            # Opening this dropdown means clicking a button that can
+            # submit the form, so it's never touched.
+            flags.append({"ref": field["ref"], "label": field.get("label"),
+                          "options": field.get("options"), "action": "human",
+                          "value": None, "source": "human",
+                          "category": categories.get(field["ref"], "unknown"),
+                          "reason": "This dropdown is a button that could submit "
+                                    "the form, so I don't click it. Answer it yourself."})
+            continue
+        category = categories.get(field["ref"], "unknown")
+        if (field["ref"] in new_after_upload and (field.get("help_text") or "").strip()
+                and classify.action_for(category) not in ("profile", "human")):
+            # Its question may be in help text the classifier wasn't shown.
+            flags.append({"ref": field["ref"], "label": field.get("label"),
+                          "options": field.get("options"), "action": "human",
+                          "value": None, "source": "human", "category": category,
+                          "reason": "Its help text changed or appeared after the resume "
+                                    "upload (help text held back after upload), so the "
+                                    "classifier couldn't be shown it. Answer it yourself."})
+            continue
+        verdict = sensitive.decide(
+            field, categories.get(field["ref"], "unknown"), prof)
+        if verdict["action"] == "human":
+            flags.append({**verdict, "ref": field["ref"]})
+        elif verdict["action"] == "fill":
+            plan[field["ref"]] = verdict
+        else:
+            field["_draft"] = verdict["action"] == "draft"
+            for_model.append(field)
+    return plan, flags, for_model
+
+
+def _ask_mapper(for_model: list[dict], prof, posting_text: str,
+                new_after_upload: set[str], plan: dict) -> None:
+    """The mapper answers only what's left, into `plan`."""
+    if not for_model:
+        return
+    mapped = mapper.map_fields(
+        [_for_model(f, f["ref"] not in new_after_upload) for f in for_model],
+        prof, posting_text[:3000])
+    for ref, decision in mapped.items():
+        if next((f for f in for_model
+                 if f["ref"] == ref and f.get("_draft")), None):
+            decision["needs_review"] = True
+            decision["draft"] = True
+            # The mapper prompt tells the model to flag every
+            # draft, so its own flag on one is the draft's flag.
+            # Flags raised in code (too long, approximate option,
+            # low confidence) keep their own names.
+            decision["review_reasons"] = ["draft"] + [
+                r for r in decision.get("review_reasons", []) if r != "model"]
+        plan[ref] = decision
+
+
+# ---------------------------------------------------------------------------
+#  follow mode: you move through the application; the agent fills each page
+# ---------------------------------------------------------------------------
+FOLLOW_IDLE_S = 20 * 60        # no new page and no input from you for this long
+FOLLOW_CAP_S = 90 * 60         # and never longer than this
+FOLLOW_POLL_MS = 500
+
+# A file box the agent may put your resume in: its label or name says resume
+# or CV, and not cover letter. Exactly one such box, or none is used.
+_RESUME_BOX = re.compile(r"\b(r.sum.|cv|curriculum\s+vitae)\b", re.I)
+_COVER = re.compile(r"\bcover\b", re.I)
+
+
+def _resume_box(fields: list[dict]) -> dict | None:
+    boxes = [f for f in fields if f.get("type") == "file"
+             and _RESUME_BOX.search(f"{f.get('label') or ''} {f.get('name') or ''}")
+             and not _COVER.search(f"{f.get('label') or ''} {f.get('name') or ''}")]
+    return boxes[0] if len(boxes) == 1 else None
+
+
+class _FollowRun:
+    """One follow-mode application: every step's answers, one record at the end."""
+
+    def __init__(self, page, prof, args, url, key, posting_text, events):
+        self.page, self.prof, self.args, self.url = page, prof, args, url
+        self.key, self.posting_text, self.events = key, posting_text, events
+        self.watcher = follow.StepWatcher(quiet_ms=follow.QUIET_MS)
+        self.ledger = ledger.FieldLedger()
+        self.guard = ledger.ActivityGuard(quiet_ms=ledger.QUIET_MS)
+        self.cache = ledger.ClassificationCache()
+        self.read_guard = extract.ReadGuard()
+        self.seen_pages: dict = {}
+        self.resume = prof.resume_path(args.resume)
+        self.resume_done = False
+        self.uploaded: dict[str, list[str]] | None = {}
+        self.rows: list[dict] = []
+        self.flags: list[dict] = []
+        self.steps: list[dict] = []
+        self.step_numbers: set[int] = set()
+
+    def _classify(self, fields: list[dict]) -> dict[str, str]:
+        known, todo = self.cache.split([f for f in fields if f.get("type") != "file"])
+        fresh = classify.classify_fields(todo) if todo else {}
+        self.cache.remember(todo, fresh)
+        return {**known, **fresh}
+
+    def fill_step(self, number: int) -> None:
+        page = self.page
+        fields = extract.extract_fields(page, self.read_guard)
+        if not fields:
+            return
+        if not self.guard.wait_quiet(page):
+            self.events.append({"kind": "never_quiet", "detail": f"step {number}"})
+            return
+        with self.guard.filling(page):
+            fields = extract.enrich_comboboxes(page, fields, contained=True)
+        new_after_upload: set[str] = set()
+        box = None if self.resume_done or not self.resume else _resume_box(fields)
+        if box is not None and self.ledger.state(page, box).get("empty"):
+            before_fields, before = fields, self._classify(fields)
+            with self.guard.filling(page):
+                worked, detail = filler.upload_file(page, box["ref"], self.resume)
+            print(f"  {GREEN if worked else RED}{detail}{OFF}")
+            self.resume_done = True
+            if not worked:
+                self.events.append({"kind": "upload_failed", "detail": detail})
+            browser_mod.settle(page, 2500)
+            fields = extract.enrich_comboboxes(
+                page, extract.extract_fields(page, self.read_guard), contained=True)
+            self.uploaded = None            # the baseline across steps isn't tracked yet
+            categories, new_after_upload = _reclassify_after_upload(before_fields, before, fields)
+        else:
+            categories = self._classify(fields)
+        plan, flags, for_model = _route(fields, categories, self.prof, new_after_upload)
+        _ask_mapper(for_model, self.prof, self.posting_text, new_after_upload, plan)
+        plan = _fillable_plan(fields, plan)
+        prefill = _prefill_census(page)
+        plan = self.ledger.fillable(page, fields, plan, step=number)
+        rows: list[dict] = []
+        if plan:
+            if not self.guard.wait_quiet(page):
+                self.events.append({"kind": "never_quiet", "detail": f"step {number}"})
+                return
+            with self.guard.filling(page):
+                rows = filler.run_plan(page, fields, plan, contained=True)
+            self.ledger.filled(page, fields, plan, rows, step=number)
+        self.watcher.filled()
+        self.steps.append(shadow.step_entry(fields, categories, plan, flags, rows,
+                                            prefill_census=prefill))
+        self.rows += rows
+        self.flags += flags
+        print(f"\n{BOLD}Step {number}{OFF} {DIM}({len(rows)} filled, "
+              f"{len(flags)} for you){OFF}")
+        _print_summary(rows, flags)
+
+    def loop(self, enter, clock=time.monotonic) -> tuple[str, dict]:
+        page = self.page
+        start = last = clock()
+        detection = {"result": "none", "signals": {}, "url_shape": ""}
+        self.guard.install(page)
+        while True:
+            if page.is_closed():
+                return "tab_closed", detection
+            if enter.pressed():
+                return "enter", detection
+            now = clock()
+            if now - start > FOLLOW_CAP_S:
+                return "hard_cap", detection
+            if self.guard.quiet_for(page) < FOLLOW_POLL_MS * 2:
+                last = now                              # you're active
+            if now - last > FOLLOW_IDLE_S:
+                return "idle", detection
+            try:
+                detection = outcome.detect_success(page, portal=self.key,
+                                                   portal_method=self.args._detected_by,
+                                                   start_url=self.url, refs=[])
+            except Exception:
+                pass
+            if detection.get("result") == "match":
+                return "success", detection
+            event = self.watcher.observe(follow.read_shape(page))
+            if event is not None:
+                last = now
+                kind, number = event
+                self.step_numbers.add(number)
+                if len(self.step_numbers) > 1 and not any(
+                        e.get("kind") == "multi_step" for e in self.events):
+                    self.events.append({"kind": "multi_step", "detail": "more than one page"})
+                verdict = pages.fill_allowed(page, self.url, self.seen_pages)
+                if verdict:
+                    self.events.append({"kind": verdict, "detail": f"step {number}"})
+                    print(f"{DIM}  step {number}: {verdict.replace('_', ' ')}; "
+                          f"I fill nothing here{OFF}")
+                else:
+                    self.guard.install(page)
+                    self.fill_step(number)
+            else:
+                self.ledger.poll(page)
+            try:
+                page.wait_for_timeout(FOLLOW_POLL_MS)
+            except Exception:
+                return "tab_closed", detection
+
+
+def _follow(page, args, prof, url, key, ats, detected_by, events, posting_text,
+            role, company) -> None:
+    """
+    Follow mode. You click Apply, Next, Continue, Sign in and Submit; the
+    agent stays on its tab, fills each new page as it appears (only empty
+    fields that aren't yours, after you've been idle a moment, never typing
+    anywhere but the field it fills), and fills nothing on sign-in, account,
+    verification, other-site or LinkedIn pages. One record and one review
+    sheet cover every page.
+    """
+    print(f"\n{BOLD}Follow mode.{OFF} You click Apply, Next, Continue, sign in and "
+          f"Submit yourself;")
+    print("I fill each page as it appears, only empty fields, and only once you've "
+          "paused for a moment.")
+    print(f"{DIM}Press Enter here when you're done, submitted or not.{OFF}")
+    args._detected_by = detected_by
+    run = _FollowRun(page, prof, args, url, key, posting_text, events)
+    enter = _EnterWatcher()
+    ended, detection = run.loop(enter)
+    print(f"\n{_WATCH_ENDED.get(ended, 'Stopped following.')}")
+
+    record = _build_record(page, url, key, detected_by, company, run.steps, events,
+                           dry_run=False, uploads=run.uploaded)
+    sheet = report.build(url=url, ats_name=ats.name, report_rows=run.rows,
+                         flags=run.flags, company=company, role=role)
+    report.open_in_browser(sheet)
+    tracker.record(url, company=company, role=role, ats=ats.name,
+                   resume_used=str(run.resume or ""), answers=run.rows, flags=run.flags,
+                   report_path=str(sheet))
+    print(f"Review sheet: {sheet}")
+    run_id, gate_result = _shadow_gate(record, prof, url, key, detected_by, dry_run=False)
+    answer = _ask_submitted()
+    if answer == "y":
+        tracker.mark_submitted(url)
+        print(f"{GREEN}Logged.{OFF}")
+    watched = {"ended": ended, "detection": detection, "final": None,
+               "capture": "none", "hooked": False}
+    _record_outcome(run_id, key, record, gate_result, watched, answer)
+
 
 
 class _EnterWatcher:
@@ -944,6 +1153,9 @@ def main() -> None:
     p_fill.add_argument("--cover-letter", action="store_true", help="also draft one")
     p_fill.add_argument("--dry-run", action="store_true", help="plan only, touch nothing")
     p_fill.add_argument("--force", action="store_true", help="ignore warnings")
+    p_fill.add_argument("--follow", action="store_true",
+                        help="follow along: you move through every page and click Submit; "
+                             "I fill each page as it appears")
     p_fill.set_defaults(fn=cmd_fill)
 
     sub.add_parser("learn", help="suggest profile fixes from your logged corrections "
