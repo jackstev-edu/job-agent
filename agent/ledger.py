@@ -205,15 +205,17 @@ class FieldLedger:
             if key is None:
                 # Untracked: never over an element the agent marked, and
                 # never twice on one step.
-                if st.get("marked") or (step is not None and step in self._anon_steps):
+                # A missing step counts as one step.
+                if st.get("marked") or step in self._anon_steps:
                     continue
                 if st["empty"]:
                     out[ref] = decision
                 continue
             if entry is None:
-                if not st["empty"]:
-                    if key:
-                        self.entries[key] = {"owner": "jack"}
+                # An element the agent marked while it couldn't track the
+                # field (say its identity was shared then) is never refilled.
+                if not st["empty"] or st.get("marked"):
+                    self.entries[key] = {"owner": "jack"}
                     continue
                 out[ref] = decision
             elif entry["owner"] == "jack":
@@ -253,6 +255,10 @@ class FieldLedger:
             key = keys.get(ref)
             if key is None:
                 self._anon_steps.add(step)
+                # If it becomes trackable later (the field sharing its
+                # identity goes away), it's never refilled.
+                if field_identity(f) is not None:
+                    self.entries[field_identity(f)] = {"owner": "jack"}
             elif not marked:
                 self.entries[key] = {"owner": "jack"}
             else:
@@ -274,6 +280,9 @@ class FieldLedger:
                 els = [h for h in page.query_selector_all(f"[{MARK_ATTR}='{mark}']")]
                 if not els:
                     continue                        # re-rendered away; keep last_mine as it was
+                if len(els) != len(_refs(f)):
+                    entry["last_mine"] = False      # some options replaced: indices can't be trusted
+                    continue
                 st = page.evaluate(_STATE_JS, [_kind(f), els, entry["value"],
                                                _option_index(f, entry["value"]), mark])
             except Exception:

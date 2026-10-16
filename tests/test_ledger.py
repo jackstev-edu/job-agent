@@ -186,11 +186,57 @@ def test_a_field_that_cant_be_tracked_is_never_refilled():
         plan = {f["ref"]: {"value": "x"} for f in fields if f.get("dom_id") in ("nick", "e1")}
         check(led.fillable(page, fields, plan, step=1) == {},
               "cleared by you on elements the agent marked: not refilled")
+        check(led.fillable(page, fields, plan, step=2) == {},
+              "  ...on another step too: the agent's mark alone refuses it")
         page.evaluate("window.rerender()")              # a fresh, unmarked Nickname box
         fields = extract.extract_fields(page, extract.ReadGuard())
         plan = {f["ref"]: {"value": "x"} for f in fields if f.get("dom_id") == "nick"}
         check(led.fillable(page, fields, plan, step=1) == {},
               "re-rendered on the same step: still not refilled")
+    check.done()
+
+
+def test_untracked_first_fills_and_the_missing_step():
+    check = Checks()
+    with mock_page(_write("ledger_untracked_steps.html", UNTRACKED)) as page:
+        led = ledger.FieldLedger()
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        nick = next(f for f in fields if f.get("dom_id") == "nick")
+        led.filled(page, fields, {}, [], step=1)      # nothing filled yet
+        allowed = led.fillable(page, fields, {nick["ref"]: {"value": "Sam"}}, step=2)
+        check(set(allowed) == {nick["ref"]}, "an untracked field still gets its first fill on a step")
+        rows = filler.run_plan(page, fields, allowed)
+        led.filled(page, fields, allowed, rows)          # no step given
+        page.evaluate("window.rerender()")
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        plan = {f["ref"]: {"value": "x"} for f in fields if f.get("dom_id") == "nick"}
+        check(led.fillable(page, fields, plan) == {},
+              "with no step given, a missing step counts as one: not refilled after a re-render")
+    check.done()
+
+
+SHARED_THEN_UNIQUE = """<!doctype html><html><body><form>
+  <div><label for="e1">Employer</label><input id="e1" name="employer"></div>
+  <div id="second"><label for="e2">Employer</label><input id="e2" name="employer"></div>
+</form></body></html>"""
+
+
+def test_a_shared_identity_that_becomes_unique_is_never_refilled():
+    check = Checks()
+    with mock_page(_write("ledger_shared_unique.html", SHARED_THEN_UNIQUE)) as page:
+        led = ledger.FieldLedger()
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        plan = {f["ref"]: {"value": "Acme"} for f in fields}
+        allowed = led.fillable(page, fields, plan, step=1)
+        rows = filler.run_plan(page, fields, allowed)
+        led.filled(page, fields, allowed, rows, step=1)
+        page.fill("#e1", "")                          # you clear one
+        page.evaluate("document.getElementById('second').remove()")   # and remove the other
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        e1 = next(f for f in fields if f.get("dom_id") == "e1")
+        check(led._keys(fields)[e1["ref"]] is not None, "Employer is now unique, so trackable")
+        check(led.fillable(page, fields, {e1["ref"]: {"value": "Acme"}}, step=2) == {},
+              "but it was filled while untracked: yours, not refilled")
     check.done()
 
 
