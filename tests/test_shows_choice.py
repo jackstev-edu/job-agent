@@ -220,6 +220,30 @@ def test_a_display_showing_a_different_option_is_still_abandoned():
     check.done()
 
 
+TWO_DISPLAYS = """<!doctype html><html><body><form>
+  <label for="co">Country</label>
+  <div class="co-control"><span class="co-singleValue" id="d1"></span>
+    <span class="co-singleValue" id="d2"></span>
+    <input id="co" name="country" role="combobox" aria-autocomplete="list"></div>
+  <ul class="menu"><li class="option">Canada</li><li class="option">Mexico</li></ul>
+</form><script>
+  document.querySelectorAll('.option').forEach(o => o.addEventListener('mousedown', () => {
+    // One display takes the choice, the other keeps something else.
+    document.getElementById('d1').textContent = o.textContent;
+    document.getElementById('d2').textContent = 'Mexico'; }));
+</script></body></html>"""
+
+
+def test_two_displays_that_disagree_are_not_a_kept_choice():
+    check = Checks()
+    with mock_page(_write("two_displays.html", TWO_DISPLAYS)) as page:
+        ok, detail = _pick(page, "Country", "Canada")
+        value = page.input_value("#co")
+    check(not ok and "didn't keep" in detail and value == "",
+          f"one display says Canada, the other Mexico: abandoned ({detail}, {value!r})")
+    check.done()
+
+
 def filler_decision(field):
     from agent import mapper
     return mapper._double_check({"ref": field["ref"], "value": "Canada", "confidence": "high",

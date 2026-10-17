@@ -18,6 +18,7 @@ from pathlib import Path
 
 from _harness import TEST_HOME, Checks, mock_page, run_as_script
 from agent import extract, filler, ledger
+from agent.ledger import _touch_tuple_of as _touch_tuple
 
 FORM = """<!doctype html><html><body><form>
   <div id="w1"><label for="ci">City</label><input id="ci" name="city"></div>
@@ -381,8 +382,10 @@ def test_left_out_says_which_of_you_a_field_belongs_to():
         led = ledger.FieldLedger()
         guard = _quiet_guard(page)
         fields, by = _scan(page)
-        with guard.filling(page):
-            _fill(page, led, fields, _plan(by, City="San Jose"))
+        with guard.filling(page):                       # contained, as follow mode fills
+            plan = led.fillable(page, fields, _plan(by, City="San Jose"))
+            rows = filler.run_plan(page, fields, plan, contained=True)
+            led.filled(page, fields, plan, rows)
         led.poll(page)                                  # the mask reshaped it: no longer "ours"
         check(page.input_value("#ci") == "San-Jose",
               f"the page reshaped what the agent typed ({page.input_value('#ci')})")
@@ -405,6 +408,61 @@ def test_a_field_you_typed_in_and_cleared_reads_as_touched():
         led.open_fields(page, fields)
         check(led.left_out.get(by["City"]["ref"]) == "touched",
               f"City, typed in and cleared by you: 'touched' ({led.left_out})")
+    check.done()
+
+
+# Two boxes with nothing to tell them apart: same tag, no name, no id,
+# the same label.
+TWINS = """<!doctype html><html><body><form>
+  <div id="w1"><label>City<input></label></div>
+  <div id="w2"><label>City<input></label></div>
+</form><script>
+  window.remount = () => {
+    document.getElementById('w2').innerHTML = '<label>City<input></label>'; };
+</script></body></html>"""
+
+
+def test_your_typing_survives_the_agent_filling_an_identical_field():
+    check = Checks()
+    with mock_page(_write("ledger_twins.html", TWINS)) as page:
+        led = ledger.FieldLedger()
+        guard = _quiet_guard(page)
+        fields, _ = _scan(page)
+        first, second = fields[0], fields[1]
+        check(_touch_tuple(first) == _touch_tuple(second),
+              "the two boxes are identical on every part of their identity")
+        with guard.filling(page):
+            page.type("#w2 input", "Shelbyville")       # you, in the second box
+            plan = led.fillable(page, fields, {first["ref"]: {"value": "Springfield",
+                                                              "source": "model"}})
+            rows = filler.run_plan(page, fields, plan, contained=True)
+            led.filled(page, fields, plan, rows)        # the agent fills the first
+            page.evaluate("window.remount()")           # yours is re-mounted, empty
+        fields, _ = _scan(page)
+        yours = fields[1]
+        check(page.input_value("#w1 input") == "Springfield"
+              and page.input_value("#w2 input") == "",
+              "the agent filled the first; yours came back empty")
+        check(yours["ref"] not in led.open_fields(page, fields),
+              "your typing still counts, though the agent filled its twin")
+    check.done()
+
+
+def test_a_field_the_agent_filled_that_you_then_change_is_yours():
+    check = Checks()
+    with mock_page(_write("ledger_agent_then_you.html", FORM)) as page:
+        led = ledger.FieldLedger()
+        guard = _quiet_guard(page)
+        fields, by = _scan(page)
+        with guard.filling(page):
+            plan = led.fillable(page, fields, _plan(by, City="Springfield"))
+            rows = filler.run_plan(page, fields, plan, contained=True)
+            led.filled(page, fields, plan, rows)
+        page.fill("#ci", "Shelbyville")                 # you, afterwards
+        fields, by = _scan(page)
+        led.open_fields(page, fields)
+        check(led.left_out.get(by["City"]["ref"]) == "value",
+              f"the agent filled it, you changed it: yours, and flagged ({led.left_out})")
     check.done()
 
 

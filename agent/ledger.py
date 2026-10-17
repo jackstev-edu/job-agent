@@ -217,7 +217,7 @@ class FieldLedger:
         self._touched_kinds: set = set()            # (type, tag) of untracked fields you touched
         self._touched: set = set()                  # identity keys of what you touched
         self._typed_while_agent: set = set()        # (tag, name, id, label) got input while filling
-        self._agent_filled: set = set()             # ...and the ones the agent then filled
+        self._agent_filled: set = set()             # (tag, name, id, label) the agent filled
         self.left_out: dict[str, str] = {}
 
     @staticmethod
@@ -258,7 +258,7 @@ class FieldLedger:
         left out while it shows a value or carries a touch mark; once both
         are gone (a re-render), so once one is seen touched, every
         untracked field of the same kind and tag stays out for the run.
-        Touches are also remembered by identity (name, id, explicit label,
+        Touches are remembered by identity (name, id, explicit label,
         an anonymous tag key and a tagless catch-all, as secret_keys_of),
         from the listener's record, so a field re-mounted or revisited
         after you touched it matches too, a second-pass field that has no
@@ -285,7 +285,12 @@ class FieldLedger:
             kind = (f.get("type"), f.get("tag") or "")
             holds = not st["empty"]
             fkeys = extract.secret_keys_of(f)
-            agents = _touch_tuple_of(f) in self._agent_filled
+            # Whose it is. A field with nothing to know it by ("", "", "",
+            # "") matches every other such field, so it never counts as the
+            # agent's: that would drop its flag. Anything you touched is
+            # yours even if the agent filled it first.
+            whole = _touch_tuple_of(f)
+            agents = any(whole) and whole in self._agent_filled
             yours = (st.get("touched") or fkeys & touched_keys
                      or (key is None and kind in self._touched_kinds))
             filling = st.get("whileFilling") or fkeys & filling_keys
@@ -294,8 +299,9 @@ class FieldLedger:
                     self.entries[key] = {"owner": "jack"}
                 else:
                     self._touched_kinds.add(kind)
-                self.left_out[f["ref"]] = ("agent" if agents else "value" if holds
-                                           else "touched" if yours else "while_filling")
+                self.left_out[f["ref"]] = ("value" if holds and yours else
+                                           "touched" if yours else
+                                           "agent" if agents else "while_filling")
                 continue
             if entry is not None and entry.get("owner") == "jack":
                 self.left_out[f["ref"]] = ("agent" if agents else
@@ -339,15 +345,20 @@ class FieldLedger:
                     self._typed_while_agent.add(whole)
 
     def while_filling_keys(self) -> set:
-        """Keys of what got input during a fill and the agent didn't then fill."""
+        """
+        Keys of every field something was typed into while the agent was
+        filling. The agent's own typing isn't taken out: two fields with
+        the same name, id and label can't be told apart, so taking it out
+        dropped your record whenever the agent filled the twin. The
+        agent's own field is excluded where it can be told for certain,
+        on the element itself (_STATE_JS: marked by the agent, so not
+        yours). The cost is a false positive after a re-mount: a field
+        the agent filled becomes yours and isn't refilled.
+        """
         keys: set = set()
-        for whole in self._typed_while_agent - self._agent_filled:
+        for whole in self._typed_while_agent:
             keys |= _keys_of(whole)
         return keys
-
-    def touched_keys(self) -> set:
-        """Your touches, and what was typed during a fill the agent didn't own."""
-        return self._touched | self.while_filling_keys()
 
     def fillable(self, page: "Page", fields: list[dict], plan: dict, step=None) -> dict:
         """

@@ -255,16 +255,21 @@ _SHOWS_CHOICE_JS = ("""
   const same = t => norm(t) === norm(choice);
   // One of them holds the other, on word boundaries: "+1" inside "United
   // States +1" counts, "No" inside "None of the above" or "Norway" doesn't.
+  // Counted in code points, so a character outside the basic plane is one
+  // character and not two halves of one.
   const near = t => {
     const a = norm(t).toLowerCase(), b = norm(choice).toLowerCase();
     if (!a || !b) return false;
     const [long, short] = a.length >= b.length ? [a, b] : [b, a];
-    const i = long.indexOf(short);
-    if (i < 0) return false;
+    const cps = [...long], want = [...short];
     // In every script, not just this page's: a letter or number either
     // side means the choice is part of a longer word.
     const edge = c => c === undefined || /[^\p{L}\p{N}]/u.test(c);
-    return edge(long[i - 1]) && edge(long[i + short.length]);
+    for (let i = 0; i + want.length <= cps.length; i++) {
+      if (want.every((c, k) => cps[i + k] === c)
+          && edge(cps[i - 1]) && edge(cps[i + want.length])) return true;
+    }
+    return false;
   };
   // The control container first, as the snapshot finds it; an enclosing
   // role=combobox only as a fallback, and never the element itself.
@@ -273,7 +278,10 @@ _SHOWS_CHOICE_JS = ("""
   if (control) {
     const shown = [...control.querySelectorAll(
         '[class*="single-value"], [class*="singleValue"]')].map(d => d.innerText);
-    return shown.some(same) ? 'kept' : shown.some(near) ? 'unconfirmed' : 'missing';
+    // Every display in the control has to agree: one showing the choice
+    // while another shows something else isn't the choice being kept.
+    if (shown.length && shown.every(same)) return 'kept';
+    return shown.length && shown.every(near) ? 'unconfirmed' : 'missing';
   }
   if (el.tagName === 'BUTTON' || !('value' in el))
     return same(el.innerText) ? 'kept' : near(el.innerText) ? 'unconfirmed' : 'missing';
