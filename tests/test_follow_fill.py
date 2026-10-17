@@ -921,6 +921,76 @@ def test_an_answer_the_page_reformats_is_unconfirmed_and_stops_the_gate():
     check.done()
 
 
+SUBMITTABLE = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+  <form id="f" onsubmit="return false"><label for="fn">First Name</label>
+    <input id="fn" name="first_name">
+    <label for="ci">City</label><input id="ci" name="city">
+    <button type="submit" id="go">Submit application</button></form>
+<script>
+  // What a portal does on submit: the form goes, a thank-you takes its place.
+  document.getElementById('f').addEventListener('submit', e => {{
+    e.preventDefault();
+    setTimeout(() => {{ document.body.innerHTML = '<h1>Thanks for applying</h1>'; }}, 50);
+  }});
+  window.addLater = () => document.getElementById('f').insertAdjacentHTML(
+    'beforeend', '<label for="nk">Nickname</label><input id="nk" name="nickname">');
+</script>{CLICKS_JS}</body></html>"""
+
+
+def _outcome(url):
+    run = [r for r in tracker.gate_runs() if r["application_url"] == url][-1]
+    return run["capture"], json.loads(run["edits_json"] or "null")
+
+
+def test_your_submit_in_follow_mode_is_captured_exactly():
+    check = Checks()
+
+    def act(page, state):
+        if not state.get("sent") and page.input_value("#fn"):
+            page.fill("#fn", "Someone Else")           # you change what the agent put
+            page.click("#go")                          # ...and submit
+            state["sent"] = True
+            return False
+        return bool(state.get("sent")) and state.get("n", 0) > 4 or (
+            state.update(n=state.get("n", 0) + 1) or False)
+    text, records, error, you = _follow(SUBMITTABLE, act, path="/submitted")
+    capture, edits = _outcome(f"{HOST}/submitted")
+    check(error is None and capture == "exact",
+          f"the submit hook read the form at the moment you submitted ({capture}, {error})")
+    kinds = {e["label"]: e["kind"] for e in edits or []}
+    check(kinds.get("First Name") == "changed" and "City" not in kinds,
+          f"your edit counts; the field neither of you filled doesn't ({kinds})")
+    check("Someone Else" not in json.dumps(edits),
+          "  ...and the diff names the field, never the value")
+    check.done()
+
+
+def test_a_page_change_between_the_fill_and_your_submit_is_still_captured():
+    check = Checks()
+
+    def act(page, state):
+        if not state.get("grew") and page.input_value("#fn"):
+            page.evaluate("window.addLater()")         # the page reveals a field
+            state["grew"] = True
+            return False
+        if state.get("grew") and not state.get("sent") and page.is_visible("#nk"):
+            state["n"] = state.get("n", 0) + 1
+            if state["n"] > 12:                        # let the agent fill it too
+                page.click("#go")
+                state["sent"] = True
+            return False
+        return bool(state.get("sent"))
+    text, records, error, you = _follow(SUBMITTABLE, act, path="/grew")
+    capture, edits = _outcome(f"{HOST}/grew")
+    check(error is None and you.state.get("sent") and capture == "exact",
+          f"the hook was re-armed over the new field and still caught the submit "
+          f"({capture}, {error})")
+    labels = {e["label"] for e in edits or []}
+    check(edits is not None and "Nickname" not in labels,
+          f"the field revealed after the first fill is in the diff, unchanged ({labels})")
+    check.done()
+
+
 def test_a_normal_fill_still_classifies_every_field_with_its_help():
     import apply
     from _fill_run import run_fill

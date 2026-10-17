@@ -136,6 +136,81 @@ def detect_success(page: "Page", *, portal: str, portal_method: str, start_url: 
     return {"result": result, "signals": signals, "url_shape": url_shape(url)}
 
 
+class Capture:
+    """
+    The passive read of a form: a hook that takes a snapshot at the moment
+    you submit, and a poll that keeps the last read while the fields are
+    still on the page. Nothing here clicks or types. Used by a normal
+    fill's watch() for one page, and by follow mode, which arms it again
+    on every page it follows so the fields it knows are the current ones.
+    """
+
+    def __init__(self):
+        self.fields: list[dict] = []
+        self.final: dict | None = None
+        self.capture = "none"
+        self.hooked = False
+        self._allowed: set[str] = set()
+        self._name: str | None = None
+
+    def _keep(self, snap: dict, kind: str) -> None:
+        # A poll just after the submit-time read sees the same form while
+        # the request is in flight. That doesn't make it any less exact.
+        if kind == "polled" and self.capture == "exact" and snap == self.final:
+            return
+        self.final, self.capture = snap, kind
+
+    def _on_submit(self, source, raw=None) -> None:
+        # Runs inside Playwright's dispatch: no calls back into the page.
+        accepted = _accept(raw, self._allowed)
+        if accepted is not None:
+            self._keep(extract.snapshot_from_raw(self.fields, accepted),
+                       "inexact" if extract.partly_read(self.fields, accepted) else "exact")
+
+    def arm(self, page: "Page", fields: list[dict]) -> None:
+        """
+        Watch these fields, and put the hook on the document showing now.
+        The binding is exposed once per page; the hook goes on again after
+        every navigation and every fill. Never fails the run.
+        """
+        self.fields = list(fields)
+        self._allowed = set(extract.readable_refs(self.fields))
+        try:
+            if self._name is None:
+                # A random name with no fixed prefix, so no page script
+                # written against this tool can look it up by a known name.
+                # A page can still enumerate window, find it and call it
+                # with whatever it likes: that is an ACCEPTED hostile-page
+                # route (CLAUDE.md, threat model). _accept limits the shape
+                # of what's taken, and it only ever reaches local files.
+                self._name = secrets.choice(string.ascii_letters) + secrets.token_hex(12)
+                page.expose_binding(self._name, self._on_submit)
+            page.evaluate(_HOOK_JS, [self._name, extract.read_items(self.fields)])
+            self.hooked = True
+        except Exception:
+            pass
+
+    def poll(self, page: "Page") -> None:
+        """Keep the last read taken while the fields are still there."""
+        present = [r for f in self.fields for r in (f.get("option_refs") or [f.get("ref")])
+                   if extract.is_current(r)]
+        if not present:
+            return
+        try:
+            if not page.evaluate(_PRESENT_JS, present):
+                return
+            raw = page.evaluate(extract._SNAPSHOT_JS, extract.read_items(self.fields))
+            # Some of a group's options refused: that group is left out, and
+            # the read is "inexact", never scored as a match.
+            self._keep(extract.snapshot_from_raw(self.fields, raw),
+                       "inexact" if extract.partly_read(self.fields, raw) else "polled")
+        except Exception:
+            return
+
+    def watched(self) -> dict:
+        return {"final": self.final, "capture": self.capture, "hooked": self.hooked}
+
+
 def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
           timeout_s: float = 1800, clock=time.monotonic) -> dict:
     """
@@ -147,7 +222,6 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
     button group's options were read.
     """
     fields = record.get("fields") or []
-    refs = extract.readable_refs(fields)
     # Whether the form is still there reads no value, so it uses every current
     # ref, not only the readable ones: on a credential step those are few, and
     # the form would look gone.
@@ -155,50 +229,10 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
                if extract.is_current(r)]
     portal, method = record.get("portal") or "", record.get("portal_method") or ""
     start_url = record.get("final_url") or record.get("url") or ""
-    state = {"final": None, "capture": "none"}
-    allowed = set(refs)
-
-    def keep(snap: dict, kind: str) -> None:
-        # A poll just after the submit-time read sees the same form while the
-        # request is in flight. That doesn't make the capture any less exact.
-        if kind == "polled" and state["capture"] == "exact" and snap == state["final"]:
-            return
-        state["final"], state["capture"] = snap, kind
-
-    def poll() -> None:
-        try:
-            if not page.evaluate(_PRESENT_JS, present):
-                return
-            raw = page.evaluate(extract._SNAPSHOT_JS, extract.read_items(fields))
-            # Some of a group's options refused: that group is left out, and
-            # the read is "inexact", never scored as a match.
-            keep(extract.snapshot_from_raw(fields, raw),
-                 "inexact" if extract.partly_read(fields, raw) else "polled")
-        except Exception:
-            return
-
-    def on_submit(source, raw=None) -> None:
-        # Runs inside Playwright's dispatch: no calls back into the page here.
-        accepted = _accept(raw, allowed)
-        if accepted is not None:
-            keep(extract.snapshot_from_raw(fields, accepted),
-                 "inexact" if extract.partly_read(fields, accepted) else "exact")
-
-    hooked = False
-    try:
-        # A random name with no fixed prefix, so no page script written
-        # against this tool can look it up by a known name. A page can still
-        # enumerate window, find it and call it with whatever it likes: that
-        # is an ACCEPTED hostile-page route (CLAUDE.md, threat model). _accept
-        # limits the shape of what's taken, and it only ever reaches local
-        # files. It still accepts more than one call: a resubmit after a
-        # validation error is read too.
-        name = secrets.choice(string.ascii_letters) + secrets.token_hex(12)
-        page.expose_binding(name, on_submit)
-        page.evaluate(_HOOK_JS, [name, extract.read_items(fields)])
-        hooked = True
-    except Exception:
-        pass
+    # The hook accepts more than one call: a resubmit after a validation
+    # error is read too.
+    capture = Capture()
+    capture.arm(page, fields)
 
     started = clock()
     detection = {"result": "none", "signals": {}, "url_shape": ""}
@@ -211,7 +245,7 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
         if detection["result"] == "match":
             ended = "success"
             break
-        poll()
+        capture.poll(page)
         if stop_requested():
             ended = "enter"
             break
@@ -223,8 +257,7 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
         except Exception:
             ended = "tab_closed"
             break
-    return {"ended": ended, "detection": detection, "final": state["final"],
-            "capture": state["capture"], "hooked": hooked}
+    return {"ended": ended, "detection": detection, **capture.watched()}
 
 
 # The uploaded box's ref after a rescan. Every scan restamps refs, and one

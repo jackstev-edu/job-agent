@@ -580,6 +580,10 @@ class _FollowRun:
         self.guard = ledger.ActivityGuard(quiet_ms=ledger.QUIET_MS)
         self.cache = ledger.ClassificationCache()
         self.read_guard = extract.ReadGuard()
+        # The same passive watcher a normal fill installs, armed again on
+        # every page followed, so your submit is captured exactly.
+        self.capture = outcome.Capture()
+        self.seen_fields: list[dict] = []        # every step's fields, for the diff
         self.seen_pages: dict = {}
         self.resume = prof.resume_path(args.resume)
         self.resume_done = False
@@ -667,6 +671,11 @@ class _FollowRun:
         self._note_next_step()
         self.watcher.filled()
         self.last_shape = follow.read_shape(page)
+        # Arm the capture over every step's fields, so an edit you make on
+        # any page the agent filled is seen against what it put there.
+        self.seen_fields = [f for f in self.seen_fields
+                            if f["ref"] not in {g["ref"] for g in fields}] + list(fields)
+        self.capture.arm(page, self.seen_fields)
         self.steps.append(shadow.step_entry(fields, categories, plan, flags, rows,
                                             prefill_census=prefill))
         self.rows += rows
@@ -731,6 +740,8 @@ class _FollowRun:
             # What you touched, by identity, before a re-mount or a new page
             # can drop it (booleans and identity parts only, never a value).
             self.ledger.sweep(page)
+            # And what the form holds now, while its fields are still there.
+            self.capture.poll(page)
             try:
                 page.wait_for_timeout(FOLLOW_POLL_MS)
             except Exception:
@@ -794,8 +805,7 @@ def _follow(page, args, prof, url, key, ats, detected_by, events, posting_text,
     if answer == "y":
         tracker.mark_submitted(url)
         print(f"{GREEN}Logged.{OFF}")
-    watched = {"ended": ended, "detection": detection, "final": None,
-               "capture": "none", "hooked": False}
+    watched = {"ended": ended, "detection": detection, **run.capture.watched()}
     _record_outcome(run_id, key, record, gate_result, watched, answer)
 
 
