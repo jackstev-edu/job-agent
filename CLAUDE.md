@@ -116,6 +116,15 @@ How the code keeps them, and rules of its own:
   This never covers password reads, any route that sends a page value to
   the model or the network, the gate's missing-key defaults, or narrowing
   HARD_STOPS, LEGAL_GUARD, PROFILE_PATHS or SECRET_WORDS.
+- EXCEPTION, written by Jack, until auto-submit: in follow mode, the
+  label, placeholder and help text of a field that is empty, unmarked,
+  untouched by me and not mine at scan time may go to the model, even
+  though a page could echo ANOTHER field's value into them (including
+  values the portal autofilled from my resume). I also accept input I
+  make in the instant before the agent's activity listener is installed
+  on a newly loaded page. This exception covers no other route: a field
+  I have typed in, pasted into or changed never reaches the model, even
+  after I clear it.
 - The reviewer treats accepted routes as FLAG, never BLOCK. Any route that
   sends a page value to the model or the network is a BLOCK.
 

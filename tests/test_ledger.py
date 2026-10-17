@@ -84,6 +84,32 @@ def test_open_fields_are_the_empty_ones_and_a_field_seen_with_a_value_stays_your
     check.done()
 
 
+def test_open_fields_leaves_out_what_you_cleared_and_what_you_touched():
+    check = Checks()
+    with mock_page(_write("ledger_open_cleared.html", FORM)) as page:
+        led = ledger.FieldLedger()
+        fields, by = _scan(page)
+        _fill(page, led, fields, _plan(by, City="Springfield"))
+        page.fill("#ci", "")                            # you clear what the agent put there
+        fields, by = _scan(page)
+        check(by["City"]["ref"] not in led.open_fields(page, fields)
+              and led.entries[ledger.field_identity(by["City"])]["owner"] == "jack",
+              "cleared after the agent filled it: not open, and yours")
+
+    with mock_page(_write("ledger_open_touched.html", FORM)) as page:
+        led = ledger.FieldLedger()
+        ledger.ActivityGuard(echo=lambda *a: None).install(page)
+        page.type("#ci", "Shelbyville")                 # you type...
+        page.fill("#ci", "")                            # ...and clear it
+        fields, by = _scan(page)
+        check(by["City"]["ref"] not in led.open_fields(page, fields)
+              and led.entries[ledger.field_identity(by["City"])]["owner"] == "jack",
+              "typed in and cleared by you: not open, and yours for the run")
+        check(led.fillable(page, fields, _plan(by, City="Springfield")) == {},
+              "  ...and never filled")
+    check.done()
+
+
 def test_a_value_you_change_is_yours_for_good():
     check = Checks()
     with mock_page(_write("ledger_change.html", FORM)) as page:

@@ -504,13 +504,22 @@ open once anything submits without Jack.
   sign-in page in follow mode, so nothing on it is filled.
 - The react-select mock in tests/test_shows_choice.py is unverified
   against a live Greenhouse page (real react-select picks on click).
-- Follow mode, cross-field echo: a page can copy one field's value (yours,
-  or the resume autofill's) into another, empty field's label, placeholder
-  or help text, and that empty field goes to the model with it. Also a
-  field you typed in and cleared again before the scan reads empty, so its
-  help can still echo what you typed. Close both before auto-submit (for
-  instance, send no help for any field on a page where any field holds a
-  value, or compare help against the scan before your input).
+- Follow mode, cross-field echo (accepted by Jack's EXCEPTION in CLAUDE.md
+  until auto-submit): a page can copy one field's value (yours, or the
+  resume autofill's) into another, empty, untouched field's label,
+  placeholder or help text, and that field goes to the model with it.
+  Also accepted: input in the instant before the listener is installed on
+  a newly loaded page (one poll, FOLLOW_POLL_MS). Close before
+  auto-submit (for instance, send no help for any field on a page where
+  any field holds a value).
+- Follow mode, touch marks: the mark sits on the element. A tracked field
+  you touched is yours for the run; an untracked one (no unique identity)
+  that the page re-renders loses its mark and can be open again.
+- Follow mode, combobox "empty": the chip / selected-item displays are
+  looked for only inside the control container (`[class*="control"]` or
+  an enclosing role=combobox). A Workday selectedItem outside it, or a
+  button combobox's own text (a placeholder can't be told from a choice),
+  still reads as empty.
 - From review FLAGs this run:
   - scan-time decide reads the name only as written; read it split into
     words too (as click time does);

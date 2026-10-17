@@ -610,11 +610,13 @@ class _FollowRun:
             fields = extract.enrich_comboboxes(
                 page, extract.extract_fields(page, self.read_guard), contained=True)
             self.uploaded = None            # the baseline across steps isn't tracked yet
-        # Only fields read empty, unmarked and not yours, after the scan, go
-        # to a model, with their label, placeholder and help text. A field
-        # holding a value (yours, prefilled, the resume autofill's) is in no
-        # model input: it's never filled, and its own help can echo it ("'jo@x'
-        # is not a valid email"). The gate stops on it as not answered.
+        # Only fields read empty, unmarked, untouched by you and not yours,
+        # after the scan, go to a model, with their label, placeholder and
+        # help text (Jack's EXCEPTION in CLAUDE.md). A field holding a value
+        # (yours, prefilled, the resume autofill's), or one you typed in and
+        # cleared, is in no model input: it's never filled, and its own help
+        # can echo it ("'jo@x' is not a valid email"). The gate stops on it
+        # as not answered.
         open_refs = self.ledger.open_fields(page, fields)
         for_classifier = [f for f in fields if f["ref"] in open_refs]
         categories = self._classify(for_classifier)
@@ -647,10 +649,13 @@ class _FollowRun:
         page = self.page
         start = last = clock()
         detection = {"result": "none", "signals": {}, "url_shape": ""}
-        self.guard.install(page)
         while True:
             if page.is_closed():
                 return "tab_closed", detection
+            # Every poll, so a newly loaded page (any page: refused ones,
+            # fieldless ones, a reload) has the listener within one poll:
+            # what you touch is marked and the idle ending works there.
+            self.guard.install(page)
             if enter.pressed():
                 return "enter", detection
             now = clock()
@@ -671,9 +676,6 @@ class _FollowRun:
             event = self.watcher.observe(follow.read_shape(page))
             if event is not None:
                 last = now
-                # On every page, refused ones included: a navigation drops
-                # the listener, and without it the idle ending never fires.
-                self.guard.install(page)
                 kind, number = event
                 self.step_numbers.add(number)
                 if len(self.step_numbers) > 1 and not any(
@@ -685,7 +687,6 @@ class _FollowRun:
                     print(f"{DIM}  step {number}: {verdict.replace('_', ' ')}; "
                           f"I fill nothing here{OFF}")
                 else:
-                    self.guard.install(page)
                     try:
                         self.fill_step(number)
                     except Exception as e:

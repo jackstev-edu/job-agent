@@ -34,6 +34,10 @@ if TYPE_CHECKING:
 # tell the same element from a re-rendered replacement. The scan never
 # clears it (it clears only data-ja-ref).
 MARK_ATTR = "data-ja-filled"
+# The attribute the activity listener puts on anything you type in, paste
+# into, change or click, so a field you touched never reaches a model, even
+# once you've cleared it.
+TOUCH_ATTR = "data-ja-touched"
 
 QUIET_MS = 2000
 
@@ -81,6 +85,7 @@ _STATE_JS = ("""
   const norm = t => String(t ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
   const same = !!mark && els.every(e => e.getAttribute('""" + MARK_ATTR + r"""') === mark);
   const marked = els.some(e => e.hasAttribute('""" + MARK_ATTR + r"""'));
+  const touched = els.some(e => e.hasAttribute('""" + TOUCH_ATTR + r"""'));
   const el = els[0];
   let empty, mine = false;
   if (kind === 'radio' || kind === 'buttons') {
@@ -99,7 +104,13 @@ _STATE_JS = ("""
     mine = false;
   } else if (kind === 'combobox') {
     const control = el.closest('[class*="control"]') || el.parentElement?.closest('[role=combobox]');
-    const shown = control ? [...control.querySelectorAll('[class*="single-value"], [class*="singleValue"]')]
+    const shown = control ? [...control.querySelectorAll(
+        '[class*="single-value"], [class*="singleValue"], [class*="multi-value"], ' +
+        '[class*="multiValue"], [class*="chip" i], [class~="tag" i], [class*="ant-tag"], ' +
+        '[class*="ant-select-selection-item"], [class*="select2-selection__choice"], ' +
+        '[class*="choices__item"], [class*="search-choice"], [class*="chosen-single"], ' +
+        '[class*="selected-item" i], [class*="selectedItem" i], ' +
+        '[data-automation-id="selectedItem"]')]
         .map(d => d.innerText).filter(t => norm(t)) : [];
     const own = ('value' in el && el.tagName !== 'BUTTON') ? el.value : '';
     empty = !shown.length && !norm(own);
@@ -109,7 +120,7 @@ _STATE_JS = ("""
     empty = !norm(el.value);
     mine = agentValue !== null && norm(el.value) === norm(agentValue);
   }
-  return {present: true, empty, mine, same, marked};
+  return {present: true, empty, mine, same, marked, touched};
 }
 """)
 
@@ -183,13 +194,17 @@ class FieldLedger:
 
     def open_fields(self, page: "Page", fields: list[dict]) -> set[str]:
         """
-        The refs of the fields that are empty, carry no agent mark and
-        aren't yours, read now from the page (booleans only, through the
-        same secret-safe check as fillable). Only these may reach a model:
-        a field holding any value is never filled, and its own label or
-        help can echo that value. A field seen with a value, or found
-        cleared after the agent filled it, becomes yours, as fillable
-        would make it.
+        The refs of the fields that are empty, carry no agent mark, were
+        never touched by you (typed in, pasted into, changed or clicked
+        since the listener was installed) and aren't yours, read now from
+        the page (booleans only, through the same secret-safe check as
+        fillable). Only these may reach a model: a field holding any value
+        is never filled, and its own label or help can echo that value, or
+        what you typed and cleared. A tracked field (one with a unique
+        identity) seen with a value, touched by you, or found cleared after
+        the agent filled it becomes yours for the run. An untracked one is
+        left out while it shows a value or carries a touch mark; once both
+        are gone (a re-render), it can be open again.
         """
         keys = self._keys(fields)
         out: set[str] = set()
@@ -202,6 +217,10 @@ class FieldLedger:
                 continue
             st = self.state(page, f, mark=(entry or {}).get("mark"))
             if not st.get("present") or st.get("secret"):
+                continue
+            if st.get("touched"):
+                if key is not None:
+                    self.entries[key] = {"owner": "jack"}
                 continue
             if not st["empty"]:
                 if key is not None and entry is None:
@@ -331,15 +350,26 @@ class FieldLedger:
 
 # Notices your input. Installed once per page; the agent's own keystrokes
 # and clicks happen while `agent` is set, so they don't count as yours.
+# It also marks what you touched (TOUCH_ATTR): the event's target, the
+# scanned field around it and a label's own control.
 _ACTIVITY_JS = r"""
 () => {
   if (window.__jaAct) return;
   // Starts as "just now": input before this was installed can't be seen,
   // so a fresh page always waits the full quiet period.
   window.__jaAct = {last: performance.now(), agent: false};
+  const touch = el => { if (el instanceof Element) el.setAttribute('""" + TOUCH_ATTR + r"""', ''); };
   for (const t of ['keydown', 'input', 'pointerdown', 'mousedown', 'change', 'paste'])
     document.addEventListener(t, e => {
-      if (e.isTrusted && !window.__jaAct.agent) window.__jaAct.last = performance.now();
+      if (!e.isTrusted || window.__jaAct.agent) return;
+      window.__jaAct.last = performance.now();
+      const path = e.composedPath ? e.composedPath() : [];
+      for (const el of [e.target, path[0]]) {
+        if (!(el instanceof Element)) continue;
+        touch(el);
+        touch(el.closest('[""" + extract.REF_ATTR + r"""]'));
+        if (el instanceof HTMLLabelElement) touch(el.control);
+      }
     }, true);
 }
 """

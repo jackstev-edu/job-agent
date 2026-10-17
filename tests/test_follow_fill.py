@@ -497,6 +497,33 @@ def test_text_you_typed_before_the_first_scan_never_reaches_a_model():
     check.done()
 
 
+def test_a_field_you_typed_in_and_cleared_never_reaches_a_model():
+    import apply
+
+    check = Checks()
+    sent, classify, map_fields = _spies()
+
+    def act(page, state):
+        if not state.get("typed"):
+            page.type("#em", "jo@x")                  # you type...
+            page.fill("#em", "")                      # ...and clear it, before the scan
+            state["typed"] = True
+            return False
+        state["help"] = page.inner_text("#em-h")
+        state["n"] = state.get("n", 0) + 1
+        return state["n"] > 25
+    text, records, error, you = _follow(
+        ECHO, act, path="/cleared",
+        patches=((apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    check(error is None and "ECHO-SENTINEL" in (you.state.get("help") or ""),
+          f"the box is empty but its help still echoes (so the next check means something) ({error})")
+    check(all("ECHO-SENTINEL" not in s for s in sent) and not _helps_sent(sent, "Email"),
+          "the field you typed in and cleared is in no model input")
+    check(_helps_sent(sent, "City"), "  ...while the untouched City is")
+    check.done()
+
+
 def test_a_rescan_of_page_one_after_a_failed_fill_keeps_your_answer_from_the_model():
     import apply
 
@@ -629,6 +656,44 @@ def test_a_field_already_holding_a_value_is_in_no_model_input():
     check(all("PREFILL-SENTINEL" not in s and "home_city" not in s for s in sent),
           "the prefilled field (label, name, help, value) is in no classify or mapper call")
     check(you.state.get("city") == "PREFILL-SENTINEL-3307", "  ...and it's left as it was")
+    check.done()
+
+
+PREFILLED_KINDS = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+  <form>
+    <label for="sp">Will you need sponsorship?</label>
+    <select id="sp" name="pre_sponsor"><option value="">Select</option>
+      <option>No</option><option selected>Yes</option></select>
+    <fieldset><legend>Are you over 18?</legend>
+      <label><input type="radio" name="pre_age" value="y" checked>Yes</label>
+      <label><input type="radio" name="pre_age" value="n">No</label></fieldset>
+    <label><input type="checkbox" id="tc" name="pre_terms" checked> I accept the privacy notice</label>
+    <label for="sk">Skills</label>
+    <div class="sk-control"><span class="sk-multi-value">Python</span>
+      <input id="sk" name="pre_skills" role="combobox" aria-autocomplete="list"></div>
+    <label for="fn">First Name</label><input id="fn" name="first_name">
+  </form>
+{CLICKS_JS}</body></html>"""
+
+
+def test_prefilled_selects_radios_checkboxes_and_chip_dropdowns_are_in_no_model_input():
+    import apply
+
+    check = Checks()
+    sent, classify, map_fields = _spies()
+
+    def act(page, state):
+        state["n"] = state.get("n", 0) + (page.input_value("#fn") != "")
+        return state["n"] > 3
+    text, records, error, you = _follow(
+        PREFILLED_KINDS, act, path="/prefilledkinds",
+        patches=((apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    check(error is None and _helps_sent(sent, "First Name"),
+          f"the empty field went to the model (so the checks below mean something) ({error})")
+    for what, name in (("a selected dropdown", "pre_sponsor"), ("a checked radio group", "pre_age"),
+                       ("a ticked checkbox", "pre_terms"), ("a dropdown showing a chip", "pre_skills")):
+        check(all(name not in s for s in sent), f"{what} is in no classify or mapper call")
     check.done()
 
 
