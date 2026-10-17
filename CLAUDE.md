@@ -83,12 +83,18 @@ How the code keeps them, and rules of its own:
   between the label plus the name (as written and split) and the scan's
   question text plus its name (as written and split); or the set of
   LEGAL_GUARD kinds differs between the label plus the split name and the
-  scan's label, help, placeholder, split name and options. After choosing a
-  dropdown row it checks in the page that a committed display (the control
-  container's single-value, or a button / div combobox's own text) shows
-  the choice; a plain input with no separate display is accepted but marked
-  unconfirmed, which the gate stops on; otherwise it empties the box and
-  reports it unfilled. A radio option is checked with no click-time
+  scan's label, help, placeholder, split name and options. After the filler sets a text box, it reads the value back: the same
+  text once whitespace is collapsed counts as filled. Anything else — a
+  reformatted number, a mask, a rewritten value — is kept in the box and
+  marked unconfirmed, which the gate stops on and the review sheet
+  lists; it is never reported as filled. There is no digits-only or
+  phone-specific comparison, so the page never chooses which check runs.
+  After choosing a dropdown row it checks in the page that a committed
+  display (the control container's single-value, or a button / div
+  combobox's own text) shows the choice; a plain input with no separate
+  display is accepted but marked unconfirmed; one whose display holds the
+  choice as whole words is kept and marked unconfirmed; otherwise it
+  empties the box and reports it unfilled. A radio option is checked with no click-time
   re-check. It has no code path that clicks Submit, accepts
   terms or signs anything. It must stay that way.
 - The submit gate is shadow mode only: it logs and scores a call, and no code
