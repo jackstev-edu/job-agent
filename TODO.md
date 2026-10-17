@@ -524,6 +524,10 @@ open once anything submits without Jack.
   with the mouse while the agent fills isn't marked, since the agent's own
   clicks are trusted too. Fix: the agent tells the listener which element
   it's acting on; trusted pointer events elsewhere are marked.
+- Follow mode, the touch record lives in the page's own sessionStorage
+  (cleared when a run starts, so an earlier run's touches aren't carried
+  in). It is readable and writable by any script on that origin in the
+  tab, and two follow runs in one tab would share it.
 - Follow mode, the listener runs in the page's own world: a hostile page
   can set window.__jaAct.agent, strip data-ja-touched or rewrite the
   sessionStorage record, and a field you touched would go to the model.
@@ -538,6 +542,12 @@ open once anything submits without Jack.
   change between your touch and the next scan isn't matched. Marking the
   focused element means your next click anywhere after a fill makes the
   last field the agent filled yours (never refilled after a re-render).
+  `closest('[class*="control"]')` also matches wrappers like
+  "form-controls" or "*controller", so one click in such a wrapper makes
+  every field inside it yours for the run, matched by label on later
+  pages too; and the anonymous tag key means one touch on any input keeps
+  every keyless input of that tag out of model input for the run
+  (refusals only; narrowing either needs Jack's approval).
   The control-container mark can make every dropdown inside a
   Bootstrap "controls" wrapper yours once you touch any field in it, and a
   dropdown the agent typed into and then abandoned becomes yours (both

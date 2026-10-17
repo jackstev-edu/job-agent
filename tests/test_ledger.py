@@ -297,6 +297,117 @@ def test_a_label_click_marks_its_control():
     check.done()
 
 
+TAGLESS = """<!doctype html><html><body><form>
+  <div id="w"><span id="cl">Country</span>
+    <div role="combobox" aria-labelledby="cl" tabindex="0" style="width:120px;height:24px"></div></div>
+</form><script>
+  window.remount = () => {
+    document.getElementById('w').innerHTML = '<span id="cl">Country</span>' +
+      '<div role="combobox" aria-labelledby="cl" tabindex="0" style="width:120px;height:24px"></div>'; };
+</script></body></html>"""
+
+
+def test_a_tagless_dropdown_you_touched_stays_out_after_a_remount():
+    check = Checks()
+    with mock_page(_write("ledger_tagless.html", TAGLESS)) as page:
+        led = ledger.FieldLedger()
+        _quiet_guard(page)
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        box = next(f for f in fields if f.get("type") == "combobox")
+        check(not box.get("tag") and extract.secret_keys_of(box) == {("anon", "")},
+              f"a second-pass dropdown is known by the tagless key alone ({box.get('tag')!r})")
+        page.click("[role=combobox]")                   # you open it
+        page.evaluate("window.remount()")               # the page re-mounts it: the mark is gone
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        box = next(f for f in fields if f.get("type") == "combobox")
+        check(page.evaluate("() => !document.querySelector('[data-ja-touched]')"),
+              "no element carries a touch mark any more (so the next check means something)")
+        check(box["ref"] not in led.open_fields(page, fields),
+              "touched, then re-mounted: still out of model input")
+    check.done()
+
+
+# Two boxes labelled "City": one the agent fills, one with nothing else to
+# know it by, so the label is its only key.
+TWO_CITIES = """<!doctype html><html><body><form>
+  <label for="a">City</label><input id="a" name="city_home">
+  <div id="w"><label>City<input></label></div>
+</form><script>
+  window.remount = () => { document.getElementById('w').innerHTML = '<label>City<input></label>'; };
+</script></body></html>"""
+
+
+def test_typing_during_a_fill_isnt_cancelled_by_another_field_the_agent_filled():
+    check = Checks()
+    with mock_page(_write("ledger_two_cities.html", TWO_CITIES)) as page:
+        led = ledger.FieldLedger()
+        guard = _quiet_guard(page)
+        fields, _ = _scan(page)
+        home = next(f for f in fields if f.get("dom_name") == "city_home")
+        yours = next(f for f in fields if not f.get("dom_name"))
+        check(extract.secret_keys_of(yours) <= extract.secret_keys_of(home),
+              "your box's only key, its label, is one of the agent's box's keys")
+        with guard.filling(page):
+            page.type("#w input", "Shelbyville")        # you, in the other City box
+            plan = led.fillable(page, fields, {home["ref"]: {"value": "Springfield",
+                                                             "source": "model"}})
+            rows = filler.run_plan(page, fields, plan, contained=True)
+            led.filled(page, fields, plan, rows)        # the agent fills the named one
+            # The page re-renders while the agent is still filling: your box
+            # comes back empty, with no mark on it any more.
+            page.evaluate("window.remount()")
+        fields, _ = _scan(page)
+        yours = next(f for f in fields if not f.get("dom_name"))
+        check(page.input_value("#a") == "Springfield" and page.input_value("#w input") == "",
+              "the agent filled the named City box; yours came back empty")
+        check(yours["ref"] not in led.open_fields(page, fields),
+              "your typing in the other City box isn't cancelled by it: still out")
+    check.done()
+
+
+SHOUTS = """<!doctype html><html><body><form>
+  <div id="w1"><label for="ci">City</label><input id="ci" name="city"></div>
+  <div id="w2"><label for="zp">Zip</label><input id="zp" name="zip" value="99999"></div>
+</form><script>
+  // A mask that reshapes what anyone types, the agent included.
+  document.getElementById('ci').addEventListener('input', e => {
+    e.target.value = e.target.value.replace(/ /g, '-'); });
+</script></body></html>"""
+
+
+def test_left_out_says_which_of_you_a_field_belongs_to():
+    check = Checks()
+    with mock_page(_write("ledger_left_out.html", SHOUTS)) as page:
+        led = ledger.FieldLedger()
+        guard = _quiet_guard(page)
+        fields, by = _scan(page)
+        with guard.filling(page):
+            _fill(page, led, fields, _plan(by, City="San Jose"))
+        led.poll(page)                                  # the mask reshaped it: no longer "ours"
+        check(page.input_value("#ci") == "San-Jose",
+              f"the page reshaped what the agent typed ({page.input_value('#ci')})")
+        led.open_fields(page, fields)
+        check(led.left_out.get(by["City"]["ref"]) == "agent",
+              f"the agent filled City, whatever the page did to it: 'agent' ({led.left_out})")
+        check(led.left_out.get(by["Zip"]["ref"]) == "value",
+              f"Zip, prefilled by the page: 'value' ({led.left_out})")
+    check.done()
+
+
+def test_a_field_you_typed_in_and_cleared_reads_as_touched():
+    check = Checks()
+    with mock_page(_write("ledger_left_out_touched.html", FORM)) as page:
+        led = ledger.FieldLedger()
+        _quiet_guard(page)
+        page.type("#ci", "Shelbyville")                 # you type and clear City
+        page.fill("#ci", "")
+        fields, by = _scan(page)
+        led.open_fields(page, fields)
+        check(led.left_out.get(by["City"]["ref"]) == "touched",
+              f"City, typed in and cleared by you: 'touched' ({led.left_out})")
+    check.done()
+
+
 def test_a_value_you_change_is_yours_for_good():
     check = Checks()
     with mock_page(_write("ledger_change.html", FORM)) as page:

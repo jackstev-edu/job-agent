@@ -388,8 +388,8 @@ def test_an_empty_fields_help_text_after_the_upload_never_reaches_a_model():
     check(error is None and any("HELP-SENTINEL" in json.dumps(f) for f in rec.get("fields", [])),
           f"page 2's help text was scanned ({error})")
     helps = _helps_sent(sent, "Phone")
-    check(all("HELP-SENTINEL" not in s for s in sent) and all(h == "" for h in helps),
-          f"empty Phone went to no model with its help text ({helps})")
+    check(helps and all("HELP-SENTINEL" not in s for s in sent) and all(h == "" for h in helps),
+          f"empty Phone went to a model with its help text blanked ({helps})")
     check(reasons and "help text held back in follow mode" in reasons[0],
           f"  ...and came to you instead ({reasons})")
     check.done()
@@ -449,8 +449,8 @@ def test_help_text_next_to_a_resume_box_on_a_later_page_never_reaches_a_model():
     check(error is None and you.state.get("files") == 1,
           f"the resume was uploaded on page 2 (so the checks below mean something) ({error})")
     helps = _helps_sent(sent, "Phone")
-    check(all("HELP-SENTINEL" not in s for s in sent) and all(h == "" for h in helps),
-          f"page 2's help text reached no model call, before or after the upload ({helps})")
+    check(helps and all("HELP-SENTINEL" not in s for s in sent) and all(h == "" for h in helps),
+          f"page 2's help reached no model call, before or after the upload ({helps})")
     rec = records[-1] if records else {}
     reasons = [fl.get("reason", "") for fl in rec.get("flags", []) if fl.get("label") == "Phone"]
     check(reasons and "help text held back in follow mode" in reasons[0],
@@ -522,6 +522,10 @@ def test_a_field_you_typed_in_and_cleared_never_reaches_a_model():
           f"the box is empty but its help still echoes (so the next check means something) ({error})")
     check(all("ECHO-SENTINEL" not in s for s in sent) and not _helps_sent(sent, "Email"),
           "the field you typed in and cleared is in no model input")
+    rec = records[-1] if records else {}
+    reasons = [fl.get("reason", "") for fl in rec.get("flags", []) if fl.get("label") == "Email"]
+    check(any("so it stays yours" in r for r in reasons),
+          f"  ...and it's on the review sheet as yours ({reasons})")
     check(_helps_sent(sent, "City"), "  ...while the untouched City is")
     check.done()
 
@@ -864,6 +868,9 @@ def test_a_field_left_out_of_model_input_is_flagged_for_you():
     check(error is None and any("already holds a value the agent didn't put there" in r
                                 for r in reasons),
           f"the prefilled City is on the review sheet for you ({reasons})")
+    filled = [fl.get("label") for fl in rec.get("flags", [])]
+    check("First Name" not in filled,
+          f"the field the agent filled isn't flagged ({filled})")
     check.done()
 
 

@@ -465,6 +465,8 @@ LEFT_OUT_REASON = {
     "value": "already holds a value the agent didn't put there; check it",
     "touched": "you've typed in, changed or cleared this field (or one like it), "
                "so it stays yours; check it",
+    "while_filling": "something was typed here while I was filling (my own attempt at "
+                     "it, or you), so it stays yours; check it",
 }
 
 # Why a field whose help text the classifier wasn't shown comes to you.
@@ -645,7 +647,7 @@ class _FollowRun:
         # the review sheet shows it.
         for f in fields:
             why = self.ledger.left_out.get(f["ref"])
-            if why in ("value", "touched") and not extract.is_secret(f):
+            if why in LEFT_OUT_REASON and not extract.is_secret(f):
                 flags.append({"ref": f["ref"], "label": f.get("label"),
                               "options": f.get("options"), "action": "human",
                               "value": None, "source": "human", "category": "unknown",
@@ -745,6 +747,8 @@ def _follow(page, args, prof, url, key, ats, detected_by, events, posting_text,
     verification, other-site or LinkedIn pages. One record and one review
     sheet cover every page.
     """
+    # A record an earlier run left in this tab isn't this run's.
+    ledger.clear_touch_record(page)
     # You open the form first, as in a normal fill: nothing is filled
     # before this, so nothing on the posting page itself is touched.
     print(f"\n{BOLD}Click Apply if the form isn't open, then press Enter.{OFF}")

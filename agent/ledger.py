@@ -14,6 +14,10 @@ Your answers always win, and the agent must never type over you.
 
 Every look at a field runs in the page, after the password test, and
 returns only true / false (empty? the agent's value?), never a value.
+The one exception is `sweep`, which brings back the identity parts of the
+fields you touched (tag, name, id, explicit label) so a touch outlives a
+re-mount. No field's value is ever read, and nothing from the page here
+reaches a model or the network.
 """
 
 from __future__ import annotations
@@ -61,6 +65,32 @@ def field_identity(f: dict) -> tuple | None:
     return (f.get("type"), f.get("tag") or "", name or "", label)
 
 
+def _touch_tuple(tag: str, dom_name: str, dom_id: str, label: str) -> tuple:
+    """One touched element, by its identity parts. The label is normalised
+    as secret_keys_of normalises it, so both sides compare the same."""
+    return (tag, dom_name, dom_id,
+            " ".join(unicodedata.normalize("NFKC", label).split()).casefold())
+
+
+def _touch_tuple_of(f: dict) -> tuple:
+    return _touch_tuple(str(f.get("tag") or ""), str(f.get("dom_name") or ""),
+                        str(f.get("dom_id") or ""), str(f.get("explicit_label") or ""))
+
+
+def _keys_of(whole: tuple) -> set:
+    """
+    The keys one touched element is matched by: its name, id and label
+    each alone (secret_keys_of), the anonymous key for its tag, and the
+    tagless catch-all, which is the only key a second-pass field (a div or
+    button dropdown, a button group) has. So once you touch anything, no
+    field without a tag of its own reaches a model for the rest of the run.
+    """
+    tag, dom_name, dom_id, label = whole
+    keys = extract.secret_keys_of({"tag": tag, "dom_name": dom_name,
+                                   "dom_id": dom_id, "explicit_label": label})
+    return keys | {("anon", tag), ("anon", "")}
+
+
 def _norm(text) -> str:
     return " ".join(unicodedata.normalize("NFKC", str(text or "")).split()).casefold()
 
@@ -89,9 +119,9 @@ _STATE_JS = ("""
   const norm = t => String(t ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
   const same = !!mark && els.every(e => e.getAttribute('""" + MARK_ATTR + r"""') === mark);
   const marked = els.some(e => e.hasAttribute('""" + MARK_ATTR + r"""'));
-  let touched = els.some(e => e.hasAttribute('""" + TOUCH_ATTR + r"""')
-      || (e.hasAttribute('""" + WHILE_AGENT_ATTR + r"""')
-          && !e.hasAttribute('""" + MARK_ATTR + r"""')));
+  let touched = els.some(e => e.hasAttribute('""" + TOUCH_ATTR + r"""'));
+  const whileFilling = els.some(e => e.hasAttribute('""" + WHILE_AGENT_ATTR + r"""')
+      && !e.hasAttribute('""" + MARK_ATTR + r"""'));
   const el = els[0];
   let empty, mine = false;
   if (kind === 'radio' || kind === 'buttons') {
@@ -137,7 +167,7 @@ _STATE_JS = ("""
     empty = !norm(el.value);
     mine = agentValue !== null && norm(el.value) === norm(agentValue);
   }
-  return {present: true, empty, mine, same, marked, touched};
+  return {present: true, empty, mine, same, marked, touched, whileFilling};
 }
 """)
 
@@ -186,8 +216,8 @@ class FieldLedger:
         self._anon_steps: set = set()               # steps where an untracked field was filled
         self._touched_kinds: set = set()            # (type, tag) of untracked fields you touched
         self._touched: set = set()                  # identity keys of what you touched
-        self._typed_while_agent: set = set()        # ...of what got input while the agent filled
-        self._agent_filled: set = set()             # ...of what the agent filled
+        self._typed_while_agent: set = set()        # (tag, name, id, label) got input while filling
+        self._agent_filled: set = set()             # ...and the ones the agent then filled
         self.left_out: dict[str, str] = {}
 
     @staticmethod
@@ -229,15 +259,18 @@ class FieldLedger:
         are gone (a re-render), so once one is seen touched, every
         untracked field of the same kind and tag stays out for the run.
         Touches are also remembered by identity (name, id, explicit label,
-        and an anonymous tag key, as secret_keys_of), from the listener's
-        record, so a field re-mounted or revisited after you touched it
-        matches too. `left_out` says why each other field was left out:
-        "agent" (holding the agent's value), "value" (holding one the agent
-        didn't put there) or "touched" (yours: touched, cleared or like one
-        you touched).
+        an anonymous tag key and a tagless catch-all, as secret_keys_of),
+        from the listener's record, so a field re-mounted or revisited
+        after you touched it matches too, a second-pass field that has no
+        tag of its own included. `left_out` says why each other field was
+        left out: "agent" (the agent filled it), "value" (holding a value
+        the agent didn't put there), "touched" (yours: touched, cleared or
+        like one you touched) or "while_filling" (typed into while the
+        agent was filling: its own attempt, or yours).
         """
         self.sweep(page)
-        touched_keys = self.touched_keys()
+        touched_keys = self._touched
+        filling_keys = self.while_filling_keys()
         keys = self._keys(fields)
         out: set[str] = set()
         self.left_out: dict[str, str] = {}
@@ -251,19 +284,22 @@ class FieldLedger:
                 continue
             kind = (f.get("type"), f.get("tag") or "")
             holds = not st["empty"]
-            agents = (holds and st.get("marked") and entry is not None
-                      and entry.get("owner") == "agent" and st.get("same"))
-            if (st.get("touched") or extract.secret_keys_of(f) & touched_keys
-                    or (key is None and kind in self._touched_kinds)):
+            fkeys = extract.secret_keys_of(f)
+            agents = _touch_tuple_of(f) in self._agent_filled
+            yours = (st.get("touched") or fkeys & touched_keys
+                     or (key is None and kind in self._touched_kinds))
+            filling = st.get("whileFilling") or fkeys & filling_keys
+            if yours or filling:
                 if key is not None:
                     self.entries[key] = {"owner": "jack"}
                 else:
                     self._touched_kinds.add(kind)
-                self.left_out[f["ref"]] = "value" if holds and not agents else (
-                    "agent" if agents else "touched")
+                self.left_out[f["ref"]] = ("agent" if agents else "value" if holds
+                                           else "touched" if yours else "while_filling")
                 continue
             if entry is not None and entry.get("owner") == "jack":
-                self.left_out[f["ref"]] = "value" if holds else "touched"
+                self.left_out[f["ref"]] = ("agent" if agents else
+                                           "value" if holds else "touched")
                 continue
             if holds:
                 if key is not None and entry is None:
@@ -273,7 +309,7 @@ class FieldLedger:
             if st.get("marked"):
                 if key is not None and (entry is None or st.get("same")):
                     self.entries[key] = {"owner": "jack"}
-                self.left_out[f["ref"]] = "touched"
+                self.left_out[f["ref"]] = "agent" if agents else "touched"
                 continue
             out.add(f["ref"])
         return out
@@ -289,18 +325,29 @@ class FieldLedger:
             got = page.evaluate(_TOUCHED_JS) or {}
         except Exception:
             return
-        for name, into in (("t", self._touched), ("a", self._typed_while_agent)):
+        for name in ("t", "a"):
             for rec in got.get(name) or []:
                 if not (isinstance(rec, list) and len(rec) == 4):
                     continue
-                tag, dom_name, dom_id, label = (str(x or "") for x in rec)
-                into.update(extract.secret_keys_of({"tag": tag, "dom_name": dom_name,
-                                                    "dom_id": dom_id, "explicit_label": label}))
-                into.add(("anon", tag))
+                whole = _touch_tuple(*(str(x or "") for x in rec))
+                if name == "t":
+                    self._touched |= _keys_of(whole)
+                else:
+                    # Kept whole: input during a fill is the agent's own only
+                    # if the agent then filled that very field, matched on all
+                    # four parts, never on one shared key.
+                    self._typed_while_agent.add(whole)
+
+    def while_filling_keys(self) -> set:
+        """Keys of what got input during a fill and the agent didn't then fill."""
+        keys: set = set()
+        for whole in self._typed_while_agent - self._agent_filled:
+            keys |= _keys_of(whole)
+        return keys
 
     def touched_keys(self) -> set:
-        """Your touches, and what was typed during a fill into a field the agent didn't fill."""
-        return self._touched | (self._typed_while_agent - self._agent_filled)
+        """Your touches, and what was typed during a fill the agent didn't own."""
+        return self._touched | self.while_filling_keys()
 
     def fillable(self, page: "Page", fields: list[dict], plan: dict, step=None) -> dict:
         """
@@ -364,8 +411,9 @@ class FieldLedger:
             if not row.get("filled"):
                 continue
             f = by_ref[ref]
-            # Input on it during the fill was the agent's own typing.
-            self._agent_filled |= extract.secret_keys_of(f)
+            # Input on it during the fill was the agent's own typing. Kept
+            # whole, so it cancels that field's record and no other's.
+            self._agent_filled.add(_touch_tuple_of(f))
             mark = next(self._marks)
             try:
                 els = _elements(page, _refs(f))
@@ -443,6 +491,12 @@ _ACTIVITY_JS = r"""
       .slice(0, 300);
   const STORE = '__jaTouched';
   const seen = new Set();
+  // Called once when a run starts: a record kept in the tab outlives the
+  // run that wrote it, and another run's touches aren't yours now.
+  window.__jaAct.reset = () => {
+    window.__jaAct.t = []; window.__jaAct.a = []; seen.clear();
+    try { sessionStorage.removeItem(STORE); } catch (e) {}
+  };
   try {
     const kept = JSON.parse(sessionStorage.getItem(STORE) || '{}');
     for (const list of ['t', 'a'])
@@ -518,6 +572,18 @@ _ACTIVITY_JS = r"""
 """
 # The listener's record of what you touched: identity parts only.
 _TOUCHED_JS = "() => window.__jaAct ? {t: window.__jaAct.t || [], a: window.__jaAct.a || []} : null"
+_RESET_JS = """() => {
+  if (window.__jaAct && window.__jaAct.reset) window.__jaAct.reset();
+  try { sessionStorage.removeItem('__jaTouched'); } catch (e) {}
+}"""
+
+
+def clear_touch_record(page: "Page") -> None:
+    """Forget what an earlier run on this origin left in the tab. Never fails."""
+    try:
+        page.evaluate(_RESET_JS)
+    except Exception:
+        pass
 # The same listener as an init script, for every new document.
 ACTIVITY_INIT_SCRIPT = "(" + _ACTIVITY_JS.strip() + ")();"
 _QUIET_JS = "() => window.__jaAct ? performance.now() - window.__jaAct.last : 0"
