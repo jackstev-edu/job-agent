@@ -275,6 +275,37 @@ def stop_kinds(text: str) -> set[str]:
     return {kind for rx, kind in STOP_KINDS if any(rx.search(v) for v in variants)}
 
 
+# The two sponsorship lines are the one pair a question regularly matches
+# both of ("will you now or in the future require sponsorship" hits the
+# future line, "do you require sponsorship to begin" the now line, and
+# plenty of wordings hit both patterns). Jack approved deciding between
+# them on which word the question actually uses.
+SPONSORSHIP = {"future": "eligibility.requires_sponsorship_future",
+               "now": "eligibility.requires_sponsorship_now"}
+_SAYS_FUTURE = re.compile(r"future|later|any\s+time", re.I)
+_SAYS_NOW = re.compile(r"\bnow\b|currently|\bbegin\b|commenc", re.I)
+
+
+def sponsorship_line(text: str, lines: set[str]) -> str | None:
+    """
+    Which of the two sponsorship lines a question is asking about, when it
+    matches both. "Future" with no "now" word is the future line; a "now"
+    word with no "future" is the now line. Both words, or neither, is
+    still yours: the question is asking about both times, or we can't tell.
+    None when this isn't that pair.
+    """
+    if lines != set(SPONSORSHIP.values()):
+        return None
+    variants = text_variants(text)
+    future = any(_SAYS_FUTURE.search(v) for v in variants)
+    now = any(_SAYS_NOW.search(v) for v in variants)
+    if future and not now:
+        return SPONSORSHIP["future"]
+    if now and not future:
+        return SPONSORSHIP["now"]
+    return None
+
+
 def profile_lines(text: str) -> list[str]:
     """
     The PROFILE_PATHS line each reading of `text` resolves to (first match
@@ -395,6 +426,10 @@ def decide(field: dict, category: str, profile) -> dict:
                               "Answer it yourself."}
         lines = profile_lines(text)
         every = all_profile_lines(text)
+        # The sponsorship pair, decided by the word the question uses.
+        only = sponsorship_line(text, every | set(lines))
+        if only is not None:
+            lines, every = [only], {only}
         if len(lines) > 1 or len(every) > 1:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This could be answered by more than one profile line "

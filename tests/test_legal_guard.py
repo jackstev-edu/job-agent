@@ -244,6 +244,56 @@ class _Profile:
         return self.data.get(path)
 
 
+def test_which_sponsorship_question_it_is_decides_which_line_answers_it():
+    check = Checks()
+    prof = _Profile({"eligibility.requires_sponsorship_now": False,
+                     "eligibility.requires_sponsorship_future": True})
+
+    def ask(label):
+        return sensitive.decide({"label": label, "type": "select",
+                                 "options": ["Yes", "No"]}, "work_authorization", prof)
+
+    # Asks about one time only, but matches both lines: the word it uses decides.
+    only_future = "Will you at any time in the future require visa sponsorship?"
+    check(sensitive.all_profile_lines(only_future) ==
+          {"eligibility.requires_sponsorship_now", "eligibility.requires_sponsorship_future"},
+          "the future-only wording matches both lines (so the next check means something)")
+    v = ask(only_future)
+    check(v["action"] == "fill"
+          and v.get("profile_path") == "eligibility.requires_sponsorship_future"
+          and v["value"] == "Yes",
+          f"it says future and not now: answered from the future line ({v.get('profile_path')}, "
+          f"{v.get('value')!r})")
+
+    # One portal's wording asks about both times at once: still yours.
+    both = "Will you now or in the future require sponsorship?"
+    v = ask(both)
+    check(v["action"] == "human" and "more than one profile line" in v.get("reason", ""),
+          f"'now or in the future' asks about both: still yours ({v['action']})")
+
+    # That portal's other wording, and a third line in the mix, are unchanged.
+    v = ask("Do you require sponsorship to begin employment with us?")
+    check(v["action"] == "fill"
+          and v.get("profile_path") == "eligibility.requires_sponsorship_now"
+          and v["value"] == "No",
+          f"'to begin employment' matches the now line alone, as before ({v.get('profile_path')})")
+    v = ask("Will you now or in the future require sponsorship for employment visa status?")
+    check(v["action"] == "human" and "more than one profile line" in v.get("reason", ""),
+          f"a third line in the question keeps it yours ({v['action']})")
+
+    # The rule itself, on each combination of the two words.
+    pair = {"eligibility.requires_sponsorship_now", "eligibility.requires_sponsorship_future"}
+    for text, want in (("sponsorship in the future", "eligibility.requires_sponsorship_future"),
+                       ("sponsorship to begin now", "eligibility.requires_sponsorship_now"),
+                       ("sponsorship now or in the future", None),
+                       ("sponsorship", None)):
+        check(sensitive.sponsorship_line(text, pair) == want,
+              f"'{text}' -> {want or 'yours'}")
+    check(sensitive.sponsorship_line("sponsorship in the future", pair | {"eeo.gender"}) is None,
+          "and it decides nothing when the question touches another line too")
+    check.done()
+
+
 def test_a_typed_box_or_a_two_area_box_comes_to_you():
     check = Checks()
     prof = _Profile({"eligibility.authorized_to_work_us": True,
