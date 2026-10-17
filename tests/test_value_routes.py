@@ -142,6 +142,22 @@ DISPLAY_FORM = f"""<!doctype html><html><body><form>
 </form></body></html>"""
 
 
+def test_a_question_with_no_answer_reads_as_left_for_you_not_failed():
+    from _fill_run import run_fill
+
+    check = Checks()
+    form = TEST_HOME / "nulls.html"
+    form.write_text("""<!doctype html><html><head><title>Engineer - Example Co</title></head>
+      <body><form><label for="fn">First Name</label><input id="fn" name="first_name">
+      <label for="nk">Nickname</label><input id="nk" name="nickname"></form></body></html>""",
+                    encoding="utf-8")
+    text, records, error = run_fill(form, dry_run=False)
+    lines = [l for l in text.splitlines() if "Nickname" in l]
+    check(error is None and lines and "for you" in lines[0] and "failed" not in lines[0],
+          f"the mapper found no nickname: left for you, not failed ({lines})")
+    check.done()
+
+
 def test_value_displays_in_labels_and_help_are_left_out():
     check = Checks()
     with mock_page(_write("route_display.html", DISPLAY_FORM)) as page:

@@ -22,6 +22,9 @@ if TYPE_CHECKING:
     from playwright.sync_api import Page
 
 from . import extract, matching, sensitive
+
+# A box that holds a phone number, whatever its input type says.
+_PHONE = re.compile(r"phone|mobile|cell\b|tel\b", re.I)
 from .extract import REF_ATTR
 
 # Buttons this tool will never click, whatever it's asked. Matched against
@@ -73,25 +76,48 @@ def _element(page: "Page", ref: str):
 
 # Sets a text box's value on the element itself, with the input and change
 # events a framework listens for, and no keystrokes at all. The native
-# setter is used because React watches it. True if the box now holds it.
-# Before anything is written or read: refused (false) for anything but a
-# text input or textarea, for an element that is now secret (a
-# show-password toggle, a re-render into a password box), and while any
-# password box or password hint is on the page, as every reader refuses.
+# setter is used because React watches it. Before anything is written or
+# read: refused ("no") for anything but a text input or textarea, for an
+# element that is now secret (a show-password toggle, a re-render into a
+# password box), and while any password box or password hint is on the
+# page, as every reader refuses. What the box holds afterwards is then
+# compared in the page, and only a word comes back:
+#   "exact"  the box holds what was written;
+#   "same"   a mask or formatter reshaped it, and it still says the same:
+#            the same digits for a phone box (a country code dropped or
+#            added after a "+" allowed), or the same text once whitespace
+#            is collapsed;
+#   "other"  the box holds something else (a mask that cut it short);
+#   "empty"  the box took nothing.
 _SET_VALUE_JS = ("""
-(el, v) => {
+(el, [v, phone]) => {
 """ + extract._SECRET_JS + r"""
-  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return false;
-  if (isSecret(el, '')) return false;
-  if (document.querySelector('input[type=password i], [autocomplete*="password" i]')) return false;
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return 'no';
+  if (isSecret(el, '')) return 'no';
+  if (document.querySelector('input[type=password i], [autocomplete*="password" i]')) return 'no';
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
                                                   : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-  if (!setter) return false;
+  if (!setter) return 'no';
   setter.call(el, v);
   el.dispatchEvent(new Event('input', {bubbles: true}));
   el.dispatchEvent(new Event('change', {bubbles: true}));
-  return el.value === v;
+  const got = el.value;
+  if (got === v) return 'exact';
+  const ws = t => String(t ?? '').replace(/\s+/g, ' ').trim();
+  if (!ws(got)) return 'empty';
+  if (phone || (el.type || '').toLowerCase() === 'tel') {
+    const digits = t => String(t ?? '').replace(/\D/g, '');
+    const a = digits(got), b = digits(v);
+    if (a && a === b) return 'same';
+    // One of them carries a country code the other doesn't: the longer
+    // must be written with a leading "+", and end with all of the shorter.
+    const [long, short, longText] = a.length > b.length ? [a, b, got] : [b, a, v];
+    if (short.length >= 7 && long.endsWith(short) && long.length - short.length <= 3
+        && ws(longText).startsWith('+')) return 'same';
+    return 'other';
+  }
+  return ws(got) === ws(v) ? 'same' : 'other';
 }
 """)
 
@@ -177,8 +203,17 @@ def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple
         if element.evaluate(extract._SUBMITS_JS):
             return False, "refused — this box could submit the form; it's yours"
         if contained:
-            if element.evaluate(_SET_VALUE_JS, text):
+            phone = (field_type or "").lower() == "tel" or bool(_PHONE.search(
+                f"{field.get('label') or ''} {field.get('name') or ''}"))
+            got = element.evaluate(_SET_VALUE_JS, [text, phone])
+            if got == "exact":
                 return True, "set"
+            if got == "same":
+                return True, "set (the box reformatted it)"
+            if got == "other":
+                # Left in place for you to read, never claimed: the gate
+                # stops on an unconfirmed fill.
+                return True, f"set, but the box shows something else{UNCONFIRMED}"
             return False, "the box didn't take the value; left for you"
         element.click(timeout=4000)
         element.fill("", timeout=4000)               # clear anything pre-filled
@@ -223,8 +258,11 @@ _MARK_OPTION_JS = r"""
 #   "kept"        a committed display shows it: the widget's control
 #                 container (react-select's single-value), or a button /
 #                 div combobox's own text;
-#   "unconfirmed" no separate display, and the box's value equals it. The
-#                 agent typed that value itself, so this proves little;
+#   "unconfirmed" no separate display, and the box's value equals it (the
+#                 agent typed that value itself, so this proves little), or
+#                 a display that isn't empty and, normalised, contains the
+#                 choice or is contained in it ("+1" shown for "United
+#                 States +1"): something was kept, but not word for word;
 #   "missing"     anything else. A secret box is never read: "missing".
 _SHOWS_CHOICE_JS = ("""
 (el, choice) => {
@@ -232,6 +270,10 @@ _SHOWS_CHOICE_JS = ("""
   if (isSecret(el, '')) return 'missing';
   const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
   const same = t => norm(t) === norm(choice);
+  const near = t => {
+    const a = norm(t).toLowerCase(), b = norm(choice).toLowerCase();
+    return !!a && !!b && (a.includes(b) || b.includes(a));
+  };
   // The control container first, as the snapshot finds it; an enclosing
   // role=combobox only as a fallback, and never the element itself.
   const control = el.closest('[class*="control"]')
@@ -239,9 +281,10 @@ _SHOWS_CHOICE_JS = ("""
   if (control) {
     const shown = [...control.querySelectorAll(
         '[class*="single-value"], [class*="singleValue"]')].map(d => d.innerText);
-    return shown.some(same) ? 'kept' : 'missing';
+    return shown.some(same) ? 'kept' : shown.some(near) ? 'unconfirmed' : 'missing';
   }
-  if (el.tagName === 'BUTTON' || !('value' in el)) return same(el.innerText) ? 'kept' : 'missing';
+  if (el.tagName === 'BUTTON' || !('value' in el))
+    return same(el.innerText) ? 'kept' : near(el.innerText) ? 'unconfirmed' : 'missing';
   return same(el.value) ? 'unconfirmed' : 'missing';
 }
 """)
@@ -383,7 +426,7 @@ def _abandon_combobox(page: "Page", element, contained: bool = False) -> None:
     """Leave no half-typed text behind in a box we couldn't answer."""
     try:
         if contained:
-            element.evaluate(_SET_VALUE_JS, "")      # on the element: no keystrokes
+            element.evaluate(_SET_VALUE_JS, ["", False])   # on the element: no keystrokes
         else:
             element.fill("", timeout=2000)
     except Exception:

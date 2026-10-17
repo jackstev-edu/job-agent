@@ -103,6 +103,72 @@ NO_FOCUS = f"""<!doctype html><html><body><form>
 </script></body></html>"""
 
 
+# A phone box that reformats what anyone puts in it, as real ones do.
+PHONE = """<!doctype html><html><body><form>
+  <label for="ph">Phone</label><input id="ph" name="phone" type="tel">
+</form><script>
+  document.getElementById('ph').addEventListener('input', e => {
+    const d = e.target.value.replace(/\\D/g, '').slice(-10);
+    if (d.length === 10) e.target.value = '(' + d.slice(0,3) + ') ' + d.slice(3,6) + '-' + d.slice(6);
+  });
+</script></body></html>"""
+
+# A box that keeps only part of what it's given.
+CLIPPED = """<!doctype html><html><body><form>
+  <label for="ci">City</label><input id="ci" name="city">
+</form><script>
+  document.getElementById('ci').addEventListener('input', e => {
+    e.target.value = e.target.value.slice(0, 4); });
+</script></body></html>"""
+
+# A box that collapses runs of spaces.
+SQUEEZED = """<!doctype html><html><body><form>
+  <label for="na">Full name</label><input id="na" name="full_name">
+</form><script>
+  document.getElementById('na').addEventListener('input', e => {
+    e.target.value = e.target.value.replace(/\\s+/g, ' '); });
+</script></body></html>"""
+
+
+def _set(page, label, value):
+    fields = extract.extract_fields(page, extract.ReadGuard())
+    f = next(f for f in fields if (f.get("label") or "").startswith(label))
+    return filler.fill_one(page, f, value, contained=True)
+
+
+def test_a_box_that_reformats_what_it_was_given_still_counts_as_filled():
+    check = Checks()
+    with mock_page(_write("contained_phone.html", PHONE)) as page:
+        ok, detail = _set(page, "Phone", "+1 555 824 9000")
+        value = page.input_value("#ph")
+    check(ok and "unconfirmed" not in detail and value == "(555) 824-9000",
+          f"a phone box reformatting the same digits: done ({detail}, {value})")
+
+    with mock_page(_write("contained_squeeze.html", SQUEEZED)) as page:
+        ok, detail = _set(page, "Full name", "Test  Person")
+        value = page.input_value("#na")
+    check(ok and "unconfirmed" not in detail and value == "Test Person",
+          f"a box collapsing the spaces: done ({detail}, {value})")
+    check.done()
+
+
+def test_a_box_showing_something_else_is_kept_and_marked_unconfirmed():
+    check = Checks()
+    with mock_page(_write("contained_clipped.html", CLIPPED)) as page:
+        ok, detail = _set(page, "City", "Springfield")
+        value = page.input_value("#ci")
+    check(ok and filler.UNCONFIRMED in detail and value == "Spri",
+          f"kept, and marked unconfirmed rather than failed ({detail}, {value})")
+
+    with mock_page(_write("contained_phone_wrong.html", PHONE)) as page:
+        # The same box, given a number it reformats into different digits.
+        ok, detail = _set(page, "Phone", "555 824 9000 ext 77")
+        value = page.input_value("#ph")
+    check(ok and filler.UNCONFIRMED in detail,
+          f"a phone box left holding other digits: unconfirmed ({detail}, {value})")
+    check.done()
+
+
 def test_a_dropdown_that_wont_hold_the_focus_is_skipped():
     check = Checks()
     with mock_page(_write("no_focus.html", NO_FOCUS)) as page:

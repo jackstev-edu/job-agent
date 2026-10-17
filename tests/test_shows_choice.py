@@ -152,6 +152,49 @@ def test_a_no_display_input_is_unconfirmed_and_the_gate_stops():
     check.done()
 
 
+PART_DISPLAY = """<!doctype html><html><body><form>
+  <label for="co">Country code</label>
+  <div class="co-control"><span class="co-singleValue" id="disp"></span>
+    <input id="co" name="country_code" role="combobox" aria-autocomplete="list"></div>
+  <ul class="menu"><li class="option">United States +1</li><li class="option">Canada +1</li></ul>
+</form><script>
+  const display = document.getElementById('disp');
+  document.querySelectorAll('.option').forEach(o => o.addEventListener('mousedown', () => {
+    // The widget shows only the dialling code it kept.
+    display.textContent = o.textContent.replace(/^.* /, ''); }));
+</script></body></html>"""
+
+
+def test_a_display_holding_part_of_the_choice_is_unconfirmed_and_the_gate_stops():
+    from _fill_run import map_from_profile, run_fill
+
+    check = Checks()
+    with mock_page(_write("part_display.html", PART_DISPLAY)) as page:
+        ok, detail = _pick(page, "Country code", "United States +1")
+        shown = page.inner_text("#disp")
+    check(ok and "unconfirmed" in detail and shown == "+1",
+          f"'+1' shown for 'United States +1': kept, unconfirmed ({detail}, {shown})")
+
+    def map_fields(fields, profile, page_text=""):
+        out = map_from_profile(fields, profile, page_text)
+        for f in fields:
+            if (f.get("label") or "").startswith("Country code"):
+                from agent import mapper
+                out[f["ref"]] = mapper._double_check(
+                    {"ref": f["ref"], "value": "United States +1", "confidence": "high",
+                     "needs_review": False, "source": "model"}, f)
+        return out
+    form = _write("part_display_fill.html", PART_DISPLAY)
+    text, records, error = run_fill(form, dry_run=False, map_fields=map_fields)
+    from agent import tracker
+    row = [r for r in tracker.gate_runs() if r["application_url"] == form.resolve().as_uri()][-1]
+    reasons = json.loads(row["reasons_json"])
+    check(error is None and row["verdict"] == "would_stop"
+          and any("unconfirmed" in r for r in reasons),
+          f"  ...and the gate stops on it ({reasons})")
+    check.done()
+
+
 def filler_decision(field):
     from agent import mapper
     return mapper._double_check({"ref": field["ref"], "value": "Canada", "confidence": "high",

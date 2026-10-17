@@ -1085,10 +1085,13 @@ def _print_dry_run(fields, plan, flags) -> None:
 def _print_summary(rows, flags) -> None:
     print()
     for row in rows:
-        if row["filled"] and not row["needs_review"]:
+        if row["filled"] and not row["needs_review"] and not row.get("unconfirmed"):
             mark = f"{GREEN}done  {OFF}"
         elif row["filled"]:
             mark = f"{AMBER}check {OFF}"
+        elif row.get("value") is None:
+            # No answer in the profile: nothing went wrong, it's yours.
+            mark = f"{DIM}for you{OFF}"
         else:
             mark = f"{RED}failed{OFF}"
         print(f"  {mark} {str(row['label'])[:52]:<54} {DIM}{str(row['value'])[:45]}{OFF}")

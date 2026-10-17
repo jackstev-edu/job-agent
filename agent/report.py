@@ -187,7 +187,7 @@ def build(*, url: str, ats_name: str, report_rows: list[dict],
     if clean:
         sections.append(('Filled from your profile', rows_html(clean, "done", "s-pass")))
     if skipped:
-        sections.append(('Left blank', rows_html(skipped, "blank", "s-skip")))
+        sections.append(('Left for you', rows_html(skipped, "for you", "s-skip")))
 
     tables = "".join(
         f'<h2 class="section">{e(title)}</h2>'
