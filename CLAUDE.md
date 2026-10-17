@@ -124,7 +124,9 @@ How the code keeps them, and rules of its own:
   make in the instant before the agent's activity listener is installed
   on a newly loaded page. This exception covers no other route: a field
   I have typed in, pasted into or changed never reaches the model, even
-  after I clear it.
+  after I clear it. I also accept a change I make with the mouse only while the
+  terminal shows 'hands off — filling'. This is listed under MUST FIX
+  BEFORE AUTO-SUBMIT.
 - The reviewer treats accepted routes as FLAG, never BLOCK. Any route that
   sends a page value to the model or the network is a BLOCK.
 

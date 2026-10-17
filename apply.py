@@ -460,6 +460,13 @@ _WATCH_ENDED = {
     "hard_cap": "Stopped following after 90 minutes.",
 }
 
+# Why follow mode left a field out of every model input (FieldLedger.left_out).
+LEFT_OUT_REASON = {
+    "value": "already holds a value the agent didn't put there; check it",
+    "touched": "you've typed in, changed or cleared this field (or one like it), "
+               "so it stays yours; check it",
+}
+
 # Why a field whose help text the classifier wasn't shown comes to you.
 HELD_AFTER_UPLOAD = ("Its help text changed or appeared after the resume upload (help "
                      "text held back after upload), so the classifier couldn't be shown "
@@ -629,6 +636,15 @@ class _FollowRun:
         categories = self._classify(for_classifier)
         self._note_next_step()
         plan, flags, for_model = _route(for_classifier, categories, self.prof, set())
+        # Every field left out that the agent didn't fill comes to you, so
+        # the review sheet shows it.
+        for f in fields:
+            why = self.ledger.left_out.get(f["ref"])
+            if why in ("value", "touched") and not extract.is_secret(f):
+                flags.append({"ref": f["ref"], "label": f.get("label"),
+                              "options": f.get("options"), "action": "human",
+                              "value": None, "source": "human", "category": "unknown",
+                              "reason": LEFT_OUT_REASON[why]})
         _ask_mapper(for_model, self.prof, self.posting_text, set(), plan)
         plan = _fillable_plan(fields, plan)
         prefill = _prefill_census(page)
@@ -705,6 +721,9 @@ class _FollowRun:
                             return "tab_closed", detection
             else:
                 self.ledger.poll(page)
+            # What you touched, by identity, before a re-mount or a new page
+            # can drop it (booleans and identity parts only, never a value).
+            self.ledger.sweep(page)
             try:
                 page.wait_for_timeout(FOLLOW_POLL_MS)
             except Exception:

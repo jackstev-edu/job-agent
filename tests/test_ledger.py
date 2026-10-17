@@ -185,6 +185,118 @@ def test_an_untracked_field_you_touched_stays_out_after_a_rerender():
     check.done()
 
 
+CHIPS = """<!doctype html><html><body><form>
+  <label for="sk">Skills</label>
+  <div class="sk-control"><span class="sk-multi-value">Python</span>
+    <input id="sk" name="skills" role="combobox" aria-autocomplete="list"></div>
+</form><script>
+  document.getElementById('sk').addEventListener('keydown', e => {
+    if (e.key === 'Backspace' && !e.target.value) document.querySelector('.sk-multi-value')?.remove();
+  });
+</script></body></html>"""
+
+
+def test_a_chip_you_remove_with_backspace_while_the_agent_fills_is_yours():
+    check = Checks()
+    with mock_page(_write("ledger_chip_backspace.html", CHIPS)) as page:
+        led = ledger.FieldLedger()
+        guard = _quiet_guard(page)
+        with guard.filling(page):
+            page.focus("#sk")
+            page.keyboard.press("Backspace")            # you, during the agent's fill
+        check(page.locator(".sk-multi-value").count() == 0,
+              "the chip is gone, the box is empty (so the next check means something)")
+        fields, by = _scan(page)
+        check(by["Skills"]["ref"] not in led.open_fields(page, fields),
+              "removed with Backspace during a fill: not open")
+    check.done()
+
+
+def test_a_field_the_agent_fills_under_the_listener_stays_the_agents():
+    check = Checks()
+    with mock_page(_write("ledger_agent_listener.html", FORM)) as page:
+        led = ledger.FieldLedger()
+        guard = _quiet_guard(page)
+        fields, by = _scan(page)
+        with guard.filling(page):                       # the agent fills, as follow mode does
+            plan = led.fillable(page, fields, _plan(by, City="Springfield"))
+            rows = filler.run_plan(page, fields, plan, contained=True)
+            led.filled(page, fields, plan, rows)
+        led.poll(page)
+        key = ledger.field_identity(by["City"])
+        fields, by = _scan(page)
+        check(by["City"]["ref"] not in led.open_fields(page, fields)
+              and led.entries[key]["owner"] == "agent" and led.left_out[by["City"]["ref"]] == "agent",
+              "filled by the agent: left out as the agent's, not yours")
+        page.evaluate("window.rerender()")
+        fields, by = _scan(page)
+        check(by["City"]["ref"] in led.open_fields(page, fields)
+              and set(led.fillable(page, fields, _plan(by, City="Springfield"))) == {by["City"]["ref"]},
+              "  ...and refilled after a re-render, as before")
+    check.done()
+
+
+ABANDON = """<!doctype html><html><body><form>
+  <label for="co">Country</label>
+  <input id="co" name="country" role="combobox" aria-autocomplete="list">
+  <ul class="menu"><li class="option">Canada</li><li class="option">Mexico</li></ul>
+</form></body></html>"""
+
+
+def test_a_dropdown_the_agent_typed_into_and_abandoned_is_yours():
+    check = Checks()
+    with mock_page(_write("ledger_abandon.html", ABANDON)) as page:
+        led = ledger.FieldLedger()
+        guard = _quiet_guard(page)
+        fields, by = _scan(page)
+        with guard.filling(page):
+            ok, detail = filler.fill_one(page, by["Country"], "Zzzland", contained=True)
+        check(not ok and page.input_value("#co") == "",
+              f"the agent typed, found no match and abandoned it ({detail})")
+        fields, by = _scan(page)
+        check(by["Country"]["ref"] not in led.open_fields(page, fields),
+              "  ...and it's yours: not open (refusal only)")
+    check.done()
+
+
+SHOWS_OWN_TEXT = """<!doctype html><html><body><form>
+  <span id="sl">State</span>
+  <button type="button" role="combobox" aria-labelledby="sl" id="st"
+          style="width:120px;height:24px">Ohio</button>
+  <div data-automation-id="formField-country">
+    <label for="wc">Country</label>
+    <div id="wc" role="combobox" tabindex="0" style="width:120px;height:24px"></div>
+    <div data-automation-id="selectedItem">Canada</div></div>
+</form></body></html>"""
+
+
+def test_a_button_combobox_or_workday_item_showing_text_isnt_open():
+    check = Checks()
+    with mock_page(_write("ledger_own_text.html", SHOWS_OWN_TEXT)) as page:
+        led = ledger.FieldLedger()
+        fields, by = _scan(page)
+        state, country = by.get("State"), by.get("Country")
+        check(state is not None and country is not None, f"both scanned ({sorted(by)})")
+        open_refs = led.open_fields(page, fields)
+        check(state is not None and state["ref"] not in open_refs,
+              "a button combobox reading 'Ohio' isn't open")
+        check(country is not None and country["ref"] not in open_refs,
+              "a Workday field showing a selectedItem isn't open")
+    check.done()
+
+
+def test_a_label_click_marks_its_control():
+    check = Checks()
+    with mock_page(_write("ledger_label_click.html", FORM)) as page:
+        led = ledger.FieldLedger()
+        _quiet_guard(page)
+        page.click("label[for=ci]")                     # you click City's label
+        fields, by = _scan(page)
+        check(by["City"]["ref"] not in led.open_fields(page, fields),
+              "clicking the label marks City: not open")
+    check.done()
+
+
 def test_a_value_you_change_is_yours_for_good():
     check = Checks()
     with mock_page(_write("ledger_change.html", FORM)) as page:

@@ -747,6 +747,124 @@ def test_prefilled_selects_radios_checkboxes_and_chip_dropdowns_are_in_no_model_
     check.done()
 
 
+NICK_ECHO = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+  <form><label for="fn">First Name</label><input id="fn" name="first_name">
+    <div id="w"><label for="nk">Nickname</label><input id="nk" name="nickname" aria-describedby="nk-h"></div>
+    <div id="nk-h">What friends call you</div></form>
+<script>
+  // The page echoes what you type into the help text...
+  document.addEventListener('input', e => {{
+    if (e.target.id === 'nk') document.getElementById('nk-h').textContent =
+      "'" + e.target.value + "' ECHO-SENTINEL-8821 isn't a nickname"; }});
+  // ...and can re-mount the box (a validation re-render), keeping that help.
+  window.remount = () => {{
+    document.getElementById('w').innerHTML =
+      '<label for="nk">Nickname</label><input id="nk" name="nickname" aria-describedby="nk-h">'; }};
+</script>{CLICKS_JS}</body></html>"""
+
+
+def test_a_field_you_typed_in_then_remounted_never_reaches_a_model():
+    import apply
+
+    check = Checks()
+    sent, classify, map_fields = _spies()
+
+    def act(page, state):
+        if not state.get("typed") and page.input_value("#fn"):
+            page.type("#nk", "jo")                     # you, after the step was filled
+            page.wait_for_timeout(700)                 # a poll or so
+            page.evaluate("window.remount()")          # the page re-mounts the box
+            state["typed"] = True
+            return False
+        if state.get("typed"):
+            state["help"] = page.inner_text("#nk-h")
+            state["n"] = state.get("n", 0) + 1
+            return state["n"] > 30
+        return False
+    text, records, error, you = _follow(
+        NICK_ECHO, act, path="/remount",
+        patches=((apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    rec = records[-1] if records else {}
+    check(error is None and "ECHO-SENTINEL" in (you.state.get("help") or "")
+          and rec.get("steps", 0) >= 2,
+          f"the box was re-mounted with the echo kept, and rescanned ({rec.get('steps')}, {error})")
+    check(all("ECHO-SENTINEL" not in s for s in sent),
+          "the echo of what you typed reached no model call")
+    check.done()
+
+
+BACK_NEXT = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+  <form id="f"></form>
+<script>
+  let typed = '';
+  const one = () => `<section id="s1"><label for="fn">First Name</label><input id="fn" name="first_name">
+    <label for="nk">Nickname</label><input id="nk" name="nickname" aria-describedby="nk-h">
+    <div id="nk-h">${{typed ? "'" + typed + "' ECHO-SENTINEL-9934 isn't a nickname" : "What friends call you"}}</div>
+    <button type="button" id="next">Next</button></section>`;
+  const two = `<section id="s2"><label for="ci">City</label><input id="ci" name="city">
+    <button type="button" id="back">Back</button></section>`;
+  const f = document.getElementById('f');
+  f.innerHTML = one();
+  document.addEventListener('input', e => {{ if (e.target.id === 'nk' && e.target.value) typed = e.target.value; }});
+  document.addEventListener('click', e => {{
+    if (e.target.id === 'next') f.innerHTML = two;
+    if (e.target.id === 'back') f.innerHTML = one(); }});
+</script>{CLICKS_JS}</body></html>"""
+
+
+def test_a_field_you_touched_is_still_yours_after_back_and_next():
+    import apply
+
+    check = Checks()
+    sent, classify, map_fields = _spies()
+
+    def act(page, state):
+        if not state.get("left") and page.is_visible("#fn") and page.input_value("#fn"):
+            page.type("#nk", "jo")                     # you type and clear...
+            page.fill("#nk", "")
+            page.click("#next")                        # ...and go on
+            state["left"] = True
+            return False
+        if state.get("left") and not state.get("back") and page.is_visible("#ci"):
+            state["w"] = state.get("w", 0) + 1
+            if state["w"] > 15:                        # page 2 handled; then come back
+                page.click("#back")
+                state["back"] = True
+            return False
+        if state.get("back"):
+            state["help"] = page.inner_text("#nk-h")
+            state["n"] = state.get("n", 0) + 1
+            return state["n"] > 30
+        return False
+    text, records, error, you = _follow(
+        BACK_NEXT, act, path="/backnext",
+        patches=((apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    rec = records[-1] if records else {}
+    check(error is None and you.state.get("back") and "ECHO-SENTINEL" in (you.state.get("help") or "")
+          and rec.get("steps", 0) >= 3,
+          f"back on page 1, its help echoing what you typed, rescanned ({rec.get('steps')}, {error})")
+    check(all("ECHO-SENTINEL" not in s for s in sent),
+          "the echo reached no model call on the revisit")
+    check.done()
+
+
+def test_a_field_left_out_of_model_input_is_flagged_for_you():
+    check = Checks()
+
+    def act(page, state):
+        state["n"] = state.get("n", 0) + (page.input_value("#fn") != "")
+        return state["n"] > 3
+    text, records, error, you = _follow(PREFILLED, act, path="/flagged")
+    rec = records[-1] if records else {}
+    reasons = [fl.get("reason", "") for fl in rec.get("flags", []) if fl.get("label") == "City"]
+    check(error is None and any("already holds a value the agent didn't put there" in r
+                                for r in reasons),
+          f"the prefilled City is on the review sheet for you ({reasons})")
+    check.done()
+
+
 def test_a_normal_fill_still_classifies_every_field_with_its_help():
     import apply
     from _fill_run import run_fill

@@ -119,11 +119,18 @@ _STATE_JS = ("""
         '[data-automation-id="selectedItem"]')]
         .map(d => d.innerText).filter(t => norm(t)) : [];
     const own = ('value' in el && el.tagName !== 'BUTTON') ? el.value : '';
+    // A button or div combobox shows its choice as its own text, and Workday
+    // can show one in its form field, outside any control container: any
+    // text there and it isn't empty (a placeholder can't be told apart).
+    const ownText = (el.tagName === 'BUTTON' || !('value' in el)) ? el.innerText : '';
+    const wd = el.closest('[data-automation-id^="formField"]');
+    const wdShown = wd ? [...wd.querySelectorAll('[data-automation-id="selectedItem"]')]
+        .map(d => d.innerText).filter(t => norm(t)) : [];
     // You may pick a row with the mouse and clear it with the X: neither
     // touches the input, both touch its control.
     if (control && (control.hasAttribute('""" + TOUCH_ATTR + r"""')
         || control.querySelector('[""" + TOUCH_ATTR + r"""]'))) touched = true;
-    empty = !shown.length && !norm(own);
+    empty = !shown.length && !norm(own) && !norm(ownText) && !wdShown.length;
     mine = agentValue !== null && (shown.length ? shown.some(t => norm(t) === norm(agentValue))
                                                  : norm(own) === norm(agentValue));
   } else {
@@ -178,6 +185,10 @@ class FieldLedger:
         self._marks = (f"m{n}" for n in itertools.count(1))
         self._anon_steps: set = set()               # steps where an untracked field was filled
         self._touched_kinds: set = set()            # (type, tag) of untracked fields you touched
+        self._touched: set = set()                  # identity keys of what you touched
+        self._typed_while_agent: set = set()        # ...of what got input while the agent filled
+        self._agent_filled: set = set()             # ...of what the agent filled
+        self.left_out: dict[str, str] = {}
 
     @staticmethod
     def _keys(fields: list[dict]) -> dict[str, tuple | None]:
@@ -217,38 +228,79 @@ class FieldLedger:
         left out while it shows a value or carries a touch mark; once both
         are gone (a re-render), so once one is seen touched, every
         untracked field of the same kind and tag stays out for the run.
+        Touches are also remembered by identity (name, id, explicit label,
+        and an anonymous tag key, as secret_keys_of), from the listener's
+        record, so a field re-mounted or revisited after you touched it
+        matches too. `left_out` says why each other field was left out:
+        "agent" (holding the agent's value), "value" (holding one the agent
+        didn't put there) or "touched" (yours: touched, cleared or like one
+        you touched).
         """
+        self.sweep(page)
+        touched_keys = self.touched_keys()
         keys = self._keys(fields)
         out: set[str] = set()
+        self.left_out: dict[str, str] = {}
         for f in fields:
             if f.get("type") == "file":
                 continue
             key = keys.get(f["ref"])
             entry = self.entries.get(key) if key else None
-            if entry is not None and entry.get("owner") == "jack":
-                continue
             st = self.state(page, f, mark=(entry or {}).get("mark"))
             if not st.get("present") or st.get("secret"):
                 continue
             kind = (f.get("type"), f.get("tag") or "")
-            if key is None and kind in self._touched_kinds:
-                continue
-            if st.get("touched"):
+            holds = not st["empty"]
+            agents = (holds and st.get("marked") and entry is not None
+                      and entry.get("owner") == "agent" and st.get("same"))
+            if (st.get("touched") or extract.secret_keys_of(f) & touched_keys
+                    or (key is None and kind in self._touched_kinds)):
                 if key is not None:
                     self.entries[key] = {"owner": "jack"}
                 else:
                     self._touched_kinds.add(kind)
+                self.left_out[f["ref"]] = "value" if holds and not agents else (
+                    "agent" if agents else "touched")
                 continue
-            if not st["empty"]:
+            if entry is not None and entry.get("owner") == "jack":
+                self.left_out[f["ref"]] = "value" if holds else "touched"
+                continue
+            if holds:
                 if key is not None and entry is None:
                     self.entries[key] = {"owner": "jack"}
+                self.left_out[f["ref"]] = "agent" if agents else "value"
                 continue
             if st.get("marked"):
                 if key is not None and (entry is None or st.get("same")):
                     self.entries[key] = {"owner": "jack"}
+                self.left_out[f["ref"]] = "touched"
                 continue
             out.add(f["ref"])
         return out
+
+    def sweep(self, page: "Page") -> None:
+        """
+        Copy the listener's record of what you touched (identity parts of
+        form fields: tag, name, id, explicit label; never a value) into
+        Python, so it outlasts a re-mount and a new document. Called on
+        every poll and before every open check. Never fails the run.
+        """
+        try:
+            got = page.evaluate(_TOUCHED_JS) or {}
+        except Exception:
+            return
+        for name, into in (("t", self._touched), ("a", self._typed_while_agent)):
+            for rec in got.get(name) or []:
+                if not (isinstance(rec, list) and len(rec) == 4):
+                    continue
+                tag, dom_name, dom_id, label = (str(x or "") for x in rec)
+                into.update(extract.secret_keys_of({"tag": tag, "dom_name": dom_name,
+                                                    "dom_id": dom_id, "explicit_label": label}))
+                into.add(("anon", tag))
+
+    def touched_keys(self) -> set:
+        """Your touches, and what was typed during a fill into a field the agent didn't fill."""
+        return self._touched | (self._typed_while_agent - self._agent_filled)
 
     def fillable(self, page: "Page", fields: list[dict], plan: dict, step=None) -> dict:
         """
@@ -312,6 +364,8 @@ class FieldLedger:
             if not row.get("filled"):
                 continue
             f = by_ref[ref]
+            # Input on it during the fill was the agent's own typing.
+            self._agent_filled |= extract.secret_keys_of(f)
             mark = next(self._marks)
             try:
                 els = _elements(page, _refs(f))
@@ -372,41 +426,98 @@ class FieldLedger:
 # event's target, the scanned field around it, a label's own control, a
 # dropdown's control container, and the focused element (a dropdown keeps
 # the focus while you pick a row with the mouse). While the agent fills,
-# what's typed in, pasted into or changed still gets WHILE_AGENT_ATTR.
+# what's typed in, pasted into or changed still gets WHILE_AGENT_ATTR, and
+# Backspace or Delete (which the agent never presses) counts as you. Each
+# touched form field's identity parts (tag, name, id, explicit label; never
+# a value) are also recorded, in window.__jaAct and the tab's
+# sessionStorage, so the record outlasts a re-mount and a new document.
 _ACTIVITY_JS = r"""
 () => {
   if (window.__jaAct) return;
   // Starts as "just now": input before this was installed can't be seen,
   // so a fresh page always waits the full quiet period.
-  window.__jaAct = {last: performance.now(), agent: false};
-  const put = (el, attr) => { if (el instanceof Element) el.setAttribute(attr, ''); };
+  window.__jaAct = {last: performance.now(), agent: false, t: [], a: []};
+""" + extract._TEXT_OF_JS + r"""
+  const explicitLabel = el => ((el.getAttribute('aria-label') || '').trim()
+      || [...(el.labels || [])].map(l => textOf(l, el)).filter(Boolean).join(' '))
+      .slice(0, 300);
+  const STORE = '__jaTouched';
+  const seen = new Set();
+  try {
+    const kept = JSON.parse(sessionStorage.getItem(STORE) || '{}');
+    for (const list of ['t', 'a'])
+      for (const rec of (Array.isArray(kept[list]) ? kept[list] : [])) {
+        const k = list + JSON.stringify(rec);
+        if (!seen.has(k)) { seen.add(k); window.__jaAct[list].push(rec); }
+      }
+  } catch (e) {}
+  const FORMISH = 'input, select, textarea, [role=combobox], '
+      + '[contenteditable]:not([contenteditable="false"])';
   const REF = '[""" + extract.REF_ATTR + r"""]';
+  const fieldsOf = el => {
+    const out = new Set();
+    if (!(el instanceof Element) || el === document.body) return out;
+    if (el.matches(FORMISH)) out.add(el);
+    const ref = el.closest(REF);
+    if (ref) out.add(ref);
+    if (el instanceof HTMLLabelElement && el.control) out.add(el.control);
+    const control = el.closest('[class*="control"], [role=combobox]');
+    if (control) {
+      if (control.matches(FORMISH)) out.add(control);
+      control.querySelectorAll(FORMISH).forEach(x => out.add(x));
+    }
+    return out;
+  };
+  const record = (els, list) => {
+    let added = false;
+    for (const el of els)
+      for (const f of fieldsOf(el)) {
+        const rec = [f.tagName.toLowerCase(), typeof f.name === 'string' ? f.name : '',
+                     f.id || '', explicitLabel(f)];
+        const k = list + JSON.stringify(rec);
+        if (seen.has(k)) continue;
+        seen.add(k); window.__jaAct[list].push(rec); added = true;
+      }
+    if (added) try {
+      sessionStorage.setItem(STORE, JSON.stringify({t: window.__jaAct.t, a: window.__jaAct.a}));
+    } catch (e) {}
+  };
+  const put = (el, attr) => { if (el instanceof Element) el.setAttribute(attr, ''); };
+  const T = '""" + TOUCH_ATTR + r"""';
+  const touch = els => {
+    for (const el of els) {
+      if (!(el instanceof Element) || el === document.body) continue;
+      put(el, T);
+      put(el.closest(REF), T);
+      put(el.closest('[class*="control"], [role=combobox]'), T);
+      if (el instanceof HTMLLabelElement) put(el.control, T);
+    }
+    record(els, 't');
+  };
   for (const t of ['keydown', 'input', 'pointerdown', 'mousedown', 'change', 'paste'])
     document.addEventListener(t, e => {
       if (!e.isTrusted) return;
       const path = e.composedPath ? e.composedPath() : [];
       const targets = [e.target, path[0]].filter(el => el instanceof Element);
       if (window.__jaAct.agent) {
-        if (['input', 'paste', 'change'].includes(t))
+        if (t === 'keydown' && (e.key === 'Backspace' || e.key === 'Delete')) {
+          touch([...targets, document.activeElement]);
+        } else if (['input', 'paste', 'change'].includes(t)) {
           for (const el of targets) {
             put(el, '""" + WHILE_AGENT_ATTR + r"""');
             put(el.closest(REF), '""" + WHILE_AGENT_ATTR + r"""');
           }
+          record(targets, 'a');
+        }
         return;
       }
       window.__jaAct.last = performance.now();
-      const T = '""" + TOUCH_ATTR + r"""';
-      const focused = document.activeElement;
-      for (const el of [...targets, focused]) {
-        if (!(el instanceof Element) || el === document.body) continue;
-        put(el, T);
-        put(el.closest(REF), T);
-        put(el.closest('[class*="control"], [role=combobox]'), T);
-        if (el instanceof HTMLLabelElement) put(el.control, T);
-      }
+      touch([...targets, document.activeElement]);
     }, true);
 }
 """
+# The listener's record of what you touched: identity parts only.
+_TOUCHED_JS = "() => window.__jaAct ? {t: window.__jaAct.t || [], a: window.__jaAct.a || []} : null"
 # The same listener as an init script, for every new document.
 ACTIVITY_INIT_SCRIPT = "(" + _ACTIVITY_JS.strip() + ")();"
 _QUIET_JS = "() => window.__jaAct ? performance.now() - window.__jaAct.last : 0"

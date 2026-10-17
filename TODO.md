@@ -445,9 +445,11 @@
 - The corrections log and the outcome read-back don't run in follow mode
   (no final snapshot; edits are unknown, so runs score unknown).
 - The resume upload's baseline isn't tracked across pages (uploads=None).
-- The activity guard only guarantees quiet before a fill starts: while
-  the agent fills, your input isn't watched (a field is re-checked as
-  empty only at plan time).
+- The activity guard only guarantees quiet before a fill starts. While the
+  agent fills, what you type in, paste into or change, and Backspace or
+  Delete, is marked and keeps the field out of model input; a mouse-only
+  change then isn't (Jack's EXCEPTION accepts it, see MUST FIX). The fill
+  itself re-checks a field as empty only at plan time.
 - A page whose structure changes faster than the watcher settles may be
   skipped; real-portal timing unchecked.
 
@@ -509,27 +511,45 @@ open once anything submits without Jack.
   resume autofill's) into another, empty, untouched field's label,
   placeholder or help text, and that field goes to the model with it.
   Also accepted: input in the instant before the listener is installed on
-  a newly loaded page (one poll, FOLLOW_POLL_MS). Close before
+  a newly loaded page (an init script runs it before the page's own
+  scripts; per-poll install is the backstop). Close before
   auto-submit (for instance, send no help for any field on a page where
   any field holds a value).
-- Follow mode, touch marks: the mark sits on the element. A tracked field
-  you touched is yours for the run; once an untracked one is seen touched,
-  every untracked field of that kind and tag stays out of model input for
-  the run. Untracked fields re-rendered before any scan saw the mark are
-  still open. The control-container mark can make every dropdown inside a
+- Follow mode, mouse-only change during "hands off — filling" (accepted by
+  Jack's EXCEPTION until auto-submit): a dropdown row you pick and clear
+  with the mouse while the agent fills isn't marked, since the agent's own
+  clicks are trusted too. Fix: the agent tells the listener which element
+  it's acting on; trusted pointer events elsewhere are marked.
+- Follow mode, the listener runs in the page's own world: a hostile page
+  can set window.__jaAct.agent, strip data-ja-touched or rewrite the
+  sessionStorage record, and a field you touched would go to the model.
+  (Such a page already holds that value and could echo it into an
+  untouched field, which the exception accepts.) Run it in an isolated
+  world before auto-submit.
+- Follow mode, touch marks: a touched field is remembered by identity
+  (name, id, explicit label, and an anonymous tag key) as well as by the
+  element's mark, so a re-mount or Back / Next keeps it yours; a tracked
+  match is yours for the run, an untracked match keeps its kind and tag
+  out of model input for the run. An element whose name, id and label all
+  change between your touch and the next scan isn't matched. Marking the
+  focused element means your next click anywhere after a fill makes the
+  last field the agent filled yours (never refilled after a re-render).
+  The control-container mark can make every dropdown inside a
   Bootstrap "controls" wrapper yours once you touch any field in it, and a
   dropdown the agent typed into and then abandoned becomes yours (both
   refusals only).
-- Follow mode, combobox "empty": `choices__item` also matches a Choices.js
+- Follow mode, combobox "empty" (placeholder-class false positives): a
+  button or div combobox counts as holding a value whenever it shows any
+  text, so one showing a placeholder ("Select...") is never filled and
+  comes to you. `choices__item` also matches a Choices.js
   placeholder, `chosen-single` is always there in Chosen, and the chip /
   tag selectors can match a chip-list wrapper with placeholder text: those
   empty dropdowns read as holding a value and are never filled (refusals
   only; narrowing them needs Jack's approval).
-- Follow mode, combobox "empty": the chip / selected-item displays are
-  looked for only inside the control container (`[class*="control"]` or
-  an enclosing role=combobox). A Workday selectedItem outside it, or a
-  button combobox's own text (a placeholder can't be told from a choice),
-  still reads as empty.
+- Follow mode, combobox "empty": chips and selected items are looked for
+  inside the control container, a button / div combobox's own text, and a
+  Workday selectedItem in its `formField` container (unverified against a
+  live Workday page). A display anywhere else still reads as empty.
 - From review FLAGs this run:
   - scan-time decide reads the name only as written; read it split into
     words too (as click time does);
