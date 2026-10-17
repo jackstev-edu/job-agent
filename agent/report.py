@@ -129,12 +129,15 @@ def build(*, url: str, ats_name: str, report_rows: list[dict],
         items.append((flag.get("label") or "(unlabelled question)",
                       flag.get("reason") or ""))
     for row in attention:
+        # A row can be both: the page never showed it back AND it was
+        # drafted. Say both; neither warning replaces the other.
+        notes = []
         if row.get("unconfirmed"):
-            items.append((row["label"], f"The page didn't show this answer back "
-                                        f"({row.get('detail', '')}). Check it."))
-        else:
-            items.append((row["label"],
-                          row.get("note") or "Drafted by AI — read it before you send it."))
+            notes.append(f"The page didn't show this answer back "
+                         f"({row.get('detail', '')}). Check it.")
+        if row.get("needs_review"):
+            notes.append(row.get("note") or "Drafted by AI — read it before you send it.")
+        items.append((row["label"], " ".join(notes)))
     for row in failed:
         items.append((row["label"],
                       f"Could not be filled: {row.get('detail','')}. Enter it by hand."))

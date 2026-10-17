@@ -174,6 +174,41 @@ def test_a_box_showing_something_else_is_kept_and_marked_unconfirmed():
     check.done()
 
 
+# A box that keeps the national digits and stamps its own dialling code on.
+RECODED = """<!doctype html><html><body><form>
+  <label for="ph">Phone</label><input id="ph" name="phone" type="tel">
+</form><script>
+  document.getElementById('ph').addEventListener('input', e => {
+    const d = e.target.value.replace(/\\D/g, '').slice(-10);
+    if (d.length === 10) e.target.value = '+91 ' + d; });
+</script></body></html>"""
+
+SHORT = """<!doctype html><html><body><form>
+  <label for="ex">Phone extension</label><input id="ex" name="phone_ext">
+</form><script>
+  document.getElementById('ex').addEventListener('input', e => {
+    e.target.value = '1' + e.target.value.replace(/\\D/g, ''); });
+</script></body></html>"""
+
+
+def test_a_phone_box_showing_a_different_country_code_is_unconfirmed():
+    check = Checks()
+    with mock_page(_write("contained_recoded.html", RECODED)) as page:
+        ok, detail = _set(page, "Phone", "+1 555 824 9000")
+        value = page.input_value("#ph")
+    check(ok and filler.UNCONFIRMED in detail,
+          f"the box stamped another dialling code on it: unconfirmed ({detail}, {value})")
+
+    with mock_page(_write("contained_short.html", SHORT)) as page:
+        # Too few digits to be a phone number: compared as text, so the
+        # box adding a digit isn't "the same number".
+        ok, detail = _set(page, "Phone extension", "4021")
+        value = page.input_value("#ex")
+    check(ok and filler.UNCONFIRMED in detail,
+          f"a short answer doesn't confirm itself on digits ({detail}, {value})")
+    check.done()
+
+
 def test_a_dropdown_that_wont_hold_the_focus_is_skipped():
     check = Checks()
     with mock_page(_write("no_focus.html", NO_FOCUS)) as page:

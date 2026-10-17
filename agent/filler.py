@@ -84,10 +84,12 @@ def _element(page: "Page", ref: str):
 # compared in the page, and only a word comes back:
 #   "exact"  the box holds what was written;
 #   "same"   a mask or formatter reshaped it, and it still says the same:
-#            the same digits for a phone box, after dropping a country code
-#            that the text itself writes as a leading "+" and 1-3 digits
-#            (so "+1 555 ..." and "(555) ..." are the same number, while
-#            "+1 555 ... ext 77" and a box holding other digits are not);
+#            the same digits for a phone box of at least seven, after
+#            dropping a country code that the text itself writes as a
+#            leading "+" and 1-3 digits, and only where the two texts don't
+#            write different codes (so "+1 555 ..." and "(555) ..." are the
+#            same number, while "+44 ..." and "+1 ..." are not, nor is
+#            "+1 555 ... ext 77" against a box holding other digits);
 #            or the same text once whitespace is collapsed;
 #   "other"  the box holds something else (a mask that cut it short);
 #   "empty"  the box took nothing.
@@ -108,17 +110,19 @@ _SET_VALUE_JS = ("""
   if (got === v) return 'exact';
   const ws = t => String(t ?? '').replace(/\s+/g, ' ').trim();
   if (!ws(got)) return 'empty';
-  if (phone || (el.type || '').toLowerCase() === 'tel') {
-    const digits = t => String(t ?? '').replace(/\D/g, '');
-    // A country code counts only where the text writes one: a leading "+"
-    // and 1-3 digits ending at a non-digit. Everything else is compared
-    // digit for digit, so a box left holding a different number is "other".
-    const bare = t => {
-      const s = ws(t), m = /^\+(\d{1,3})(?!\d)/.exec(s);
-      return m ? digits(s).slice(m[1].length) : digits(s);
-    };
-    if (digits(got) && digits(got) === digits(v)) return 'same';
-    return bare(got) && bare(got) === bare(v) ? 'same' : 'other';
+  const digits = t => String(t ?? '').replace(/\D/g, '');
+  // A phone box, holding something long enough to be a phone number: its
+  // digits decide. A country code counts only where the text writes one (a
+  // leading "+" and 1-3 digits ending at a non-digit), and two texts that
+  // write different codes are different numbers. Anything shorter, and
+  // every other box, is compared as text, so a digit or two can't confirm
+  // itself.
+  if ((phone || (el.type || '').toLowerCase() === 'tel') && digits(v).length >= 7) {
+    const code = t => (/^\+(\d{1,3})(?!\d)/.exec(ws(t)) || [])[1] || '';
+    const bare = t => digits(t).slice(code(t).length);
+    if (digits(got) === digits(v)) return 'same';
+    const sameCode = !code(got) || !code(v) || code(got) === code(v);
+    return bare(got) && bare(got) === bare(v) && sameCode ? 'same' : 'other';
   }
   return ws(got) === ws(v) ? 'same' : 'other';
 }
@@ -281,7 +285,9 @@ _SHOWS_CHOICE_JS = ("""
     const [long, short] = a.length >= b.length ? [a, b] : [b, a];
     const i = long.indexOf(short);
     if (i < 0) return false;
-    const edge = c => c === undefined || /[^a-z0-9]/.test(c);
+    // In every script, not just this page's: a letter or number either
+    // side means the choice is part of a longer word.
+    const edge = c => c === undefined || /[^\p{L}\p{N}]/u.test(c);
     return edge(long[i - 1]) && edge(long[i + short.length]);
   };
   // The control container first, as the snapshot finds it; an enclosing

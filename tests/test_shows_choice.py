@@ -207,6 +207,16 @@ def test_a_display_showing_a_different_option_is_still_abandoned():
         value = page.input_value("#co")
     check(not ok and "didn't keep" in detail and value == "",
           f"'None of the above' doesn't confirm 'No': abandoned ({detail}, {value!r})")
+
+    # The same rule in a script with no a-z: 是 ("yes") inside 不是 ("no").
+    other = PART_DISPLAY.replace("United States +1", "\u662f").replace("Canada +1", "\u5426") \
+                        .replace("Country code", "Eligible") \
+                        .replace("o.textContent.replace(/^.* /, '')", "'\u4e0d\u662f'")
+    with mock_page(_write("other_display_cjk.html", other)) as page:
+        ok, detail = _pick(page, "Eligible", "\u662f")
+        value = page.input_value("#co")
+    check(not ok and "didn't keep" in detail and value == "",
+          f"a display reading the opposite doesn't confirm it either ({ascii(detail)})")
     check.done()
 
 

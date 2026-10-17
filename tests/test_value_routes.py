@@ -148,6 +148,9 @@ def test_an_unconfirmed_fill_is_something_to_check_not_a_clean_row():
              "needs_review": False, "unconfirmed": True, "source": "profile",
              "detail": "selected 'United States +1' — unconfirmed", "confidence": "high",
              "note": "", "required": True},
+            {"label": "Why us", "value": "Because.", "filled": True, "needs_review": True,
+             "unconfirmed": True, "source": "model", "detail": "set — unconfirmed",
+             "confidence": "high", "note": "", "required": False},
             {"label": "First Name", "value": "Test", "filled": True, "needs_review": False,
              "unconfirmed": False, "source": "profile", "detail": "typed",
              "confidence": "high", "note": "", "required": True}]
@@ -157,6 +160,12 @@ def test_an_unconfirmed_fill_is_something_to_check_not_a_clean_row():
     before, _, after = html.partition("Filled from your profile")
     check("Country code" in before and "Country code" not in after,
           "the unconfirmed row is above the clean ones, not among them")
+    drafted = html.partition("Drafted — read these")[2].partition("Filled from your profile")[0]
+    check("Country code" in drafted and "First Name" not in drafted,
+          "  ...it sits under 'Drafted — read these', and the clean row doesn't")
+    check("Drafted by AI" in html and "show this answer back" in
+          html.partition("Why us")[2][:400],
+          "a row that is drafted AND unconfirmed is warned about on both counts")
     check("show this answer back" in html,
           "  ...and it's on the checklist, saying the page never showed it back")
     check("Nothing needs your attention" not in html,
