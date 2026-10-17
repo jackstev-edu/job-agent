@@ -81,7 +81,7 @@ def test_the_gate_stops_on_a_model_answered_legal_question():
         rec["categories"]["f9"] = "personal_fact"
         rec["plan"]["f9"] = {"value": "x", "source": "model", "confidence": "high",
                              "needs_review": False, "review_reasons": []}
-        rec["results"]["f9"] = {"filled": True, "detail": "typed"}
+        rec["results"]["f9"] = {"filled": True, "detail": "typed", "unconfirmed": False}
         rec["snapshot"]["f9"] = "x"
         tg.stops(check, rec, "not traced to a profile line", f"'{label}', model-answered")
     check(tg.run(tg.base())["content_verdict"] == "would_submit",
@@ -229,7 +229,7 @@ def test_the_gate_stops_on_a_verbatim_fit_for_a_guarded_question():
     rec["categories"]["f9"] = "compensation"
     rec["plan"]["f9"] = {"value": "x", "source": "profile",
                          "profile_path": "compensation.desired_base_min", "fit": "verbatim"}
-    rec["results"]["f9"] = {"filled": True, "detail": "typed"}
+    rec["results"]["f9"] = {"filled": True, "detail": "typed", "unconfirmed": False}
     rec["snapshot"]["f9"] = "x"
     tg.stops(check, rec, "matched the options loosely (verbatim)",
              "a guarded question answered verbatim from its profile line")
@@ -323,7 +323,7 @@ def _gate_record(label, category, plan):
     rec["fields"].append({"ref": "f9", "type": "text", "label": label})
     rec["categories"]["f9"] = category
     rec["plan"]["f9"] = plan
-    rec["results"]["f9"] = {"filled": True, "detail": "typed"}
+    rec["results"]["f9"] = {"filled": True, "detail": "typed", "unconfirmed": False}
     rec["snapshot"]["f9"] = plan.get("value")
     return rec
 

@@ -505,8 +505,6 @@ open once anything submits without Jack.
   form-control / controls wrappers.
 - A step that fails partway (fill_step_failed) loses the rows already
   filled from the review sheet and tracker.
-- The gate treats a results entry with no "unconfirmed" key as confirmed;
-  it should default to unconfirmed.
 - An Indian "PIN code" (or a token / secret field) makes a page read as a
   sign-in page in follow mode, so nothing on it is filled.
 - The react-select mock in tests/test_shows_choice.py is unverified

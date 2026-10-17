@@ -60,7 +60,8 @@ def base():
                    "needs_review": True, "review_reasons": ["draft"]},
         },
         "flags": [],
-        "results": {r: {"filled": True, "detail": "typed"} for r in ("f0", "f1", "f3", "f4")},
+        "results": {r: {"filled": True, "detail": "typed", "unconfirmed": False}
+                    for r in ("f0", "f1", "f3", "f4")},
         "snapshot": {"f0": "Test", "f1": "Yes", "f3": SENTINEL_EEO, "f4": CANNED},
         "census": [{"ref": "c0", "checked": False, "visible": True, "label_source": "for",
                     "label_inner": SMS, "label_content": SMS, "described": "",
@@ -164,6 +165,9 @@ def test_3_nothing_flagged_null_failed_or_unsure():
     stops(check, r, "model confidence is medium", "a medium-confidence model answer")
     r = base(); r["plan"]["f0"].update(needs_review=True, review_reasons=[])
     stops(check, r, "needs review (unattributed)", "a review flag with no named reason")
+    r = base(); r["results"]["f0"] = {"filled": True, "detail": "typed"}
+    stops(check, r, "the page couldn't confirm the choice (unconfirmed)",
+          "a results entry that doesn't say whether it was confirmed")
     r = base(); r["fields"].append({"ref": "f9", "type": "checkbox", "label": "Signature"})
     r["categories"]["f9"] = "consent"
     r["flags"] = [{"ref": "f9", "label": "Signature", "category": "consent", "reason": "yours"}]
@@ -243,7 +247,7 @@ def _pair(planned="Yes", before=False, after=True, visible=False, label="Do you 
                         "label": label, "options": ["Yes", "No"]})
     r["categories"]["f10"] = "preference"
     r["plan"]["f10"] = {"value": planned, "source": "model", "confidence": "high"}
-    r["results"]["f10"] = {"filled": True}
+    r["results"]["f10"] = {"filled": True, "unconfirmed": False}
     return r
 
 

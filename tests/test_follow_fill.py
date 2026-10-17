@@ -67,11 +67,18 @@ class _You:
         pass
 
 
-def _follow(html, act, path="/job", patches=(), answers=("n",), profile_yaml=None, url=None):
+def _follow(html, act, path="/job", patches=(), answers=("n",), profile_yaml=None,
+            url=None, pages=None):
+    """
+    One follow run on `html`. `pages` lets a test share the list the Enter
+    watcher reads the current page from, so it can look at the page itself
+    without patching open_page again (a second patch would win, leaving
+    the watcher with no page and the run ending only on its poll limit).
+    """
     import apply
     from _fill_run import PROFILE, run_fill
 
-    pages = []
+    pages = [] if pages is None else pages
     real_open = apply.browser_mod.open_page
 
     def open_page(ctx, u):
@@ -1020,13 +1027,7 @@ def test_nothing_is_filled_before_you_open_the_form():
 
     check = Checks()
     seen_at_prompt = []
-    pages_ref = []
-    real_open = apply.browser_mod.open_page
-
-    def open_page(ctx, u):
-        page = real_open(ctx, u)
-        pages_ref.append(page)
-        return page
+    pages_ref = []          # the same list the Enter watcher reads
 
     def ask(prompt=""):
         page = pages_ref[-1]
@@ -1041,8 +1042,8 @@ def test_nothing_is_filled_before_you_open_the_form():
         state["n"] = state.get("n", 0) + (page.is_visible("#fn") and page.input_value("#fn") != "")
         return state["n"] > 3
     text, records, error, you = _follow(
-        POSTING, act, path="/posting",
-        patches=((apply.browser_mod, "open_page", open_page), (apply, "input", ask)))
+        POSTING, act, path="/posting", pages=pages_ref,
+        patches=((apply, "input", ask),))
     check(error is None and "Click Apply if the form isn't open, then press Enter." in text,
           f"follow mode asks you to open the form first ({error})")
     check(seen_at_prompt and seen_at_prompt[0] == ("", 0),
@@ -1098,7 +1099,7 @@ def test_the_resume_box_rules():
     check = Checks()
     resume = TEST_HOME / "rules-resume.pdf"
     resume.write_bytes(b"%PDF-1.4 test resume\n")
-    own = TEST_HOME / "jacks-own.pdf"
+    own = TEST_HOME / "your-own.pdf"
     own.write_bytes(b"%PDF-1.4 your own\n")
     profile = PROFILE.replace("resume_default: missing.pdf", "resume_default: rules-resume.pdf")
     files_js = "() => [...document.querySelectorAll('input[type=file]')].map(b => [...b.files].map(f => f.name))"
@@ -1114,7 +1115,7 @@ def test_the_resume_box_rules():
             [["rules-resume.pdf"]], False),
         "the box already holds your file: left alone": (
             "<label for='a'>Resume</label><input type='file' id='a' name='resume'>",
-            [["jacks-own.pdf"]], True),
+            [["your-own.pdf"]], True),
     }
     for i, (what, (boxes, want, yours_first)) in enumerate(cases.items()):
         def act(page, state, yours_first=yours_first):

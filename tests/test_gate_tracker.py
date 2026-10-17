@@ -139,7 +139,7 @@ def test_prefill_states_of_button_pairs_are_stored_withheld_alike():
     rec["categories"]["f30"] = "work_authorization"
     rec["plan"]["f30"] = {"value": "No", "source": "profile",
                           "profile_path": "eligibility.requires_sponsorship", "fit": "bool"}
-    rec["results"]["f30"] = {"filled": True}
+    rec["results"]["f30"] = {"filled": True, "unconfirmed": False}
     sponsor = test_gate.box("Will you now or in the future require visa sponsorship?", ref=None,
                             in_button_group=True, group_ref="f30", label_source="none",
                             visible=False, checked=False)

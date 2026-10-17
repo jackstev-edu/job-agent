@@ -349,7 +349,9 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             res = results.get(ref)
             if not res or not res.get("filled"):
                 content.append(f"{name}: filling it failed")
-            elif res.get("unconfirmed"):
+            # A results entry with no "unconfirmed" key is unreadable, not
+            # confirmed: the gate defaults to stopping on anything missing.
+            elif res.get("unconfirmed", True):
                 content.append(f"{name}: the page couldn't confirm the choice (unconfirmed)")
         reasons = list(decision.get("review_reasons") or [])
         draft = bool(decision.get("draft"))
