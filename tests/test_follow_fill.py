@@ -352,7 +352,7 @@ def _helps_sent(sent, label):
     return out
 
 
-def test_an_empty_fields_help_text_after_the_upload_is_classified_with_it():
+def test_an_empty_fields_help_text_after_the_upload_never_reaches_a_model():
     import apply
     from _fill_run import PROFILE, classify_by_label, map_from_profile
 
@@ -388,9 +388,10 @@ def test_an_empty_fields_help_text_after_the_upload_is_classified_with_it():
     check(error is None and any("HELP-SENTINEL" in json.dumps(f) for f in rec.get("fields", [])),
           f"page 2's help text was scanned ({error})")
     helps = _helps_sent(sent, "Phone")
-    check(helps and all("HELP-SENTINEL-4471" in h for h in helps),
-          f"empty Phone went to the model with its static help text ({helps})")
-    check(not any("held back" in r for r in reasons), f"and isn't held back for you ({reasons})")
+    check(all("HELP-SENTINEL" not in s for s in sent) and all(h == "" for h in helps),
+          f"empty Phone went to no model with its help text ({helps})")
+    check(reasons and "help text held back in follow mode" in reasons[0],
+          f"  ...and came to you instead ({reasons})")
     check.done()
 
 
@@ -423,7 +424,7 @@ def _spies():
     return sent, classify, map_fields
 
 
-def test_help_text_next_to_a_resume_box_on_a_later_page_goes_over_after_the_upload():
+def test_help_text_next_to_a_resume_box_on_a_later_page_never_reaches_a_model():
     import apply
     from _fill_run import PROFILE
 
@@ -448,11 +449,12 @@ def test_help_text_next_to_a_resume_box_on_a_later_page_goes_over_after_the_uplo
     check(error is None and you.state.get("files") == 1,
           f"the resume was uploaded on page 2 (so the checks below mean something) ({error})")
     helps = _helps_sent(sent, "Phone")
-    check(helps and all("HELP-SENTINEL-5582" in h for h in helps),
-          f"empty Phone, scanned after the upload, went over with its help text ({helps})")
+    check(all("HELP-SENTINEL" not in s for s in sent) and all(h == "" for h in helps),
+          f"page 2's help text reached no model call, before or after the upload ({helps})")
     rec = records[-1] if records else {}
     reasons = [fl.get("reason", "") for fl in rec.get("flags", []) if fl.get("label") == "Phone"]
-    check(not any("held back" in r for r in reasons), f"and isn't held back for you ({reasons})")
+    check(reasons and "help text held back in follow mode" in reasons[0],
+          f"  ...and Phone came to you, with the follow-mode reason ({reasons})")
     check.done()
 
 

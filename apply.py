@@ -471,6 +471,9 @@ LEFT_OUT_REASON = {
 HELD_AFTER_UPLOAD = ("Its help text changed or appeared after the resume upload (help "
                      "text held back after upload), so the classifier couldn't be shown "
                      "it. Answer it yourself.")
+HELD_IN_FOLLOW = ("Follow mode never shows a model help text (help text held back in "
+                  "follow mode), so the classifier couldn't be shown it. Answer it "
+                  "yourself.")
 
 
 def _route(fields: list[dict], categories: dict, prof, new_after_upload: set[str],
@@ -625,17 +628,19 @@ class _FollowRun:
                 fields = extract.enrich_comboboxes(page, fields, contained=True)
             self.uploaded = None            # the baseline across steps isn't tracked yet
         # Only fields read empty, unmarked, untouched by you and not yours,
-        # after the scan, go to a model, with their label, placeholder and
-        # help text (Jack's EXCEPTION in CLAUDE.md). A field holding a value
-        # (yours, prefilled, the resume autofill's), or one you typed in and
-        # cleared, is in no model input: it's never filled, and its own help
-        # can echo it ("'jo@x' is not a valid email"). The gate stops on it
-        # as not answered.
+        # after the scan, go to a model, and never with their help text: a
+        # page can echo what you typed (or the resume autofill) into it
+        # ("'jo@x' is not a valid email"). Each goes with its help blanked,
+        # and one with help text that isn't profile- or human-routed comes
+        # to you. A field holding a value, or one you typed in and cleared,
+        # is in no model input at all, and comes to you on the review sheet.
         open_refs = self.ledger.open_fields(page, fields)
         for_classifier = [f for f in fields if f["ref"] in open_refs]
-        categories = self._classify(for_classifier)
+        categories = self._classify([_for_model(f, False) for f in for_classifier])
+        held = {f["ref"] for f in for_classifier}
         self._note_next_step()
-        plan, flags, for_model = _route(for_classifier, categories, self.prof, set())
+        plan, flags, for_model = _route(for_classifier, categories, self.prof, held,
+                                        held_reason=HELD_IN_FOLLOW)
         # Every field left out that the agent didn't fill comes to you, so
         # the review sheet shows it.
         for f in fields:
@@ -645,7 +650,7 @@ class _FollowRun:
                               "options": f.get("options"), "action": "human",
                               "value": None, "source": "human", "category": "unknown",
                               "reason": LEFT_OUT_REASON[why]})
-        _ask_mapper(for_model, self.prof, self.posting_text, set(), plan)
+        _ask_mapper(for_model, self.prof, self.posting_text, held, plan)
         plan = _fillable_plan(fields, plan)
         prefill = _prefill_census(page)
         plan = self.ledger.fillable(page, fields, plan, step=number)

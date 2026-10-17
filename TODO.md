@@ -411,11 +411,12 @@
         scan, when the page already holds a value (a saved draft, a page
         that opens filled). It's plain text, so the skip list doesn't catch
         it. aria-errormessage isn't read today; aria-describedby is.
-        Follow mode sends a model only the fields it reads empty, unmarked
-        and not yours, just after each scan (booleans from the ledger's
-        state check), with label, placeholder and help text; a field
-        holding any value is in no model input. A normal fill keeps the
-        pre-upload rule (the
+        Follow mode sends a model only the fields it reads empty, unmarked,
+        untouched and not yours, just after each scan, and never with help
+        text (blanked; a field with help text that isn't profile- or
+        human-routed comes to you, "help text held back in follow mode").
+        A field holding any value is in no model input. A normal fill keeps
+        the pre-upload rule (the
         one scan before the upload sends help; after it, unchanged fields
         reuse that classification and the rest go without help). Still
         open, in a normal fill only: the first scan of a page that already
@@ -508,8 +509,11 @@ open once anything submits without Jack.
   against a live Greenhouse page (real react-select picks on click).
 - Follow mode, cross-field echo (accepted by Jack's EXCEPTION in CLAUDE.md
   until auto-submit): a page can copy one field's value (yours, or the
-  resume autofill's) into another, empty, untouched field's label,
-  placeholder or help text, and that field goes to the model with it.
+  resume autofill's) into another, empty, untouched field's label or
+  placeholder, and that field goes to the model with it. (Help text never
+  goes in follow mode since the return to the conservative rule; the
+  exception still allows it, so sending help again needs no new wording,
+  only a clean review of the touch memory.)
   Also accepted: input in the instant before the listener is installed on
   a newly loaded page (an init script runs it before the page's own
   scripts; per-poll install is the backstop). Close before
