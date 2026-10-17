@@ -234,6 +234,11 @@ def cmd_fill(args) -> None:
               f"{DIM}Carrying on; if the API is unreachable, every field comes to you.{OFF}")
 
     with browser_mod.browser() as ctx:
+        if getattr(args, "follow", False) and not args.dry_run:
+            # Before the first page loads: from then on every document has
+            # the activity listener before its own scripts run, so what you
+            # touch is marked even before follow mode starts polling.
+            ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
         page = browser_mod.open_page(ctx, url)
 
         key, ats, detected_by = adapters.detect_with_method(url, page)
@@ -607,8 +612,10 @@ class _FollowRun:
             if not worked:
                 self.events.append({"kind": "upload_failed", "detail": detail})
             browser_mod.settle(page, 2500)
-            fields = extract.enrich_comboboxes(
-                page, extract.extract_fields(page, self.read_guard), contained=True)
+            fields = extract.extract_fields(page, self.read_guard)
+            with self.guard.filling(page):
+                # The agent's own clicks opening each dropdown aren't yours.
+                fields = extract.enrich_comboboxes(page, fields, contained=True)
             self.uploaded = None            # the baseline across steps isn't tracked yet
         # Only fields read empty, unmarked, untouched by you and not yours,
         # after the scan, go to a model, with their label, placeholder and

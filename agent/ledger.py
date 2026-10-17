@@ -38,6 +38,10 @@ MARK_ATTR = "data-ja-filled"
 # into, change or click, so a field you touched never reaches a model, even
 # once you've cleared it.
 TOUCH_ATTR = "data-ja-touched"
+# Put on what gets typed in, pasted into or changed (trusted events only)
+# while the agent is filling: that's you, unless the agent then marks the
+# field as filled (MARK_ATTR). The agent's own text sets are untrusted.
+WHILE_AGENT_ATTR = "data-ja-input-while-agent"
 
 QUIET_MS = 2000
 
@@ -85,7 +89,9 @@ _STATE_JS = ("""
   const norm = t => String(t ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
   const same = !!mark && els.every(e => e.getAttribute('""" + MARK_ATTR + r"""') === mark);
   const marked = els.some(e => e.hasAttribute('""" + MARK_ATTR + r"""'));
-  const touched = els.some(e => e.hasAttribute('""" + TOUCH_ATTR + r"""'));
+  let touched = els.some(e => e.hasAttribute('""" + TOUCH_ATTR + r"""')
+      || (e.hasAttribute('""" + WHILE_AGENT_ATTR + r"""')
+          && !e.hasAttribute('""" + MARK_ATTR + r"""')));
   const el = els[0];
   let empty, mine = false;
   if (kind === 'radio' || kind === 'buttons') {
@@ -113,6 +119,10 @@ _STATE_JS = ("""
         '[data-automation-id="selectedItem"]')]
         .map(d => d.innerText).filter(t => norm(t)) : [];
     const own = ('value' in el && el.tagName !== 'BUTTON') ? el.value : '';
+    // You may pick a row with the mouse and clear it with the X: neither
+    // touches the input, both touch its control.
+    if (control && (control.hasAttribute('""" + TOUCH_ATTR + r"""')
+        || control.querySelector('[""" + TOUCH_ATTR + r"""]'))) touched = true;
     empty = !shown.length && !norm(own);
     mine = agentValue !== null && (shown.length ? shown.some(t => norm(t) === norm(agentValue))
                                                  : norm(own) === norm(agentValue));
@@ -167,6 +177,7 @@ class FieldLedger:
         self.entries: dict[tuple, dict] = {}
         self._marks = (f"m{n}" for n in itertools.count(1))
         self._anon_steps: set = set()               # steps where an untracked field was filled
+        self._touched_kinds: set = set()            # (type, tag) of untracked fields you touched
 
     @staticmethod
     def _keys(fields: list[dict]) -> dict[str, tuple | None]:
@@ -204,7 +215,8 @@ class FieldLedger:
         identity) seen with a value, touched by you, or found cleared after
         the agent filled it becomes yours for the run. An untracked one is
         left out while it shows a value or carries a touch mark; once both
-        are gone (a re-render), it can be open again.
+        are gone (a re-render), so once one is seen touched, every
+        untracked field of the same kind and tag stays out for the run.
         """
         keys = self._keys(fields)
         out: set[str] = set()
@@ -218,9 +230,14 @@ class FieldLedger:
             st = self.state(page, f, mark=(entry or {}).get("mark"))
             if not st.get("present") or st.get("secret"):
                 continue
+            kind = (f.get("type"), f.get("tag") or "")
+            if key is None and kind in self._touched_kinds:
+                continue
             if st.get("touched"):
                 if key is not None:
                     self.entries[key] = {"owner": "jack"}
+                else:
+                    self._touched_kinds.add(kind)
                 continue
             if not st["empty"]:
                 if key is not None and entry is None:
@@ -348,31 +365,50 @@ class FieldLedger:
                 entry["owner"] = "jack"
 
 
-# Notices your input. Installed once per page; the agent's own keystrokes
-# and clicks happen while `agent` is set, so they don't count as yours.
-# It also marks what you touched (TOUCH_ATTR): the event's target, the
-# scanned field around it and a label's own control.
+# Notices your input. In follow mode it is on every new document before the
+# page's scripts run (an init script) and installed again on every poll; the
+# agent's own keystrokes and clicks happen while `agent` is set, so they
+# don't count as yours. It also marks what you touched (TOUCH_ATTR): the
+# event's target, the scanned field around it, a label's own control, a
+# dropdown's control container, and the focused element (a dropdown keeps
+# the focus while you pick a row with the mouse). While the agent fills,
+# what's typed in, pasted into or changed still gets WHILE_AGENT_ATTR.
 _ACTIVITY_JS = r"""
 () => {
   if (window.__jaAct) return;
   // Starts as "just now": input before this was installed can't be seen,
   // so a fresh page always waits the full quiet period.
   window.__jaAct = {last: performance.now(), agent: false};
-  const touch = el => { if (el instanceof Element) el.setAttribute('""" + TOUCH_ATTR + r"""', ''); };
+  const put = (el, attr) => { if (el instanceof Element) el.setAttribute(attr, ''); };
+  const REF = '[""" + extract.REF_ATTR + r"""]';
   for (const t of ['keydown', 'input', 'pointerdown', 'mousedown', 'change', 'paste'])
     document.addEventListener(t, e => {
-      if (!e.isTrusted || window.__jaAct.agent) return;
-      window.__jaAct.last = performance.now();
+      if (!e.isTrusted) return;
       const path = e.composedPath ? e.composedPath() : [];
-      for (const el of [e.target, path[0]]) {
-        if (!(el instanceof Element)) continue;
-        touch(el);
-        touch(el.closest('[""" + extract.REF_ATTR + r"""]'));
-        if (el instanceof HTMLLabelElement) touch(el.control);
+      const targets = [e.target, path[0]].filter(el => el instanceof Element);
+      if (window.__jaAct.agent) {
+        if (['input', 'paste', 'change'].includes(t))
+          for (const el of targets) {
+            put(el, '""" + WHILE_AGENT_ATTR + r"""');
+            put(el.closest(REF), '""" + WHILE_AGENT_ATTR + r"""');
+          }
+        return;
+      }
+      window.__jaAct.last = performance.now();
+      const T = '""" + TOUCH_ATTR + r"""';
+      const focused = document.activeElement;
+      for (const el of [...targets, focused]) {
+        if (!(el instanceof Element) || el === document.body) continue;
+        put(el, T);
+        put(el.closest(REF), T);
+        put(el.closest('[class*="control"], [role=combobox]'), T);
+        if (el instanceof HTMLLabelElement) put(el.control, T);
       }
     }, true);
 }
 """
+# The same listener as an init script, for every new document.
+ACTIVITY_INIT_SCRIPT = "(" + _ACTIVITY_JS.strip() + ")();"
 _QUIET_JS = "() => window.__jaAct ? performance.now() - window.__jaAct.last : 0"
 _AGENT_JS = "(on) => { if (window.__jaAct) window.__jaAct.agent = on; }"
 

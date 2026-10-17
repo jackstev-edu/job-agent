@@ -513,8 +513,18 @@ open once anything submits without Jack.
   auto-submit (for instance, send no help for any field on a page where
   any field holds a value).
 - Follow mode, touch marks: the mark sits on the element. A tracked field
-  you touched is yours for the run; an untracked one (no unique identity)
-  that the page re-renders loses its mark and can be open again.
+  you touched is yours for the run; once an untracked one is seen touched,
+  every untracked field of that kind and tag stays out of model input for
+  the run. Untracked fields re-rendered before any scan saw the mark are
+  still open. The control-container mark can make every dropdown inside a
+  Bootstrap "controls" wrapper yours once you touch any field in it, and a
+  dropdown the agent typed into and then abandoned becomes yours (both
+  refusals only).
+- Follow mode, combobox "empty": `choices__item` also matches a Choices.js
+  placeholder, `chosen-single` is always there in Chosen, and the chip /
+  tag selectors can match a chip-list wrapper with placeholder text: those
+  empty dropdowns read as holding a value and are never filled (refusals
+  only; narrowing them needs Jack's approval).
 - Follow mode, combobox "empty": the chip / selected-item displays are
   looked for only inside the control container (`[class*="control"]` or
   an enclosing role=combobox). A Workday selectedItem outside it, or a

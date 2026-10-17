@@ -524,6 +524,56 @@ def test_a_field_you_typed_in_and_cleared_never_reaches_a_model():
     check.done()
 
 
+# Page 2 names its fields apart from page 1's, so a model call can be told apart.
+ECHO2 = (ECHO.replace('for="em">Email', 'for="em">Work email')
+         .replace('for="ci">City', 'for="ci">Town'))
+START_THEN_ECHO = {"/start2": SINGLE, "/echo2": ECHO2}
+
+
+def test_a_field_you_touch_on_a_new_page_before_the_next_poll_never_reaches_a_model():
+    import apply
+    from _fill_run import PROFILE, run_fill
+
+    check = Checks()
+    sent, classify, map_fields = _spies()
+
+    def serve(route):
+        path = "/" + route.request.url.split("/", 3)[3].split("?")[0]
+        route.fulfill(content_type="text/html", body=START_THEN_ECHO.get(path, SINGLE))
+
+    def act(page, state):
+        if not state.get("moved") and page.input_value("#fn"):
+            page.goto(f"{HOST}/echo2")                 # you, to the next page...
+            page.type("#em", "jo@x")                   # ...typing at once, before any poll
+            page.fill("#em", "")
+            state["moved"] = True
+            return False
+        if state.get("moved"):
+            state["n"] = state.get("n", 0) + 1
+            return state["n"] > 25
+        return False
+    pages = []
+    real_open = apply.browser_mod.open_page
+
+    def open_page(ctx, u):
+        page = real_open(ctx, u)
+        pages.append(page)
+        return page
+    you = _You(pages, act)
+    text, records, error = run_fill(
+        None, dry_run=False, follow=True, url=f"{HOST}/start2", routes={f"{HOST}/**": serve},
+        profile_yaml=PROFILE,
+        patches=(*_speed(apply), (apply.browser_mod, "open_page", open_page),
+                 (apply, "_EnterWatcher", you),
+                 (apply.classify, "classify_fields", classify),
+                 (apply.mapper, "map_fields", map_fields)))
+    check(error is None and you.state.get("moved") and _helps_sent(sent, "Town"),
+          f"page 2 was scanned and its Town went to the model (so the next check means something) ({error})")
+    check(not _helps_sent(sent, "Work email") and all("ECHO-SENTINEL" not in s for s in sent),
+          "the field you touched before any poll is in no model input")
+    check.done()
+
+
 def test_a_rescan_of_page_one_after_a_failed_fill_keeps_your_answer_from_the_model():
     import apply
 

@@ -110,6 +110,81 @@ def test_open_fields_leaves_out_what_you_cleared_and_what_you_touched():
     check.done()
 
 
+def _quiet_guard(page):
+    guard = ledger.ActivityGuard(echo=lambda *a: None)
+    guard.install(page)
+    return guard
+
+
+def test_what_you_type_while_the_agent_fills_is_still_yours():
+    check = Checks()
+    with mock_page(_write("ledger_while_agent.html", FORM)) as page:
+        led = ledger.FieldLedger()
+        guard = _quiet_guard(page)
+        with guard.filling(page):
+            page.type("#ci", "Shelbyville")             # you, during the agent's fill
+            page.fill("#ci", "")
+        fields, by = _scan(page)
+        check(by["City"]["ref"] not in led.open_fields(page, fields),
+              "typed in and cleared during a fill: not open")
+    check.done()
+
+
+PICKER = """<!doctype html><html><body><form>
+  <label for="co">Country</label>
+  <div class="co-control"><span id="disp"></span>
+    <input id="co" name="country" role="combobox" aria-autocomplete="list">
+    <button type="button" class="clear" style="width:20px;height:20px">x</button></div>
+  <ul class="menu"><li class="opt" style="height:20px">Canada</li></ul>
+</form><script>
+  document.querySelector('.opt').addEventListener('mousedown', e => {
+    e.preventDefault();
+    document.getElementById('disp').innerHTML = '<span class="co-single-value">Canada</span>'; });
+  document.querySelector('.clear').addEventListener('mousedown', e => {
+    e.preventDefault(); document.getElementById('disp').innerHTML = ''; });
+</script></body></html>"""
+
+
+def test_a_dropdown_you_picked_with_the_mouse_and_cleared_is_yours():
+    check = Checks()
+    with mock_page(_write("ledger_picker.html", PICKER)) as page:
+        led = ledger.FieldLedger()
+        _quiet_guard(page)
+        page.click(".opt")                              # you pick a row...
+        page.click(".clear")                            # ...and clear it with the X
+        fields, by = _scan(page)
+        check(by["Country"]["ref"] not in led.open_fields(page, fields),
+              "picked by mouse and cleared: not open (its control was touched)")
+    check.done()
+
+
+UNTRACKED_PAIR = """<!doctype html><html><body><form>
+  <div id="w"><input id="a" placeholder="Employer"></div>
+  <input id="b" placeholder="Employer">
+</form><script>
+  window.rerender = () => {
+    document.getElementById('w').innerHTML = '<input id="a" placeholder="Employer">'; };
+</script></body></html>"""
+
+
+def test_an_untracked_field_you_touched_stays_out_after_a_rerender():
+    check = Checks()
+    with mock_page(_write("ledger_untracked_touch.html", UNTRACKED_PAIR)) as page:
+        led = ledger.FieldLedger()
+        _quiet_guard(page)
+        page.type("#a", "Acme")                         # you type...
+        page.fill("#a", "")                             # ...and clear it
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        check(all(ledger.field_identity(f) is None for f in fields),
+              "both boxes are untracked (so the checks below mean something)")
+        check(led.open_fields(page, fields) == set(), "seen touched: nothing of that kind is open")
+        page.evaluate("window.rerender()")              # the mark goes with the element
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        check(led.open_fields(page, fields) == set(),
+              "  ...and still nothing after the page re-renders the box")
+    check.done()
+
+
 def test_a_value_you_change_is_yours_for_good():
     check = Checks()
     with mock_page(_write("ledger_change.html", FORM)) as page:
