@@ -22,9 +22,6 @@ if TYPE_CHECKING:
     from playwright.sync_api import Page
 
 from . import extract, matching, sensitive
-
-# A box that holds a phone number, whatever its input type says.
-_PHONE = re.compile(r"\b(phone|mobile|cell|tel)\b", re.I)
 from .extract import REF_ATTR
 
 # Buttons this tool will never click, whatever it's asked. Matched against
@@ -83,18 +80,13 @@ def _element(page: "Page", ref: str):
 # page, as every reader refuses. What the box holds afterwards is then
 # compared in the page, and only a word comes back:
 #   "exact"  the box holds what was written;
-#   "same"   a mask or formatter reshaped it, and it still says the same:
-#            the same digits for a phone box of at least seven, after
-#            dropping a country code that the text itself writes as a
-#            leading "+" and 1-3 digits, and only where the two texts don't
-#            write different codes (so "+1 555 ..." and "(555) ..." are the
-#            same number, while "+44 ..." and "+1 ..." are not, nor is
-#            "+1 555 ... ext 77" against a box holding other digits);
-#            or the same text once whitespace is collapsed;
-#   "other"  the box holds something else (a mask that cut it short);
+#   "same"   the same text once whitespace is collapsed;
+#   "other"  anything else the box holds: a reformatted number, a mask, a
+#            rewritten value. There is no digits-only or phone-specific
+#            comparison, so the page never chooses which check runs;
 #   "empty"  the box took nothing.
 _SET_VALUE_JS = ("""
-(el, [v, phone]) => {
+(el, v) => {
 """ + extract._SECRET_JS + r"""
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return 'no';
   if (isSecret(el, '')) return 'no';
@@ -110,20 +102,6 @@ _SET_VALUE_JS = ("""
   if (got === v) return 'exact';
   const ws = t => String(t ?? '').replace(/\s+/g, ' ').trim();
   if (!ws(got)) return 'empty';
-  const digits = t => String(t ?? '').replace(/\D/g, '');
-  // A phone box, holding something long enough to be a phone number: its
-  // digits decide. A country code counts only where the text writes one (a
-  // leading "+" and 1-3 digits ending at a non-digit), and two texts that
-  // write different codes are different numbers. Anything shorter, and
-  // every other box, is compared as text, so a digit or two can't confirm
-  // itself.
-  if ((phone || (el.type || '').toLowerCase() === 'tel') && digits(v).length >= 7) {
-    const code = t => (/^\+(\d{1,3})(?!\d)/.exec(ws(t)) || [])[1] || '';
-    const bare = t => digits(t).slice(code(t).length);
-    if (digits(got) === digits(v)) return 'same';
-    const sameCode = !code(got) || !code(v) || code(got) === code(v);
-    return bare(got) && bare(got) === bare(v) && sameCode ? 'same' : 'other';
-  }
   return ws(got) === ws(v) ? 'same' : 'other';
 }
 """)
@@ -210,9 +188,7 @@ def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple
         if element.evaluate(extract._SUBMITS_JS):
             return False, "refused — this box could submit the form; it's yours"
         if contained:
-            phone = (field_type or "").lower() == "tel" or bool(_PHONE.search(
-                f"{field.get('label') or ''} {field.get('name') or ''}"))
-            got = element.evaluate(_SET_VALUE_JS, [text, phone])
+            got = element.evaluate(_SET_VALUE_JS, text)
             if got == "exact":
                 return True, "set"
             if got == "same":
@@ -442,7 +418,7 @@ def _abandon_combobox(page: "Page", element, contained: bool = False) -> None:
     """Leave no half-typed text behind in a box we couldn't answer."""
     try:
         if contained:
-            element.evaluate(_SET_VALUE_JS, ["", False])   # on the element: no keystrokes
+            element.evaluate(_SET_VALUE_JS, "")      # on the element: no keystrokes
         else:
             element.fill("", timeout=2000)
     except Exception:

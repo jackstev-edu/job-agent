@@ -139,41 +139,6 @@ def _set(page, label, value):
     return filler.fill_one(page, f, value, contained=True)
 
 
-def test_a_box_that_reformats_what_it_was_given_still_counts_as_filled():
-    check = Checks()
-    with mock_page(_write("contained_phone.html", PHONE)) as page:
-        ok, detail = _set(page, "Phone", "+1 555 824 9000")
-        value = page.input_value("#ph")
-    check(ok and "unconfirmed" not in detail and value == "(555) 824-9000",
-          f"a phone box reformatting the same digits: done ({detail}, {value})")
-
-    with mock_page(_write("contained_squeeze.html", SQUEEZED)) as page:
-        ok, detail = _set(page, "Full name", "Test  Person")
-        value = page.input_value("#na")
-    check(ok and "unconfirmed" not in detail and value == "Test Person",
-          f"a box collapsing the spaces: done ({detail}, {value})")
-    check.done()
-
-
-def test_a_box_showing_something_else_is_kept_and_marked_unconfirmed():
-    check = Checks()
-    with mock_page(_write("contained_clipped.html", CLIPPED)) as page:
-        ok, detail = _set(page, "City", "Springfield")
-        value = page.input_value("#ci")
-    check(ok and filler.UNCONFIRMED in detail and value == "Spri",
-          f"kept, and marked unconfirmed rather than failed ({detail}, {value})")
-
-    for what, number in (("as written", "555 824 9000 ext 77"),
-                         ("with a country code", "+1 555 824 9000 ext 77")):
-        with mock_page(_write("contained_phone_wrong.html", PHONE)) as page:
-            # The same box, given a number it reformats into other digits.
-            ok, detail = _set(page, "Phone", number)
-            value = page.input_value("#ph")
-        check(ok and filler.UNCONFIRMED in detail,
-              f"a phone box left holding other digits, {what}: unconfirmed ({detail}, {value})")
-    check.done()
-
-
 # A box that keeps the national digits and stamps its own dialling code on.
 RECODED = """<!doctype html><html><body><form>
   <label for="ph">Phone</label><input id="ph" name="phone" type="tel">
@@ -183,29 +148,42 @@ RECODED = """<!doctype html><html><body><form>
     if (d.length === 10) e.target.value = '+91 ' + d; });
 </script></body></html>"""
 
-SHORT = """<!doctype html><html><body><form>
-  <label for="ex">Phone extension</label><input id="ex" name="phone_ext">
-</form><script>
-  document.getElementById('ex').addEventListener('input', e => {
-    e.target.value = '1' + e.target.value.replace(/\\D/g, ''); });
-</script></body></html>"""
+PLAIN_BOX = """<!doctype html><html><body><form>
+  <label for="ci">City</label><input id="ci" name="city">
+</form></body></html>"""
 
 
-def test_a_phone_box_showing_a_different_country_code_is_unconfirmed():
+def test_only_the_same_text_counts_as_filled():
     check = Checks()
-    with mock_page(_write("contained_recoded.html", RECODED)) as page:
-        ok, detail = _set(page, "Phone", "+1 555 824 9000")
-        value = page.input_value("#ph")
-    check(ok and filler.UNCONFIRMED in detail,
-          f"the box stamped another dialling code on it: unconfirmed ({detail}, {value})")
+    with mock_page(_write("contained_squeeze.html", SQUEEZED)) as page:
+        ok, detail = _set(page, "Full name", "Test  Person")
+        value = page.input_value("#na")
+    check(ok and filler.UNCONFIRMED not in detail and value == "Test Person",
+          f"a box collapsing the spaces says the same thing: done ({detail}, {value})")
 
-    with mock_page(_write("contained_short.html", SHORT)) as page:
-        # Too few digits to be a phone number: compared as text, so the
-        # box adding a digit isn't "the same number".
-        ok, detail = _set(page, "Phone extension", "4021")
-        value = page.input_value("#ex")
-    check(ok and filler.UNCONFIRMED in detail,
-          f"a short answer doesn't confirm itself on digits ({detail}, {value})")
+    with mock_page(_write("contained_plain.html", PLAIN_BOX)) as page:
+        ok, detail = _set(page, "City", "Springfield")
+        value = page.input_value("#ci")
+    check(ok and detail == "set" and value == "Springfield",
+          f"a box that takes it as written: done ({detail}, {value})")
+    check.done()
+
+
+def test_a_box_that_reformats_the_answer_is_kept_and_unconfirmed():
+    check = Checks()
+    cases = {
+        "a phone box reformatting the same digits": (PHONE, "Phone", "#ph",
+                                                     "+1 555 824 9000", "(555) 824-9000"),
+        "a box stamping its own dialling code on": (RECODED, "Phone", "#ph",
+                                                    "555 824 9000", "+91 5558249000"),
+        "a box that cut it short": (CLIPPED, "City", "#ci", "Springfield", "Spri"),
+    }
+    for what, (html, label, sel, answer, shows) in cases.items():
+        with mock_page(_write("contained_reformat.html", html)) as page:
+            ok, detail = _set(page, label, answer)
+            value = page.input_value(sel)
+        check(ok and filler.UNCONFIRMED in detail and value == shows,
+              f"{what}: kept, unconfirmed, never done ({detail}, {value})")
     check.done()
 
 

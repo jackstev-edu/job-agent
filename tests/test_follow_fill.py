@@ -874,6 +874,53 @@ def test_a_field_left_out_of_model_input_is_flagged_for_you():
     check.done()
 
 
+REFORMATS = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+  <form><label for="fn">First Name</label><input id="fn" name="first_name">
+    <label for="ph">Phone</label><input id="ph" name="phone" type="tel"></form>
+<script>
+  document.getElementById('ph').addEventListener('input', e => {{
+    const d = e.target.value.replace(/\\D/g, '').slice(-10);
+    if (d.length === 10) e.target.value = '(' + d.slice(0,3) + ') ' + d.slice(3,6) + '-' + d.slice(6);
+  }});
+</script>{CLICKS_JS}</body></html>"""
+
+
+def test_an_answer_the_page_reformats_is_unconfirmed_and_stops_the_gate():
+    import apply
+    from _fill_run import map_from_profile
+    from agent import mapper
+
+    check = Checks()
+
+    def map_fields(fields, profile, page_text=""):
+        out = map_from_profile(fields, profile, page_text)
+        for f in fields:
+            if (f.get("label") or "").startswith("Phone"):
+                out[f["ref"]] = mapper._double_check(
+                    {"ref": f["ref"], "value": "+1 555 824 9000", "confidence": "high",
+                     "needs_review": False, "source": "model"}, f)
+        return out
+
+    def act(page, state):
+        state["phone"] = page.input_value("#ph")
+        state["n"] = state.get("n", 0) + (state["phone"] != "")
+        return state["n"] > 3
+    text, records, error, you = _follow(
+        REFORMATS, act, path="/reformats",
+        patches=((apply.mapper, "map_fields", map_fields),))
+    check(error is None and you.state.get("phone") == "(555) 824-9000",
+          f"the page reformatted what the agent set ({you.state.get('phone')!r}, {error})")
+    verdict, reasons = _gate(f"{HOST}/reformats")
+    check(verdict == "would_stop" and any("unconfirmed" in r for r in reasons),
+          f"it is unconfirmed, and the gate stops on it ({reasons})")
+    sheet = [l for l in text.splitlines() if "Review sheet:" in l]
+    html = Path(sheet[0].split("Review sheet:")[1].strip()).read_text(encoding="utf-8")
+    check("show this answer back" in html
+          and "Phone" in html.partition("Filled from your profile")[0],
+          "  ...and the sheet lists it to check, above the filled ones")
+    check.done()
+
+
 def test_a_normal_fill_still_classifies_every_field_with_its_help():
     import apply
     from _fill_run import run_fill

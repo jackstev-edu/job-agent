@@ -456,11 +456,6 @@
 
 ## MUST FIX BEFORE AUTO-SUBMIT
 
-- The page's own label or name picks which value check runs: a box whose
-  label says phone (or type=tel) has what it holds compared on digits,
-  which passes where the exact text comparison would fail. A page can
-  therefore choose the looser check for a box. Before auto-submit: the
-  digits comparison only for type=tel, and keep the digit-count floor.
 - The dropdown display check compares whole words by Unicode letters and
   numbers; a script with no letter or number marks (and look-alike
   characters generally) still falls under the Unicode parity item below.
