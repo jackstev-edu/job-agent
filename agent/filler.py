@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 from . import extract, matching, sensitive
 
 # A box that holds a phone number, whatever its input type says.
-_PHONE = re.compile(r"phone|mobile|cell\b|tel\b", re.I)
+_PHONE = re.compile(r"\b(phone|mobile|cell|tel)\b", re.I)
 from .extract import REF_ATTR
 
 # Buttons this tool will never click, whatever it's asked. Matched against
@@ -84,9 +84,11 @@ def _element(page: "Page", ref: str):
 # compared in the page, and only a word comes back:
 #   "exact"  the box holds what was written;
 #   "same"   a mask or formatter reshaped it, and it still says the same:
-#            the same digits for a phone box (a country code dropped or
-#            added after a "+" allowed), or the same text once whitespace
-#            is collapsed;
+#            the same digits for a phone box, after dropping a country code
+#            that the text itself writes as a leading "+" and 1-3 digits
+#            (so "+1 555 ..." and "(555) ..." are the same number, while
+#            "+1 555 ... ext 77" and a box holding other digits are not);
+#            or the same text once whitespace is collapsed;
 #   "other"  the box holds something else (a mask that cut it short);
 #   "empty"  the box took nothing.
 _SET_VALUE_JS = ("""
@@ -108,14 +110,15 @@ _SET_VALUE_JS = ("""
   if (!ws(got)) return 'empty';
   if (phone || (el.type || '').toLowerCase() === 'tel') {
     const digits = t => String(t ?? '').replace(/\D/g, '');
-    const a = digits(got), b = digits(v);
-    if (a && a === b) return 'same';
-    // One of them carries a country code the other doesn't: the longer
-    // must be written with a leading "+", and end with all of the shorter.
-    const [long, short, longText] = a.length > b.length ? [a, b, got] : [b, a, v];
-    if (short.length >= 7 && long.endsWith(short) && long.length - short.length <= 3
-        && ws(longText).startsWith('+')) return 'same';
-    return 'other';
+    // A country code counts only where the text writes one: a leading "+"
+    // and 1-3 digits ending at a non-digit. Everything else is compared
+    // digit for digit, so a box left holding a different number is "other".
+    const bare = t => {
+      const s = ws(t), m = /^\+(\d{1,3})(?!\d)/.exec(s);
+      return m ? digits(s).slice(m[1].length) : digits(s);
+    };
+    if (digits(got) && digits(got) === digits(v)) return 'same';
+    return bare(got) && bare(got) === bare(v) ? 'same' : 'other';
   }
   return ws(got) === ws(v) ? 'same' : 'other';
 }
@@ -270,9 +273,16 @@ _SHOWS_CHOICE_JS = ("""
   if (isSecret(el, '')) return 'missing';
   const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
   const same = t => norm(t) === norm(choice);
+  // One of them holds the other, on word boundaries: "+1" inside "United
+  // States +1" counts, "No" inside "None of the above" or "Norway" doesn't.
   const near = t => {
     const a = norm(t).toLowerCase(), b = norm(choice).toLowerCase();
-    return !!a && !!b && (a.includes(b) || b.includes(a));
+    if (!a || !b) return false;
+    const [long, short] = a.length >= b.length ? [a, b] : [b, a];
+    const i = long.indexOf(short);
+    if (i < 0) return false;
+    const edge = c => c === undefined || /[^a-z0-9]/.test(c);
+    return edge(long[i - 1]) && edge(long[i + short.length]);
   };
   // The control container first, as the snapshot finds it; an enclosing
   // role=combobox only as a fallback, and never the element itself.

@@ -1094,7 +1094,10 @@ def _print_summary(rows, flags) -> None:
             mark = f"{DIM}for you{OFF}"
         else:
             mark = f"{RED}failed{OFF}"
-        print(f"  {mark} {str(row['label'])[:52]:<54} {DIM}{str(row['value'])[:45]}{OFF}")
+        # A missing answer prints as nothing, never as the word "None",
+        # which reads like one.
+        shown = "" if row.get("value") is None else str(row["value"])[:45]
+        print(f"  {mark} {str(row['label'])[:52]:<54} {DIM}{shown}{OFF}")
         if not row["filled"] and row["detail"] != "skipped — no value":
             print(f"         {RED}{row['detail']}{OFF}")
     _print_flags(flags)

@@ -114,9 +114,13 @@ def build(*, url: str, ats_name: str, report_rows: list[dict],
     config.ensure_dirs()
     e = html.escape
 
-    attention = [r for r in report_rows if r["filled"] and r["needs_review"]]
+    # An unconfirmed fill is in the form but the page never showed it back,
+    # so it belongs with the ones you must read, never among the clean.
+    attention = [r for r in report_rows
+                 if r["filled"] and (r["needs_review"] or r.get("unconfirmed"))]
     failed = [r for r in report_rows if not r["filled"] and r.get("value") is not None]
-    clean = [r for r in report_rows if r["filled"] and not r["needs_review"]]
+    clean = [r for r in report_rows
+             if r["filled"] and not r["needs_review"] and not r.get("unconfirmed")]
     skipped = [r for r in report_rows if not r["filled"] and r.get("value") is None]
 
     # --- the checklist: everything you must personally handle ---------------
@@ -125,8 +129,12 @@ def build(*, url: str, ats_name: str, report_rows: list[dict],
         items.append((flag.get("label") or "(unlabelled question)",
                       flag.get("reason") or ""))
     for row in attention:
-        items.append((row["label"],
-                      row.get("note") or "Drafted by AI — read it before you send it."))
+        if row.get("unconfirmed"):
+            items.append((row["label"], f"The page didn't show this answer back "
+                                        f"({row.get('detail', '')}). Check it."))
+        else:
+            items.append((row["label"],
+                          row.get("note") or "Drafted by AI — read it before you send it."))
     for row in failed:
         items.append((row["label"],
                       f"Could not be filled: {row.get('detail','')}. Enter it by hand."))

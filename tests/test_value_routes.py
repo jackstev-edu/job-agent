@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 
 from _harness import TEST_HOME, Checks, mock_page, run_as_script
-from agent import adapters, extract, tracker
+from agent import adapters, extract, report, tracker
 
 SENTINEL = "VALUE-ROUTE-SENTINEL-6604"
 
@@ -142,6 +142,28 @@ DISPLAY_FORM = f"""<!doctype html><html><body><form>
 </form></body></html>"""
 
 
+def test_an_unconfirmed_fill_is_something_to_check_not_a_clean_row():
+    check = Checks()
+    rows = [{"label": "Country code", "value": "United States +1", "filled": True,
+             "needs_review": False, "unconfirmed": True, "source": "profile",
+             "detail": "selected 'United States +1' — unconfirmed", "confidence": "high",
+             "note": "", "required": True},
+            {"label": "First Name", "value": "Test", "filled": True, "needs_review": False,
+             "unconfirmed": False, "source": "profile", "detail": "typed",
+             "confidence": "high", "note": "", "required": True}]
+    sheet = report.build(url="https://example.invalid/job", ats_name="Mock", report_rows=rows,
+                         flags=[], company="Example Co", role="Engineer")
+    html = sheet.read_text(encoding="utf-8")
+    before, _, after = html.partition("Filled from your profile")
+    check("Country code" in before and "Country code" not in after,
+          "the unconfirmed row is above the clean ones, not among them")
+    check("show this answer back" in html,
+          "  ...and it's on the checklist, saying the page never showed it back")
+    check("Nothing needs your attention" not in html,
+          "  ...so the sheet doesn't say nothing needs you")
+    check.done()
+
+
 def test_a_question_with_no_answer_reads_as_left_for_you_not_failed():
     from _fill_run import run_fill
 
@@ -155,6 +177,12 @@ def test_a_question_with_no_answer_reads_as_left_for_you_not_failed():
     lines = [l for l in text.splitlines() if "Nickname" in l]
     check(error is None and lines and "for you" in lines[0] and "failed" not in lines[0],
           f"the mapper found no nickname: left for you, not failed ({lines})")
+    check(lines and "None" not in lines[0],
+          f"  ...and no answer prints as nothing, not as the word 'None' ({lines[0]!r})")
+    sheet = [l for l in text.splitlines() if "Review sheet:" in l]
+    html = Path(sheet[0].split("Review sheet:")[1].strip()).read_text(encoding="utf-8")
+    check("Left for you" in html and "Left blank" not in html,
+          "the review sheet calls that section 'Left for you'")
     check.done()
 
 

@@ -195,6 +195,21 @@ def test_a_display_holding_part_of_the_choice_is_unconfirmed_and_the_gate_stops(
     check.done()
 
 
+def test_a_display_showing_a_different_option_is_still_abandoned():
+    check = Checks()
+    # Picking "No" on a widget whose display then reads "None of the above":
+    # the short word is inside the long one, but not as a word of its own.
+    html = PART_DISPLAY.replace("United States +1", "No").replace("Canada +1", "Yes") \
+                       .replace("Country code", "Sponsorship") \
+                       .replace("o.textContent.replace(/^.* /, '')", "'None of the above'")
+    with mock_page(_write("other_display.html", html)) as page:
+        ok, detail = _pick(page, "Sponsorship", "No")
+        value = page.input_value("#co")
+    check(not ok and "didn't keep" in detail and value == "",
+          f"'None of the above' doesn't confirm 'No': abandoned ({detail}, {value!r})")
+    check.done()
+
+
 def filler_decision(field):
     from agent import mapper
     return mapper._double_check({"ref": field["ref"], "value": "Canada", "confidence": "high",

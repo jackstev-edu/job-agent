@@ -7,9 +7,12 @@ at the next keystroke, leaves the dropdown empty, and the other box gets
 nothing. A text box is set on the element itself, with no keystrokes, even
 when the focus jumps away the moment it arrives. A dropdown that won't
 take the focus is skipped. And without containment (every non-follow fill)
-filling is exactly what it was: typed, key by key.
+filling is exactly what it was: typed, key by key. Also what a set counts
+as: a box that reformats the same answer is filled, and one left showing
+something else is kept but marked unconfirmed, never reported as done.
 WHY IT MATTERS: In follow mode you may be typing in the same page. A stray
-keystroke from the agent could change one of your answers.
+keystroke from the agent could change one of your answers. And an answer
+the page reshaped past recognition must never be reported as filled.
 
 Run from anywhere:  .venv/Scripts/python.exe tests/test_containment.py
 """
@@ -160,12 +163,14 @@ def test_a_box_showing_something_else_is_kept_and_marked_unconfirmed():
     check(ok and filler.UNCONFIRMED in detail and value == "Spri",
           f"kept, and marked unconfirmed rather than failed ({detail}, {value})")
 
-    with mock_page(_write("contained_phone_wrong.html", PHONE)) as page:
-        # The same box, given a number it reformats into different digits.
-        ok, detail = _set(page, "Phone", "555 824 9000 ext 77")
-        value = page.input_value("#ph")
-    check(ok and filler.UNCONFIRMED in detail,
-          f"a phone box left holding other digits: unconfirmed ({detail}, {value})")
+    for what, number in (("as written", "555 824 9000 ext 77"),
+                         ("with a country code", "+1 555 824 9000 ext 77")):
+        with mock_page(_write("contained_phone_wrong.html", PHONE)) as page:
+            # The same box, given a number it reformats into other digits.
+            ok, detail = _set(page, "Phone", number)
+            value = page.input_value("#ph")
+        check(ok and filler.UNCONFIRMED in detail,
+              f"a phone box left holding other digits, {what}: unconfirmed ({detail}, {value})")
     check.done()
 
 
