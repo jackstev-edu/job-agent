@@ -14,18 +14,27 @@ may be clicked, anything else pauses. Waiting for Jack's go before item 1.
    `/google-login`. Every POST needs the per-session token (random, in the
    page, `X-Token` header); every request's Host must be `127.0.0.1:<port>`
    or `localhost:<port>`; an Origin that isn't the page's own is refused; no
-   CORS headers. State is one in-memory object behind a lock: per job the
-   company, role, portal, status, reason, and for a gate stop each field's
-   label, reason and, for non-legal agent-filled fields only, the proposed
-   value with an approve flag. Legal / EEO / pay / password fields are never
-   sent to the page. Approvals and codes live in that object only.
+   CORS headers; the page is served with a CSP (`default-src 'none';
+   script-src 'nonce-…'; connect-src 'self'`) and every string from
+   `/state` lands in the page as a text node (a label holding `<script>` or
+   `<img onerror>` is inert; tested). State is one in-memory object behind a
+   lock: per job the company, role, portal, status, reason, and for a gate
+   stop each field's label, reason and, only for a field the gate's own
+   sensitive predicate does not flag (category, PROFILE_PATHS line, legal
+   kind, LEGAL_GUARD, raw flags) and that the agent filled, the proposed
+   value with an approve flag. A field either layer flagged, and every
+   password box, is never sent to the page (tested with a field the
+   classifier called free_text and LEGAL_GUARD caught). Approvals and codes
+   live in that object only.
 2. **Non-blocking pauses** — `pause.Pauser.wait` gains a GUI mode that
    records the pause and raises `pause.Deferred`; `wizard.Wizard` catches
    it, keeps its place (page, step, the page's fill and gate result, the
    pause kind) and returns `waiting`. `apply.py gui` runs the queue on the
    main thread (Playwright's), one tab per job, and calls `resume(job)` when
-   Jack presses Continue: the page is re-read, approvals count as reviewed
-   (recorded like a touch), a code is typed into the one-time-code box, the
+   Jack presses Continue: the page is re-read; an approval counts as
+   reviewed only if the field still holds the value Jack was shown (the
+   same collapsed-whitespace comparison filler.py uses), otherwise its stop
+   stands (negative test); a code is typed into the one-time-code box; the
    page is gated again, and the loop carries on to Submit. No timeout. The
    browser closes only on "Close browser" with no paused job, or on Jack's
    confirmation. In GUI mode a forgot-password pause asks Jack to sign in
@@ -34,13 +43,20 @@ may be clicked, anything else pauses. Waiting for Jack's go before item 1.
    accounts.google.com, waits for Enter (or the GUI button), reads nothing.
 4. **Google sign-in** in `accounts.py` (helper `agent/google.py`): a
    "Sign in / Continue with Google" control (whole-text match) is pressed
-   ahead of email + password; the Google page (same tab or popup, host
-   `accounts.google.com`) is handled by structure only: the chooser entry
-   whose visible email equals the profile email may be clicked; the consent
-   screen's listed permissions must each match a strict allowlist (name,
-   email address, profile picture / basic profile info) or the job pauses;
-   an email / password box, a 2-step challenge or "this browser may not be
-   secure" pauses with nothing typed. Tests: local mocks for each page.
+   ahead of email + password. `google` alone leaves accounts.NEVER_WORDS
+   under the 2026-10-19 decision; microsoft, apple, facebook, linkedin and
+   sso stay refused (negative test). The Google page (same tab or popup)
+   counts only when `urlparse(url).hostname == "accounts.google.com"` and
+   the scheme is https (an `accounts.google.com.example` host or a path
+   holding the string is not Google: negative tests), and is handled by
+   structure only: the chooser entry whose visible email equals the
+   profile email may be clicked; each permission listed on the consent
+   screen, after NFKC / casefold / collapsed whitespace only, must equal an
+   entry of a list in code written from Jack's words (name, email address,
+   profile picture / basic profile info); an empty or unparsed list or any
+   extra entry pauses; an email / password box, a 2-step challenge or
+   "this browser may not be secure" pauses with nothing typed. Tests: local
+   mocks for each page.
 5. **MyGreenhouse** in `intake.py`: for `my.greenhouse.io/jobs/<slug>/<id>`
    try `job-boards.greenhouse.io/<slug>/jobs/<id>` then
    `boards.greenhouse.io/<slug>/jobs/<id>`; use one only if it loads and its

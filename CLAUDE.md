@@ -130,9 +130,10 @@ supersede the pause lines above:
   unrecognised wording: pause for Jack.
 - If Google shows its own login page, a 2-step challenge, or "this browser
   may not be secure": pause for Jack; never type into it.
-- The post-pause waiver covers only fields Jack touched (a touch mark new
-  since before the pause, not the filler's input); approving a proposed
-  value in the GUI counts as touching that field.
+- From item 1 of the same prompt (not the decisions list): the GUI's
+  approve tick "records the field as reviewed by Jack". The plan binds
+  that to the page: an approval counts only if, on Continue, the field
+  still holds the value Jack was shown.
 
 ## Design rules — do not relax these
 
@@ -216,8 +217,9 @@ How the code keeps them, and rules of its own:
   (classifier, policy table, HARD_STOPS). It defaults to would_stop on
   anything missing, unknown or unreadable. Page text can only fail an exact
   comparison with something the user wrote, never pass one (the consent
-  policy above is the one owner-decided exception, and it can only tick a
-  box, never answer a question). No answer value for a legal, eligibility,
+  policy above, and the Google chooser and consent screen of the
+  2026-10-19 decisions, are the owner-decided exceptions; each can only
+  tick a box or press a Google control, never answer a question). No answer value for a legal, eligibility,
   EEO or pay field is ever stored in `gate_runs`; in the edits diff a
   checkbox whose tick is such an answer records only that it changed.
 - The outcome hook's read counts as submit-time ("exact") only for the
@@ -227,6 +229,11 @@ How the code keeps them, and rules of its own:
 
 ## Threat model for field reads
 
+- The Chrome profile may hold a Google web session that Jack placed by
+  signing in by hand (a site session in cookies, not a Chrome browser
+  sign-in: Playwright's bundled Chromium carries no API keys, so sync can't
+  be enabled and nothing in the profile leaves the machine). The agent
+  never reads cookies and never automates accounts.google.com's login.
 - Defended: benign page behaviour (show-password toggles, re-renders,
   framework node reuse, password boxes appearing after a scan, stale refs)
   must never get a password value into Python. No field value read from the

@@ -1146,3 +1146,15 @@ an exact read with any polled read whose snapshot differs, and a read
 with no entries differs). Proposed fix for Jack to approve: an exact
 read is never replaced by a polled one in the same watch (a new exact
 read still replaces it). Not changed here: outside the two items.
+
+Commit 1b91e33 (the GUI plan): VERDICT FLAG, 9 FLAGs. Folded into the plan
+and CLAUDE.md in the next commit (all design-level, before anything is
+built): the approve line attributed to item 1 of Jack's prompt, not the
+decisions list; approval bound to the value the page holds on Continue;
+text nodes and a CSP for the GUI page; the sensitive predicate is the
+gate's own; `google` alone leaves NEVER_WORDS; exact https hostname for
+accounts.google.com; the consent-screen list compared exactly to a list in
+code from Jack's words; the threat model notes the Google web session;
+the "one owner-decided exception" sentence names the Google screens too.
+Left for item 2: the two CLAUDE.md sentences that still say Enter / the
+terminal for a pause and the hands-off notice.
