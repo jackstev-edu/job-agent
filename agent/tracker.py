@@ -119,23 +119,24 @@ def _unless_settled(column: str) -> str:
 
 
 def record(url: str, *, company="", role="", ats="", resume_used="",
-           answers=None, flags=None, report_path="", status="draft") -> None:
+           answers=None, flags=None, report_path="", status="draft", notes="") -> None:
     """
     Insert, or update in place if this URL is already logged.
 
-    A row past draft keeps its status, submitted_at, and what it was sent
-    with (company, role, ats, resume). Only the answers, flags and review
-    sheet are refreshed. A draft row is refreshed in full.
+    A row past draft keeps its status, submitted_at, notes and what it was
+    sent with (company, role, ats, resume). Only the answers, flags and
+    review sheet are refreshed. A draft or parked row is refreshed in full
+    (`notes` holds why a `run` parked it).
     """
     keep = ",\n                ".join(
-        _unless_settled(c) for c in ("company", "role", "ats", "resume_used", "status"))
+        _unless_settled(c) for c in ("company", "role", "ats", "resume_used", "status", "notes"))
     with _connect() as conn:
         conn.execute(
             f"""
             INSERT INTO applications
                 (url, company, role, ats, status, resume_used,
-                 answers_json, flags_json, report_path, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 answers_json, flags_json, report_path, created_at, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url) DO UPDATE SET
                 answers_json = excluded.answers_json,
                 flags_json   = excluded.flags_json,
@@ -145,7 +146,7 @@ def record(url: str, *, company="", role="", ats="", resume_used="",
             (url, company, role, ats, status, resume_used,
              json.dumps(answers or [], default=str),
              json.dumps(flags or [], default=str),
-             report_path, _timestamp()),
+             report_path, _timestamp(), notes),
         )
 
 

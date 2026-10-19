@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
-                   filler, follow, gate, learn, ledger, letters, mapper, outcome,
+                   filler, follow, gate, intake, learn, ledger, letters, mapper, outcome,
                    pages, report, score, sensitive, shadow, template, tracker)
 from agent.profile import Profile
 
@@ -1214,6 +1214,100 @@ def cmd_shadow_report(args) -> None:
 
 
 # ---------------------------------------------------------------------------
+#  run — a link in, an application out (milestones 2-7 of the autonomy plan)
+# ---------------------------------------------------------------------------
+NEEDS_YOU, FAILED = "needs_you", "failed"
+
+
+def read_queue(path: Path) -> list[str]:
+    """One link per line; blank lines and # comments skipped; duplicates dropped."""
+    links: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line not in links:
+            links.append(line)
+    return links
+
+
+def _park(url: str, reason: str, *, company: str = "", role: str = "", ats: str = "",
+          status: str = NEEDS_YOU) -> None:
+    """Log a link the agent stopped on, with the reason, so needs-you lists it."""
+    tracker.record(url, company=company, role=role, ats=ats, status=status, notes=reason)
+
+
+def run_one(ctx, url: str, prof, args) -> tuple[str, str]:
+    """
+    One link, end to end. Returns (status, reason). Milestone 2: open the
+    link, click Apply, follow to the form, detect the portal. The milestones
+    after this one fill, sign in, step through and submit.
+    """
+    landing = intake.open_link(ctx, url)
+    for step in landing.steps:
+        print(f"{DIM}  {step}{OFF}")
+    page = landing.page
+    role = company = ""
+    if page is not None:
+        try:
+            role, company = extract.guess_role_and_company(page)
+        except Exception:
+            pass
+    ats = adapters.CATALOG.get(landing.portal, adapters.CATALOG["generic"]).name
+    if landing.parked:
+        _park(url, landing.parked, company=company, role=role, ats=ats)
+        return NEEDS_YOU, landing.parked
+    print(f"  {BOLD}{ats}{OFF} {DIM}({landing.portal_method}) at {landing.url[:90]}{OFF}")
+    reason = ("the form was reached; filling, accounts and submit arrive with the next "
+              "milestones (use `fill --follow` on this link meanwhile)")
+    _park(url, reason, company=company, role=role, ats=ats)
+    return NEEDS_YOU, reason
+
+
+def cmd_run(args) -> None:
+    prof = Profile.load(args.profile)
+    links = list(args.urls or [])
+    if args.queue:
+        for link in read_queue(Path(args.queue).expanduser()):
+            if link not in links:
+                links.append(link)
+    if not links:
+        print(f"{RED}No links given.{OFF} Pass one or more URLs, or --queue FILE.")
+        return
+    blocking = prof.audit()["required"]
+    if blocking and not args.force:
+        print(f"{RED}{len(blocking)} required profile field(s) are blank.{OFF} "
+              f"Run `python apply.py check` first, or --force past this.")
+        return
+    status, detail = config.check_api_key()
+    if status in ("rejected", "missing"):
+        print(f"{RED}Anthropic API key {'rejected' if status == 'rejected' else 'not found'}"
+              f"{OFF} ({detail}). Set a new ANTHROPIC_API_KEY and try again.")
+        sys.exit(1)
+    results: list[tuple[str, str, str]] = []
+    with browser_mod.browser() as ctx:
+        for url in links:
+            print(f"\n{BOLD}{url[:100]}{OFF}")
+            existing = tracker.find(url)
+            if existing and not args.force and existing["status"] not in (NEEDS_YOU, "draft"):
+                print(f"{AMBER}Already logged: status '{existing['status']}', "
+                      f"{existing['created_at'][:10]}.{OFF} {DIM}Add --force to do it again.{OFF}")
+                results.append((url, "skipped", existing["status"]))
+                continue
+            try:
+                status, reason = run_one(ctx, url, prof, args)
+            except Exception as e:
+                status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
+                _park(url, reason, status=FAILED)
+            colour = GREEN if status == "submitted" else AMBER if status == NEEDS_YOU else RED
+            print(f"  {colour}{status}{OFF} {DIM}{reason}{OFF}")
+            results.append((url, status, reason))
+    print(f"\n{BOLD}{len(results)} link(s):{OFF} "
+          + ", ".join(f"{s} {sum(1 for _, st, _ in results if st == s)}"
+                      for s in dict.fromkeys(st for _, st, _ in results)))
+
+
+# ---------------------------------------------------------------------------
 #  log commands
 # ---------------------------------------------------------------------------
 def cmd_list(args) -> None:
@@ -1271,6 +1365,15 @@ def main() -> None:
                         help="follow along: you move through every page and click Submit; "
                              "I fill each page as it appears")
     p_fill.set_defaults(fn=cmd_fill)
+
+    p_run = sub.add_parser("run", help="apply to each link end to end, pausing only "
+                                       "where the owner decisions say so")
+    p_run.add_argument("urls", nargs="*", help="job links (any Apply button's page)")
+    p_run.add_argument("--queue", default=None, help="a file of links, one per line")
+    p_run.add_argument("--resume", default=None, help="variant key from profile.yaml")
+    p_run.add_argument("--force", action="store_true",
+                       help="redo links already logged; ignore profile warnings")
+    p_run.set_defaults(fn=cmd_run)
 
     sub.add_parser("learn", help="suggest profile fixes from your logged corrections "
                    "(changes nothing)").set_defaults(fn=cmd_learn)
