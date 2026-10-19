@@ -20,7 +20,7 @@ from pathlib import Path
 
 from _fill_run import PROFILE, run_fill
 from _harness import TEST_HOME, Checks, mock_page, run_as_script
-from agent import extract, outcome, tracker
+from agent import extract, outcome, sensitive, tracker
 
 HERE = Path(__file__).parent
 PASSWORD = "PW-SENTINEL-8812"
@@ -79,16 +79,25 @@ def test_edits_and_consent_baselines():
                       {"ref": "l", "type": "checkbox", "label": "SMS"},
                       {"ref": "p", "type": "password", "label": "Password"},
                       {"ref": "c", "type": "combobox", "label": "Country"}],
-           "plan": {"t": {"value": "Springfield"}, "c": {"value": "Exampleland"}}}
+           "plan": {"t": {"value": "Springfield"}, "c": {"value": "Exampleland"}},
+           # As the gate only puts a box in consent_actions when its category
+           # is consent (or a declaration with a legal hit), a real record
+           # carries these categories for them.
+           "categories": {"w": "legal_declaration", "l": "consent"}}
     gate = {"consent_actions": {"w": "would_tick", "l": "leave"}}
     kinds = lambda final: {e["ref"]: e["kind"] for e in outcome.compute_edits(rec, gate, final)}
 
     same = {"t": "springfield ", "b": "", "w": True, "l": False, "c": "Exampleland"}
     check(kinds(same) == {}, "agent's answers kept, would_tick ticked, leave left -> no edits")
-    # "I certify" is a legal declaration: that it changed is kept, not which way.
+    # Both are consent boxes: that one changed is kept, not which way.
     check(kinds({**same, "w": False}) == {"w": "changed_withheld"},
           "would_tick declaration box left unticked -> an edit, direction withheld")
-    check(kinds({**same, "l": True}) == {"l": "ticked"}, "leave box ticked -> an edit")
+    check(kinds({**same, "l": True}) == {"l": "changed_withheld"},
+          "leave box ticked -> an edit, direction withheld")
+    bare = {**rec, "categories": {}}
+    check({e["ref"]: e["kind"] for e in outcome.compute_edits(bare, gate, {**same, "l": True})}
+          == {"l": "changed_withheld"},
+          "  ...withheld on the consent action alone, with no category at all")
     check(kinds({**same, "t": "Shelbyville", "b": "Q."}) == {"t": "changed", "b": "filled_blank"},
           "a changed answer and a filled blank")
     check(kinds({**same, "t": ""}) == {"t": "cleared"}, "a cleared answer")
@@ -116,25 +125,39 @@ def test_a_legal_or_eeo_checkbox_edit_never_says_which_way():
                       {"ref": "r", "type": "checkbox", "label": "Box", "raw_legal": True},
                       {"ref": "c", "type": "checkbox", "label": "Tick to confirm"},
                       {"ref": "u", "type": "checkbox", "label": "Also a box"},
+                      {"ref": "a", "type": "checkbox", "label": "A third box"},
+                      {"ref": "d", "type": "checkbox", "label": "Do you hold a driver's license"},
+                      {"ref": "p", "type": "checkbox", "label": "Share your pronouns"},
                       {"ref": "m", "type": "checkbox", "label": "Email me job alerts"}],
            "categories": {"c": "consent"},
-           "plan": {"v": {"value": False}, "s": {"value": False}, "k": {"value": False},
-                    "r": {"value": False}, "c": {"value": False}, "u": {"value": False},
-                    "m": {"value": False}}}
-    gate = {"consent_actions": {}, "trace": [{"ref": "u"}]}
-    final = {"v": True, "s": True, "k": True, "r": True, "c": True, "u": True, "m": True}
+           "plan": {ref: {"value": False} for ref in "vskrcuadpm"}}
+    gate = {"consent_actions": {"a": "leave"}, "trace": [{"ref": "u"}]}
+    final = {ref: True for ref in "vskrcuadpm"}
     edits = outcome.compute_edits(rec, gate, final)
     kinds = {e["ref"]: e["kind"] for e in edits}
+    # Each route on its own where the patterns allow: "d" hits PROFILE_PATHS
+    # (eligibility.has_drivers_license) and not LEGAL_GUARD; "p" hits
+    # LEGAL_GUARD (eeo) and not PROFILE_PATHS.
+    check(sensitive.legal_guard(rec["fields"][7]) is None
+          and sensitive.sensitive_line("Do you hold a driver's license",
+                                       ("eligibility.",)) is not None,
+          "the license box reaches withholding only through PROFILE_PATHS")
+    check(sensitive.legal_guard(rec["fields"][8]) == "eeo"
+          and sensitive.sensitive_line("Share your pronouns", ("eligibility.", "eeo.",
+                                                              "compensation.")) is None,
+          "the pronouns box reaches withholding only through LEGAL_GUARD")
     for ref, what in (("v", "an EEO line"), ("s", "a work-authorization guard"),
                       ("k", "a HARD_STOPS legal pattern"), ("r", "the page's raw_legal flag"),
-                      ("c", "a consent category"), ("u", "a traced ref")):
+                      ("c", "a consent category"), ("u", "a traced ref"),
+                      ("a", "a consent action"), ("d", "a profile line alone"),
+                      ("p", "a legal guard alone")):
         check(kinds.get(ref) == "changed_withheld", f"{what}: the direction is withheld")
     check(kinds.get("m") == "ticked", "an ordinary opt-in box still says ticked")
     stored = json.dumps([e for e in edits if e["ref"] != "m"])
     check("ticked" not in stored and "unticked" not in stored,
           "no withheld row carries the words ticked or unticked")
-    check(len([e for e in edits if e["kind"] == "changed_withheld"]) == 6,
-          "a withheld change still counts as an edit (six of them)")
+    check(len([e for e in edits if e["kind"] == "changed_withheld"]) == 9,
+          "a withheld change still counts as an edit (nine of them)")
     check.done()
 
 

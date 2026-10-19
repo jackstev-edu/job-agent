@@ -409,10 +409,15 @@ def test_the_deciding_word_must_sit_in_the_sponsorship_sentence():
     check(sensitive.sponsorship_line("Do you need sponsorship to begin? "
                                      "We may relocate you later.", pair) is None,
           "a future-word in another sentence still blocks a now decision")
-    # Sentence breaks a page can use: line breaks and semicolons too.
-    check(sensitive.sponsorship_line("Will you require sponsorship?\nLater, "
-                                     "we will ask about relocation.", pair) is None,
-          "a line break ends the sentence too")
+    # Sentence breaks a page can use: a line break with no punctuation before
+    # it (innerText's block break) ends the sentence too, even though one
+    # reading of the text collapses it to a space.
+    check(sensitive.sponsorship_line("Will you require sponsorship\nLater, "
+                                     "we will ask about relocation", pair) is None,
+          "a bare line break ends the sentence too")
+    check(sensitive.sponsorship_line("Will you require spon­sorship in the future",
+                                     pair) == "eligibility.requires_sponsorship_future",
+          "an invisible character inside the word still can't hide the clause")
     check.done()
 
 

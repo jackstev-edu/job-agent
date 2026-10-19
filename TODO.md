@@ -928,3 +928,25 @@ Commit e2bea7a (milestone 0, pre-pass-4 hash), 6 FLAGs:
 - "12 FLAGs" over 13 bullets. Fixed.
 - The plan records decisions CLAUDE.md does not yet hold. Noted: they
   take effect only when CLAUDE.md records them (milestone 1).
+
+Commit eb4dc9f (M1 a and b), 4 FLAGs and 3 notes:
+- "A line break ends a sentence" was false: the collapsed reading joined
+  the lines. Fixed: sentences are cut from the text as written, then each
+  is read every way; the test now uses a bare line break.
+- The consent "leave" box asserted "ticked" on a record shape the gate
+  never emits. Fixed: a box in consent_actions is withheld on that alone;
+  the fixture carries the categories a real record has. Open for Jack:
+  whether a marketing opt-in's direction should be kept in the local log
+  (today it is kept only when nothing marks the box as consent or legal).
+- Two routes to withholding weren't isolated in the test. Fixed: a
+  driver's-license box (PROFILE_PATHS only) and a pronouns box
+  (LEGAL_GUARD only) added.
+- The sensitive sets were duplicated from gate.py. Fixed: imported.
+- Note: ":" ends a sentence, so "Visa sponsorship: will you need it in the
+  future?" now comes to Jack. Accepted (a false positive).
+- Note: eb4dc9f's message says 232 passed; it was 233.
+- Note: 3606540's message says the full suite passed (235); the log shows
+  1 failed, 234 passed: test_your_submit_in_follow_mode_is_captured_exactly,
+  read "polled" with both fields unreadable while the reviewer's own suite
+  ran on the same machine. Alone and in two later full runs of its file it
+  passes. The claim in that message was wrong; it is corrected here.

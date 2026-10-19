@@ -289,11 +289,6 @@ _SPONSOR_WORD = re.compile(r"sponsor|immigration|petition|work\s+permit|visa", r
 _SENTENCE_END = re.compile(r"[.?!;:\r\n]+")
 
 
-def _sponsor_clauses(text: str) -> list[str]:
-    """The sentences of `text` that mention sponsorship at all."""
-    return [s for s in _SENTENCE_END.split(text) if _SPONSOR_WORD.search(s)]
-
-
 def sponsorship_line(text: str, lines: set[str]) -> str | None:
     """
     Which of the two sponsorship lines a question is asking about, when it
@@ -310,7 +305,11 @@ def sponsorship_line(text: str, lines: set[str]) -> str | None:
     variants = text_variants(text)
     future_anywhere = any(_SAYS_FUTURE.search(v) for v in variants)
     now_anywhere = any(_SAYS_NOW.search(v) for v in variants)
-    clauses = [c for v in variants for c in _sponsor_clauses(v)]
+    # Sentences are cut from the text as written, before any reading
+    # collapses a line break into a space; each sentence is then read every
+    # way, so an invisible character inside a word still can't hide it.
+    clauses = [c for s in _SENTENCE_END.split(str(text or ""))
+               for c in text_variants(s) if _SPONSOR_WORD.search(c)]
     future_in_clause = any(_SAYS_FUTURE.search(c) for c in clauses)
     now_in_clause = any(_SAYS_NOW.search(c) for c in clauses)
     if future_in_clause and not now_anywhere:

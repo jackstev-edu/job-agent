@@ -30,7 +30,7 @@ import time
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from . import extract, learn, sensitive
+from . import extract, gate, learn, sensitive
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -383,7 +383,7 @@ def compute_edits(record: dict, result: dict, final: dict | None) -> list[dict] 
                 # A legal, eligibility, EEO or pay checkbox answers its
                 # question by being ticked, so "ticked" would be the answer.
                 # Only that it changed is kept.
-                withheld = _tick_is_an_answer(f, categories.get(ref), traced)
+                withheld = _tick_is_an_answer(f, categories.get(ref), traced, set(consent))
                 edits.append({"ref": ref, "label": label,
                               "kind": "changed_withheld" if withheld
                               else "ticked" if now else "unticked"})
@@ -399,21 +399,23 @@ def compute_edits(record: dict, result: dict, final: dict | None) -> list[dict] 
     return edits
 
 
-# Questions whose answer must never be stored: the gate's sensitive set.
-_SENSITIVE_CATEGORIES = {"work_authorization", "eeo", "compensation", "legal_declaration",
-                         "consent"}
-_SENSITIVE_PREFIXES = ("eligibility.", "eeo.", "compensation.")
+# Questions whose answer must never be stored: the gate's own sensitive set,
+# plus consent, and every box the gate planned a consent action for.
+_SENSITIVE_CATEGORIES = gate.SENSITIVE_CATEGORIES | {"consent"}
+_SENSITIVE_PREFIXES = gate.SENSITIVE_PREFIXES
 
 
-def _tick_is_an_answer(f: dict, category, traced: set) -> bool:
+def _tick_is_an_answer(f: dict, category, traced: set, consent: set) -> bool:
     """
     Does ticking this checkbox answer a legal, eligibility, EEO or pay
     question (or a consent / declaration)? Judged on every reading of the
-    question text, the way the gate judges it, plus the gate's own trace.
-    Any doubt counts as yes: it only withholds a word from a local log.
+    question text, the way the gate judges it, plus the gate's own trace
+    and consent actions. Any doubt counts as yes: it only withholds a word
+    from a local log.
     """
     text = sensitive._question_text(f)
-    return (f.get("ref") in traced or category in _SENSITIVE_CATEGORIES
+    return (f.get("ref") in traced or f.get("ref") in consent
+            or category in _SENSITIVE_CATEGORIES
             or sensitive.sensitive_line(text, _SENSITIVE_PREFIXES) is not None
             or sensitive.legal_guard(f) is not None
             or "legal" in sensitive.stop_kinds(text)
