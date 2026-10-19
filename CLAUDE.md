@@ -26,7 +26,9 @@ run as `python apply.py <command>` (no make).
   that forces `null` rather than a guess.
 - `agent/filler.py` — types answers into the page.
 - `agent/adapters.py` — per-ATS quirks; spots a Next / Continue control.
-  Clicks nothing: you press Apply, Next and Continue yourself.
+  Clicks nothing itself: the Apply, Sign in, Next / Continue and Submit
+  clicks live only in `intake.py`, `accounts.py`, `wizard.py` and
+  `submit.py`.
 - `agent/browser.py` — launches Playwright's bundled Chromium on a persistent
   profile; CAPTCHA and login-wall detection.
 - `agent/learn.py` — report-only suggestions from the corrections log.
