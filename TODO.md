@@ -1158,3 +1158,17 @@ code from Jack's words; the threat model notes the Google web session;
 the "one owner-decided exception" sentence names the Google screens too.
 Left for item 2: the two CLAUDE.md sentences that still say Enter / the
 terminal for a pause and the hands-off notice.
+
+Commit fd3ffe2 (plan follow-up): VERDICT FLAG, 8 FLAGs. Jack's go of
+2026-10-19 answered the decisions: the consent list is Google's standard
+wording for openid, email and profile, with the "personal info" line
+explicitly approved; the approve tick shows the page's read-back value,
+local only, and counts only if the page still holds it on Continue;
+checkboxes and the consent and per_company categories are never
+approvable; forgot-password stays in the tab; the item split stays;
+"approving records the field as reviewed by Jack" is his decision. Folded
+into the items as they land: the CSP gains style-src (item 1); only
+`google` leaves NEVER_WORDS, citing the decision, with the rest refused
+and tested (item 4); the threat-model line will say no sync upload is
+possible and the session cookies go only to Google hosts (item 3); the
+two Enter / terminal sentences are rewritten in item 2.

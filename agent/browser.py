@@ -53,8 +53,9 @@ def browser():
             ctx.close()
 
 
-def open_page(ctx, url: str) -> "Page":
-    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+def open_page(ctx, url: str, new_tab: bool = False) -> "Page":
+    """Open `url` in the context's first tab, or in a new tab of its own (`new_tab`)."""
+    page = ctx.new_page() if new_tab or not ctx.pages else ctx.pages[0]
     page.goto(url, wait_until="domcontentloaded", timeout=60_000)
     settle(page)
     return page

@@ -14,6 +14,7 @@ portals autofill from the resume and would overwrite everything otherwise.
 from __future__ import annotations
 
 import argparse
+from argparse import Namespace
 import json
 import re
 import sys
@@ -22,7 +23,7 @@ import time
 from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
-                   filler, follow, gate, intake, learn, ledger, letters, mapper, outcome,
+                   filler, follow, gate, gui, intake, learn, ledger, letters, mapper, outcome,
                    pages, pause, pipeline, report, score, sensitive, shadow, template, tracker,
                    wizard)
 from agent.profile import Profile
@@ -1039,7 +1040,7 @@ def cmd_shadow_report(args) -> None:
 # ---------------------------------------------------------------------------
 #  run — a link in, an application out (milestones 2-7 of the autonomy plan)
 # ---------------------------------------------------------------------------
-NEEDS_YOU, FAILED = "needs_you", "failed"
+NEEDS_YOU, FAILED, DRY = "needs_you", "failed", "dry"
 
 
 def read_queue(path: Path) -> list[str]:
@@ -1060,14 +1061,42 @@ def _park(url: str, reason: str, *, company: str = "", role: str = "", ats: str 
     tracker.record(url, company=company, role=role, ats=ats, status=status, notes=reason)
 
 
-def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None) -> tuple[str, str]:
+def dry_report(landing: "intake.Landing", ats: str) -> tuple[str, bool, int]:
+    """
+    What a dry run says about a link: the final address, the portal, and
+    whether a form with fields is there (two or more fields, or a file box;
+    the scan's count beside it). The scan reads structure only; nothing is
+    filled or clicked here.
+    """
+    page = landing.page
+    found, count = False, 0
+    if page is not None and not page.is_closed():
+        found = intake.has_form_fields(page)
+        try:
+            count = len(extract.extract_fields(page, extract.ReadGuard()))
+        except Exception:
+            count = 0
+    where = landing.url if landing.page is not None else "(the link didn't open)"
+    tail = f"; parked: {landing.parked}" if landing.parked else ""
+    steps = f"; {'; '.join(landing.steps)}" if landing.steps else "; nothing clicked"
+    text = (f"dry run: landed on {where}; portal {ats} (detected by {landing.portal_method}); "
+            f"form with fields: {'yes' if found else 'no'} ({count} field(s) scanned){steps}{tail}")
+    return text, found, count
+
+
+def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
+            new_tab: bool = False, report_to=None) -> tuple[str, str]:
     """
     One link, end to end: open it, click Apply, follow to the form, detect
     the portal, then the wizard (accounts, every page, the gate, Submit).
-    Returns (status, reason); everything is logged in the tracker.
+    Returns (status, reason); everything is logged in the tracker. With
+    `args.dry`, intake only: the landing is reported and nothing is
+    filled, signed in to, or submitted, and the tracker isn't written.
+    `report_to(dict)`, if given, is told the landing (company, role,
+    portal, final URL, and for a dry run whether a form was found).
     """
     pauser = pauser or pause.Pauser()
-    landing = intake.open_link(ctx, url)
+    landing = intake.open_link(ctx, url, new_tab=new_tab)
     for step in landing.steps:
         print(f"{DIM}  {step}{OFF}")
     page = landing.page
@@ -1078,6 +1107,16 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None) -> 
         except Exception:
             pass
     ats = adapters.CATALOG.get(landing.portal, adapters.CATALOG["generic"]).name
+    if getattr(args, "dry", False):
+        text, found, _ = dry_report(landing, ats)
+        print(f"  {text}")
+        if report_to is not None:
+            report_to({"company": company, "role": role, "portal": ats,
+                       "final_url": landing.url if page is not None else "", "form_found": found})
+        return DRY, text
+    if report_to is not None:
+        report_to({"company": company, "role": role, "portal": ats,
+                   "final_url": landing.url if page is not None else ""})
     if landing.parked:
         _park(url, landing.parked, company=company, role=role, ats=ats)
         return NEEDS_YOU, landing.parked
@@ -1142,16 +1181,10 @@ def cmd_run(args) -> None:
     if not links:
         print(f"{RED}No links given.{OFF} Pass one or more URLs, or --queue FILE.")
         return
-    blocking = prof.audit()["required"]
-    if blocking and not args.force:
-        print(f"{RED}{len(blocking)} required profile field(s) are blank.{OFF} "
-              f"Run `python apply.py check` first, or --force past this.")
-        return
-    status, detail = config.check_api_key()
-    if status in ("rejected", "missing"):
-        print(f"{RED}Anthropic API key {'rejected' if status == 'rejected' else 'not found'}"
-              f"{OFF} ({detail}). Set a new ANTHROPIC_API_KEY and try again.")
-        sys.exit(1)
+    dry = bool(getattr(args, "dry", False))
+    if not dry:
+        if not _ready_to_fill(prof, args.force):
+            return
     results: list[tuple[str, str, str]] = []
     pauser = pause.Pauser()
     with browser_mod.browser() as ctx:
@@ -1161,7 +1194,7 @@ def cmd_run(args) -> None:
         for url in links:
             print(f"\n{BOLD}{url[:100]}{OFF}")
             existing = tracker.find(url)
-            if existing and not args.force and existing["status"] not in (NEEDS_YOU, "draft"):
+            if existing and not args.force and not dry and existing["status"] not in (NEEDS_YOU, "draft"):
                 print(f"{AMBER}Already logged: status '{existing['status']}', "
                       f"{existing['created_at'][:10]}.{OFF} {DIM}Add --force to do it again.{OFF}")
                 results.append((url, "skipped", existing["status"]))
@@ -1171,8 +1204,9 @@ def cmd_run(args) -> None:
             except Exception as e:
                 status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
                 _park(url, reason, status=FAILED)
-            colour = GREEN if status == "submitted" else AMBER if status == NEEDS_YOU else RED
-            print(f"  {colour}{status}{OFF} {DIM}{reason}{OFF}")
+            colour = (GREEN if status == "submitted" else AMBER if status == NEEDS_YOU
+                      else DIM if status == DRY else RED)
+            print(f"  {colour}{status}{OFF} {DIM}{reason if status != DRY else ''}{OFF}")
             results.append((url, status, reason))
     summary = ", ".join(f"{s} {sum(1 for _, st, _ in results if st == s)}"
                         for s in dict.fromkeys(st for _, st, _ in results))
@@ -1182,6 +1216,99 @@ def cmd_run(args) -> None:
         pauser.notify_fn("job-agent: batch done", f"{len(results)} link(s): {summary}", echo=print)
     except Exception:
         pass
+
+
+def _ready_to_fill(prof, force: bool) -> bool:
+    """The profile and the API key, checked once before anything is filled."""
+    blocking = prof.audit()["required"]
+    if blocking and not force:
+        print(f"{RED}{len(blocking)} required profile field(s) are blank.{OFF} "
+              f"Run `python apply.py check` first, or --force past this.")
+        return False
+    status, detail = config.check_api_key()
+    if status in ("rejected", "missing"):
+        print(f"{RED}Anthropic API key {'rejected' if status == 'rejected' else 'not found'}"
+              f"{OFF} ({detail}). Set a new ANTHROPIC_API_KEY and try again.")
+        sys.exit(1)
+    return True
+
+
+# ---------------------------------------------------------------------------
+#  gui — paste links into a page; rows show where each one is
+# ---------------------------------------------------------------------------
+GUI_POLL_S = 0.5
+
+
+def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=time.monotonic,
+             idle_limit_s: float | None = None) -> None:
+    """
+    The queue loop behind `apply.py gui`, on the main thread (Playwright's):
+    take queued jobs from the GUI one at a time, each in its own tab, and
+    report where each one got to. Ends when the page asks to close the
+    browser, or after `idle_limit_s` with nothing queued (tests). Item 2
+    makes pauses non-blocking; until then a job that needs Jack pauses in
+    the terminal, as `run` does.
+    """
+    run = run or run_one
+    last_busy = clock()
+    while True:
+        if state.close_browser:
+            return
+        if state.google_login:
+            state.google_login = False
+            state.notice = "Google login arrives with item 3 of docs/PLAN-gui.md"
+        job = state.next_queued()
+        if job is None:
+            if idle_limit_s is not None and clock() - last_busy > idle_limit_s:
+                return
+            time.sleep(GUI_POLL_S)
+            continue
+        last_busy = clock()
+        job_args = Namespace(profile=args.profile, resume=getattr(args, "resume", None),
+                             force=True, dry=job.dry or bool(getattr(args, "dry", False)))
+        try:
+            status, reason = run(ctx, job.url, prof, job_args, pauser, new_tab=True,
+                                 report_to=lambda facts, j=job: state.update(j.id, **facts))
+        except Exception as e:
+            status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
+            if not job.dry:
+                _park(job.url, reason, status=FAILED)
+        state.update(job.id, status=status, reason=reason)
+        last_busy = clock()
+
+
+def cmd_gui(args) -> None:
+    import webbrowser
+
+    prof = Profile.load(args.profile)
+    state = gui.State()
+    server = gui.Server(state).start()
+    print(f"\n{BOLD}GUI:{OFF} {server.url}")
+    print(f"{DIM}Paste links there. Dry run fills nothing. Close the browser from the page.{OFF}")
+    try:
+        webbrowser.open(server.url)
+    except Exception:
+        pass
+    pauser = pause.Pauser()
+    try:
+        with browser_mod.browser() as ctx:
+            ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+            state.browser_open = True
+            # The profile and key are needed only once something is filled;
+            # a page of dry runs needs neither.
+            checked = {"ok": None}
+
+            def run_checked(ctx, url, prof, job_args, pauser, **kw):
+                if not job_args.dry and checked["ok"] is None:
+                    checked["ok"] = _ready_to_fill(prof, True)
+                if not job_args.dry and not checked["ok"]:
+                    return FAILED, "the profile isn't ready (see the terminal)"
+                return run_one(ctx, url, prof, job_args, pauser, **kw)
+            gui_loop(ctx, state, prof, args, pauser, run=run_checked)
+            state.browser_open = False
+    finally:
+        server.stop()
+    print(f"{DIM}Browser closed.{OFF}")
 
 
 def cmd_applied(args) -> None:
@@ -1288,7 +1415,15 @@ def main() -> None:
     p_run.add_argument("--resume", default=None, help="variant key from profile.yaml")
     p_run.add_argument("--force", action="store_true",
                        help="redo links already logged; ignore profile warnings")
+    p_run.add_argument("--dry", action="store_true",
+                       help="intake only: open, click Apply, follow, report the landing; "
+                            "fill nothing, sign in to nothing, submit nothing")
     p_run.set_defaults(fn=cmd_run)
+
+    p_gui = sub.add_parser("gui", help="a local page to paste links into and watch each one")
+    p_gui.add_argument("--resume", default=None, help="variant key from profile.yaml")
+    p_gui.add_argument("--dry", action="store_true", help="every job a dry run")
+    p_gui.set_defaults(fn=cmd_gui)
 
     sub.add_parser("applied", help="every link run has logged, with its status"
                    ).set_defaults(fn=cmd_applied)

@@ -126,11 +126,23 @@ applications is somewhere under five dollars.
 ### Unattended: `run`
 
 ```bash
+python apply.py gui                            # a local page: paste links, watch rows
 python apply.py run https://company.example/careers/jobs/1234
 python apply.py run --queue links.txt          # one link per line, # comments
+python apply.py run <url> --dry                # intake only: open, click Apply, report
 python apply.py applied                        # what each link came to
 python apply.py needs-you                      # the parked ones, and why
 ```
+
+`gui` serves one page on 127.0.0.1 (a random port, printed) and opens it
+in your browser: paste links, press Start, and each row shows the company,
+role, portal and live status. The page talks only to that port, checks the
+Host and Origin of every request, needs a per-session token for every
+change, and renders everything from the job pages as plain text. A dry run
+(the toggle on the page, or `run --dry`) opens the link, clicks Apply,
+follows it, and reports the final address, the portal and whether a form
+with fields is there; it fills nothing, signs in to nothing and presses no
+Submit, Next or consent control, and writes nothing to the tracker.
 
 `run` is the autonomous path (owner decisions of 2026-10-18, see CLAUDE.md).
 For each link it opens the page in the agent's Chrome profile, clicks the

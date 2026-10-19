@@ -63,7 +63,13 @@ run as `python apply.py <command>` (no make).
   ticks the gate allows, gate again, Submit, the confirmation sentence.
 - `agent/pause.py`, `agent/notify.py`, `agent/console.py` — a pause: a
   Windows toast (fallback bell), a prompt (hidden via getpass for a
-  password), a 15-minute wait that also ends when the page moves on.
+  password), a 15-minute wait that also ends when the page moves on
+  (item 2 of `docs/PLAN-gui.md` replaces the wait with the GUI).
+- `agent/gui.py` — the one-page local GUI (`apply.py gui`): loopback only,
+  Host and Origin checks, a per-session token on every change, a strict
+  CSP, text-node rendering; the State the queue loop and the page share.
+  A legal, EEO, pay, consent, per-company, checkbox or password field is
+  never offered for approval and its value never reaches the page.
 
 ## Owner decisions (Jack, 2026-10-18)
 

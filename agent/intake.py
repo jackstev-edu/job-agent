@@ -179,7 +179,8 @@ def _click_marked(ctx: "BrowserContext", page: "Page", wait_ms: int = 3000) -> "
     return page
 
 
-def open_link(ctx: "BrowserContext", url: str, max_clicks: int = 3) -> Landing:
+def open_link(ctx: "BrowserContext", url: str, max_clicks: int = 3,
+              new_tab: bool = False) -> Landing:
     """
     Open Jack's link and get to the form. Up to `max_clicks` Apply clicks
     (posting -> company site -> Workday's "Apply Manually"), each one on a
@@ -189,7 +190,7 @@ def open_link(ctx: "BrowserContext", url: str, max_clicks: int = 3) -> Landing:
     """
     landing = Landing(page=None, url=url)
     try:
-        page = browser_mod.open_page(ctx, url)
+        page = browser_mod.open_page(ctx, url, new_tab=new_tab)
     except Exception as e:
         landing.parked = f"the link didn't open ({type(e).__name__})"
         return landing
