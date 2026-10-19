@@ -138,6 +138,60 @@ def test_a_legal_or_eeo_checkbox_edit_never_says_which_way():
     check.done()
 
 
+WIZARD_PAGE = """<!doctype html><html><body>
+<form id="app" onsubmit="event.preventDefault();">
+  <label for="fn">First Name</label><input id="fn" name="first_name" value="">
+  <button type="submit" id="next">Continue</button>
+  <button type="button" id="show">Show more</button>
+  <button type="submit" id="go">Submit Application</button>
+</form></body></html>"""
+
+
+def test_a_next_press_is_never_an_exact_read():
+    # Must-fix (c): the hook fired on any button press and called the read
+    # "exact". A press on Continue (type=submit, as wizards have it) or on
+    # any other non-submit control is a polled read; only the form's submit
+    # event, or a control that reads as Submit, is exact.
+    check = Checks()
+    for how, want in (("submit:", "exact"), ("submit:Submit Application", "exact"),
+                      ("submit:Continue", "polled"), ("submit:Next", "polled"),
+                      ("click:Submit Application", "exact"), ("click:Apply now", "exact"),
+                      ("click:Next", "polled"), ("click:Save and continue", "polled"),
+                      ("click:Sign in", "polled"), ("click:Show more", "polled"),
+                      ("click:", "polled"), (None, "polled"), (42, "polled")):
+        check(outcome.read_kind(how) == want, f"{how!r} -> {want}")
+    form = TEST_HOME / "wizard_page.html"
+    form.write_text(WIZARD_PAGE, encoding="utf-8")
+    with mock_page(form) as page:
+        fields = extract.extract_fields(page)
+        rec = {"url": form.as_uri(), "portal": "generic", "portal_method": "default",
+               "fields": fields, "plan": {fields[0]["ref"]: {"value": "Test"}}}
+        page.fill("#fn", "Test")
+        steps = iter([lambda: page.click("#next"), lambda: page.click("#show"),
+                      lambda: None, lambda: None])
+        seen = []
+
+        def you():
+            step = next(steps, None)
+            if step is None:
+                return True
+            step()
+            return False
+        cap = outcome.Capture()
+        cap.arm(page, fields)
+        for _ in range(6):
+            if you():
+                break
+            page.wait_for_timeout(100)
+            seen.append(cap.capture)
+        check(cap.hooked and "exact" not in seen and cap.capture != "exact",
+              f"Continue and Show more pressed: no exact read ({seen})")
+        page.click("#go")
+        page.wait_for_timeout(200)
+        check(cap.capture == "exact", f"Submit Application pressed: exact ({cap.capture})")
+    check.done()
+
+
 def test_file_box_edits():
     # A file box is compared by the names (and so the count) of its files
     # against what the agent uploaded. Contents never come into it.

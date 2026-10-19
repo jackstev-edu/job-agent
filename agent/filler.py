@@ -8,7 +8,9 @@ only register input they see as real keystrokes. In follow mode
 
 WHY IT MATTERS: This file contains the hard stop. It has no code path that
 clicks Submit, presses Enter, or types a line break outside a textarea — not
-as an option, not behind a flag. That's deliberate.
+as an option, not behind a flag. That's deliberate. Either way a text box is
+read back afterwards: the same text counts as filled, anything else is kept
+but marked unconfirmed, and an emptied box is reported unfilled.
 """
 
 from __future__ import annotations
@@ -98,6 +100,24 @@ _SET_VALUE_JS = ("""
   setter.call(el, v);
   el.dispatchEvent(new Event('input', {bubbles: true}));
   el.dispatchEvent(new Event('change', {bubbles: true}));
+  const got = el.value;
+  if (got === v) return 'exact';
+  const ws = t => String(t ?? '').replace(/\s+/g, ' ').trim();
+  if (!ws(got)) return 'empty';
+  return ws(got) === ws(v) ? 'same' : 'other';
+}
+""")
+
+
+# What a text box holds after the agent typed into it, compared in the page
+# the way _SET_VALUE_JS compares; the same words come back ("exact", "same",
+# "other", "empty"), plus "no" for anything that isn't a text box or has
+# become secret, which is never read.
+_READ_BACK_JS = ("""
+(el, v) => {
+""" + extract._SECRET_JS + r"""
+  if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return 'no';
+  if (isSecret(el, '')) return 'no';
   const got = el.value;
   if (got === v) return 'exact';
   const ws = t => String(t ?? '').replace(/\s+/g, ' ').trim();
@@ -201,7 +221,21 @@ def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple
         element.click(timeout=4000)
         element.fill("", timeout=4000)               # clear anything pre-filled
         element.type(text, delay=12, timeout=25_000)
-        return True, "typed"
+        # The same read-back the contained path makes: only a word comes
+        # back, and a box that has become secret is never read.
+        try:
+            got = element.evaluate(_READ_BACK_JS, text)
+        except Exception:
+            got = "no"
+        if got == "exact":
+            return True, "typed"
+        if got == "same":
+            return True, "typed (the box reformatted it)"
+        if got == "empty":
+            return False, "the box didn't take the value; left for you"
+        if got == "no":
+            return True, f"typed, but the box couldn't be read back{UNCONFIRMED}"
+        return True, f"typed, but the box shows something else{UNCONFIRMED}"
 
     except Exception as e:
         return False, f"{type(e).__name__}: {str(e)[:110]}"

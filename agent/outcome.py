@@ -62,18 +62,53 @@ _HOOK_JS = ("""
 (args) => {
   const [name, items] = args;
   const snap = """ + extract._SNAPSHOT_JS + """;
-  const fire = () => {
+  // Which control fired the read goes along with it: a form's submit event
+  // (with its submitter's text) or a press on a button (its text). Python
+  // decides from that whether the read counts as submit-time.
+  const textOf = b => String((b && (b.innerText || b.value)) || '').trim().slice(0, 80);
+  const fire = how => {
     let data = null;
     try { data = snap(items); } catch (e) {}
-    try { window[name](data); } catch (e) {}
+    try { window[name](data, how); } catch (e) {}
   };
-  document.addEventListener('submit', fire, true);
+  document.addEventListener('submit', e => fire('submit:' + textOf(e.submitter)), true);
   document.addEventListener('pointerdown', e => {
-    if (e.target.closest && e.target.closest(
-        'button, input[type=submit], input[type=button], [role=button]')) fire();
+    const b = e.target.closest && e.target.closest(
+        'button, input[type=submit], input[type=button], [role=button]');
+    if (b) fire('click:' + textOf(b));
   }, true);
 }
 """)
+
+# A read is "exact" (taken at the moment of submitting) only when the form's
+# submit event fired, or the pressed control reads as Submit; never when the
+# control reads as Next, Continue, Back, Sign in or the like, whichever event
+# it came with: a wizard's Continue is type=submit on most portals, and the
+# form isn't sent by it. Page text can only turn an exact read into a polled
+# one, or make a press count as Submit; a polled read is never scored as a
+# match.
+SUBMIT_WORDS = re.compile(
+    r"^(submit|submit (my |your |the )?application|send( (my |your |the )?application)?"
+    r"|apply|apply now|finish|complete( (my |your |the )?application)?"
+    r"|confirm and submit|sign and submit|confirm)$", re.I)
+NEXT_WORDS = re.compile(
+    r"^(next|continue|back|previous|prev|save|save (and|&) (continue|next|proceed)"
+    r"|save (and|&) exit|proceed|review|skip|cancel|close|sign ?in|log ?in|login"
+    r"|create (an )?account|register|sign ?up|verify|resend|send code|forgot password\??"
+    r"|show|hide|add( another)?|remove|upload|browse|edit)$", re.I)
+
+
+def read_kind(how) -> str:
+    """How a hook read counts: "exact" or "polled", from what fired it."""
+    if not isinstance(how, str):
+        return "polled"
+    source, _, text = how.partition(":")
+    text = re.sub(r"\s+", " ", text).strip()
+    if NEXT_WORDS.match(text):
+        return "polled"
+    if source == "submit" or SUBMIT_WORDS.match(text):
+        return "exact"
+    return "polled"
 
 _MAX_VALUE = 5000
 _MAX_FILES, _MAX_FILE_NAME = 50, 1000
@@ -160,12 +195,13 @@ class Capture:
             return
         self.final, self.capture = snap, kind
 
-    def _on_submit(self, source, raw=None) -> None:
+    def _on_submit(self, source, raw=None, how=None) -> None:
         # Runs inside Playwright's dispatch: no calls back into the page.
         accepted = _accept(raw, self._allowed)
         if accepted is not None:
+            kind = read_kind(how)
             self._keep(extract.snapshot_from_raw(self.fields, accepted),
-                       "inexact" if extract.partly_read(self.fields, accepted) else "exact")
+                       "inexact" if extract.partly_read(self.fields, accepted) else kind)
 
     def arm(self, page: "Page", fields: list[dict]) -> None:
         """
@@ -217,9 +253,11 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
     Watch the agent's own tab until you press Enter (`stop_requested`), the
     confirmation page appears, the tab closes, or `timeout_s` passes. Keeps
     the last read of the form taken while its fields were still on the page.
-    A read made at the moment of submitting is "exact"; one from polling is
-    "polled". Either is "inexact" when some, but not all, of a radio or
-    button group's options were read.
+    A read made at the moment of submitting is "exact" (the form's submit
+    event, or a press on a control that reads as Submit); one from polling,
+    or from a press on Next, Continue, Sign in and the like, is "polled".
+    Either is "inexact" when some, but not all, of a radio or button
+    group's options were read.
     """
     fields = record.get("fields") or []
     # Whether the form is still there reads no value, so it uses every current

@@ -224,6 +224,49 @@ PLAIN = f"""<!doctype html><html><body><form>
 </form><script>{KEYS_JS}</script></body></html>"""
 
 
+# A box that throws away whatever is typed into it.
+CLEARING = """<!doctype html><html><body><form>
+  <label for="ci">City</label><input id="ci" name="city">
+</form><script>
+  document.getElementById('ci').addEventListener('input', e => { e.target.value = ''; });
+</script></body></html>"""
+
+
+def test_a_normal_fill_reads_the_value_back():
+    # Must-fix (d): the uncontained path used to return "typed" without
+    # looking. Now it reads the box back like the contained path does.
+    check = Checks()
+
+    def typed(html, label, value):
+        with mock_page(_write("uncontained_readback.html", html)) as page:
+            fields = extract.extract_fields(page, extract.ReadGuard())
+            f = next(f for f in fields if (f.get("label") or "").startswith(label))
+            ok, detail = filler.fill_one(page, f, value)
+            keys = page.evaluate("window.__keys") if "__keys" in html else None
+        return ok, detail, keys
+
+    ok, detail, _ = typed(PLAIN_BOX, "City", "Springfield")
+    check(ok and detail == "typed", f"a plain box: typed ({detail})")
+    ok, detail, _ = typed(PHONE, "Phone", "+1 555 824 9000")
+    check(ok and filler.UNCONFIRMED in detail,
+          f"a box that reformats the number: kept, unconfirmed ({detail})")
+    ok, detail, _ = typed(CLIPPED, "City", "Springfield")
+    check(ok and filler.UNCONFIRMED in detail,
+          f"a box that cut it short: kept, unconfirmed ({detail})")
+    ok, detail, _ = typed(SQUEEZED, "Full name", "Test  Person")
+    check(ok and detail == "typed (the box reformatted it)" and filler.UNCONFIRMED not in detail,
+          f"a box collapsing spaces says the same thing: done ({detail})")
+    ok, detail, _ = typed(CLEARING, "City", "Springfield")
+    check(not ok and "didn't take" in detail, f"a box that empties itself: not filled ({detail})")
+    rows = None
+    with mock_page(_write("uncontained_readback.html", PHONE)) as page:
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        rows = filler.run_plan(page, fields, {fields[0]["ref"]: {"value": "+1 555 824 9000"}})
+    check(rows and rows[0]["filled"] and rows[0]["unconfirmed"],
+          "run_plan carries the unconfirmed mark, so the gate stops on it")
+    check.done()
+
+
 def test_without_containment_filling_is_unchanged():
     check = Checks()
     with mock_page(_write("plain.html", PLAIN)) as page:
