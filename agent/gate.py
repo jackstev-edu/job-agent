@@ -40,9 +40,10 @@ from . import sensitive
 # 7: the owner decisions of 2026-10-18. A checkbox whose label passes the
 #    consent policy (terms / privacy wording only) counts like an
 #    allowlisted one; a field in the record's human_reviewed list (set by
-#    the wizard after a pause Jack ended, for a field he touched, left blank
-#    or reviewed) is his answer and skips the field-level stops, never the
-#    required-but-empty check; an event marked handled by the agent (a
+#    the wizard after a pause Jack ended; since 2026-10-19 only for a field
+#    he touched, a touch mark new since before the pause) is his answer and
+#    skips the field-level stops, never the required-but-empty check; an
+#    event marked handled by the agent (a
 #    sign-in, a Next press) or by Jack (a CAPTCHA, a pause) doesn't stop,
 #    a CAPTCHA only when Jack handled it; more than one step is fine when
 #    the record says it is a wizard run.
@@ -363,8 +364,9 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
     allow = profile.consent_allowlist()
     census_by_ref = {b.get("ref"): b for b in (record.get("census") or []) if b.get("ref")}
     consent_actions: dict[str, str] = {}
-    # Fields Jack answered, left blank or reviewed himself after a pause (the
-    # wizard writes this list; a missing key waives nothing).
+    # Fields Jack touched himself after a pause he ended (a touch mark new
+    # since before it; the wizard writes this list; a missing key waives
+    # nothing).
     reviewed = {r for r in (record.get("human_reviewed") or []) if isinstance(r, str)}
 
     for f in fields:

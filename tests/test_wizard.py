@@ -246,9 +246,10 @@ def test_a_field_the_filler_filled_is_not_reviewed_at_a_pause():
     check(out.status == "needs_you" and "confidence is medium" in out.reason,
           f"the filler's own untouched answer keeps its stop ({out.status}, {out.reason})")
     check(clicks == [] and url.endswith("/apply"), f"Next never pressed on page one ({clicks}, {url})")
-    check(not (out.record or {}).get("human_reviewed") and all(
-        e.get("handled") == "jack" for e in out.events if e["kind"] == "gate_pause"),
-        "the pause was Jack's, but it reviewed nothing")
+    pauses = [e for e in out.events if e["kind"] == "gate_pause"]
+    check(pauses and all(e.get("handled") == "jack" and e.get("detail") == "0 field(s) touched by Jack"
+                         for e in pauses),
+          f"the pause was Jack's, but it reviewed nothing ({pauses})")
     check.done()
 
 

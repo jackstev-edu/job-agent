@@ -1093,3 +1093,14 @@ Commit 62bdcd4: VERDICT FLAG, 2 low FLAGs, both fixed in the next commit:
 the merge test's message overstated ("passes" -> "clears the
 hidden-and-ticked stop"); a dead `before` variable in _gate_pause removed.
 The BLOCK on e31717b was verified closed.
+
+Commits 38510fb and 3a46f15 (Jack's items of 2026-10-19): VERDICT FLAG,
+3 FLAGs.
+- A vacuous check in the filler-filled test (out.record is None on a parked
+  run). Fixed: asserts on the pause event's detail instead.
+- Two gate.py comments still described the old waiver. Fixed; the gate
+  version note records the 2026-10-19 narrowing (no version bump: the
+  gate's own code is unchanged, only what the wizard writes).
+- The reviewer's full run took 2h50m against 12m36s in the worktree just
+  before. Investigated with --durations=10 on the next run (see the
+  commit message for the slowest tests).
