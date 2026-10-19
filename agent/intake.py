@@ -76,7 +76,8 @@ _FIND_APPLY_JS = r"""
   document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
   // The text Jack sees: innerText, or an input's value; an aria-label only
   // for a control with no visible text at all (an icon button).
-  const texts = el => { const seen = norm(el.innerText || el.value);
+  const isBtnInput = el => el.tagName === 'INPUT' && ['submit', 'button'].includes((el.type || '').toLowerCase());
+  const texts = el => { const seen = norm(el.innerText || (isBtnInput(el) ? el.value : ''));
                         return [seen || norm(el.getAttribute('aria-label'))].filter(Boolean); };
   const all = [...document.querySelectorAll(
       'a, button, [role=button], input[type=submit], input[type=button]')].filter(visible);
@@ -94,7 +95,7 @@ _FIND_APPLY_JS = r"""
     if (!list.length) return null;
     const hrefs = new Set(list.map(e => e.tagName === 'A' ? (e.href || '') : ''));
     if (hrefs.size > 1) return null;
-    const words = new Set(list.map(e => norm(e.innerText || e.value || e.getAttribute('aria-label')).toLowerCase()));
+    const words = new Set(list.map(e => norm(e.innerText || (isBtnInput(e) ? e.value : '') || e.getAttribute('aria-label')).toLowerCase()));
     if (words.size > 1) return null;
     return list[0];
   };
@@ -103,7 +104,7 @@ _FIND_APPLY_JS = r"""
   return {found: hits.length, manual: manual.length, chosen: !!chosen,
           tag: chosen ? chosen.tagName.toLowerCase() : '',
           target: chosen && chosen.tagName === 'A' ? (chosen.getAttribute('target') || '') : '',
-          word: chosen ? norm(chosen.innerText || chosen.value || chosen.getAttribute('aria-label')) : ''};
+          word: chosen ? norm(chosen.innerText || (isBtnInput(chosen) ? chosen.value : '') || chosen.getAttribute('aria-label')) : ''};
 }
 """
 

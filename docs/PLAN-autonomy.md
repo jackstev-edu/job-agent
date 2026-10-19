@@ -6,6 +6,12 @@ the application end to end". A new session resumes from this file and
 `TODO.md`: each milestone below says what it changes, where, how it is
 tested, and how to tell it is done.
 
+## Status (2026-10-19)
+
+Milestones 0-7 are implemented and on origin/main. Every piece past
+milestone 0 is tested on mock pages only, never on a live portal. Open
+decisions for Jack are listed at the end of TODO.md.
+
 ## 0. Owner decisions (2026-10-18, Jack's own words, quoted from his prompt)
 
 These supersede the old rules where they conflict and are copied into

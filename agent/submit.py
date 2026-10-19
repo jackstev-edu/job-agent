@@ -48,7 +48,8 @@ _FIND_SUBMIT_JS = r"""
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
   document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
-  const text = el => norm(el.innerText || el.value || el.getAttribute('aria-label'));
+  const isBtnInput = el => el.tagName === 'INPUT' && ['submit', 'button'].includes((el.type || '').toLowerCase());
+  const text = el => norm(el.innerText || (isBtnInput(el) ? el.value : '') || el.getAttribute('aria-label'));
   const hits = [...document.querySelectorAll(
       'button, input[type=submit], input[type=button], [role=button], a')]
       .filter(visible).filter(el => { const t = text(el); return t && SUBMIT.test(t) && !NEXT.test(t); });

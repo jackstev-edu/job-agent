@@ -157,6 +157,10 @@ required one of those stops the gate, and the job is parked for you. An
 optional opt-in box that isn't on your `consent_allowlist` also stops the
 gate today (the rule predates `run`; see TODO for the decision).
 
+By the owner decision, `run` submits on every portal with no daily cap:
+`autosubmit_portals` and `daily_submit_cap` in profile.yaml are computed
+and logged with each gate verdict but gate nothing in `run`.
+
 ### Attended: `fill`
 
 ```bash

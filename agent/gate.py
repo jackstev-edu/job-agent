@@ -529,7 +529,7 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         elif box.get("described"):
             content.append(f"{name}: has fine print attached")
         elif (normalize_label(box.get("label_inner")) not in allow
-              and not consent_ok(box.get("label_inner"))):
+              and not consent_box_ok(box)):
             content.append(f"{name}: not on consent_allowlist, and not a terms / privacy consent")
 
     # 9. nothing unexpected along the way. An event the agent handled under

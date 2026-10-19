@@ -22,7 +22,7 @@ from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
 from . import (accounts, browser as browser_mod, extract, follow, gate, ledger, pages,
-               pipeline, submit as submit_mod)
+               pause as pause_mod, pipeline, submit as submit_mod)
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -35,7 +35,7 @@ TIME_CAP_S = 60 * 60
 FORWARD_WORDS = re.compile(
     r"^(next|continue|next step|next page|save (and|&) continue|save (and|&) next"
     r"|save (and|&) proceed|proceed|continue to (the )?next step|continue application"
-    r"|review( application| and submit)?|go to review|save and review)$", re.I)
+    r"|review( application)?|go to review|save and review)$", re.I)
 NEXT_ATTR = "data-ja-next"
 
 _PORTAL_NEXT = {
@@ -52,12 +52,17 @@ _FIND_NEXT_JS = r"""
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
   document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
-  const text = el => norm(el.innerText || el.value || el.getAttribute('aria-label'));
+  // A value is read only off a submit / button input, never off anything
+  // else that may carry role=button.
+  const isBtnInput = el => el.tagName === 'INPUT' && ['submit', 'button'].includes((el.type || '').toLowerCase());
+  const text = el => norm(el.innerText || (isBtnInput(el) ? el.value : '') || el.getAttribute('aria-label'));
+  // Anything that so much as mentions Submit is never a Next.
+  const saysSubmit = t => SUBMIT.test(t) || /submit/i.test(t);
   let hits = extra ? [...document.querySelectorAll(extra)].filter(visible) : [];
-  hits = hits.filter(el => !SUBMIT.test(text(el)));
+  hits = hits.filter(el => !saysSubmit(text(el)));
   if (!hits.length) hits = [...document.querySelectorAll(
       'button, input[type=submit], input[type=button], [role=button], a')]
-      .filter(visible).filter(el => { const t = text(el); return t && FORWARD.test(t) && !SUBMIT.test(t); });
+      .filter(visible).filter(el => { const t = text(el); return t && FORWARD.test(t) && !saysSubmit(t); });
   const words = new Set(hits.map(el => text(el).toLowerCase()));
   if (!hits.length || words.size > 1) return {found: hits.length, chosen: false, word: ''};
   const chosen = hits.find(el => (el.type || '').toLowerCase() === 'submit') || hits[0];
@@ -67,11 +72,14 @@ _FIND_NEXT_JS = r"""
 """
 
 # Which of these refs carry a trusted-input mark from the activity listener
-# (TOUCH_ATTR, set only for isTrusted events). Booleans only.
+# on their own element (TOUCH_ATTR, set only for isTrusted events while the
+# agent isn't filling). The mark on a wrapper doesn't count here: in follow
+# mode over-marking keeps a field from the model, but here a mark waives a
+# stop, so only the field's own element says anything. Refs only.
 _TOUCHED_JS = r"""
 ([refs, attr]) => refs.filter(r => {
   const el = document.querySelector(`[data-ja-ref="${CSS.escape(r)}"]`);
-  return !!el && (el.hasAttribute(attr) || !!el.closest('[' + attr + ']'));
+  return !!el && el.hasAttribute(attr);
 })
 """
 
@@ -117,8 +125,13 @@ class Wizard:
         self.agent_submissions_today = agent_submissions_today
         self.reload_profile = reload_profile
         self.guard = extract.ReadGuard()
+        # The activity listener's agent flag: while the filler works, its
+        # own (trusted, Playwright-sent) input is marked as the agent's, not
+        # as Jack's, so a touch mark can only come from him.
+        self.activity = ledger.ActivityGuard(quiet_ms=0, echo=lambda *a, **k: None)
         self.out = Outcome("needs_you")
         self.snapshots: dict = {}               # every page's read-back, by ref
+        self.census: dict = {}                  # every page's checkboxes after filling, by ref
         self.results: dict = {}
         self.human_reviewed: list[str] = []
         self.uploaded: dict | None = {}
@@ -131,8 +144,11 @@ class Wizard:
                                     uploads=self.uploaded)
         if "fields" in rec:
             # Earlier pages were read back when they were filled; the page
-            # now showing can only vouch for its own fields.
+            # now showing can only vouch for its own fields and boxes.
             rec["snapshot"] = {**self.snapshots, **(rec.get("snapshot") or {})}
+            now = rec.get("census") or []
+            showing = {b.get("ref") for b in now if isinstance(b, dict) and b.get("ref")}
+            rec["census"] = [b for r, b in self.census.items() if r not in showing] + list(now)
             rec["human_reviewed"] = list(self.human_reviewed)
             rec["wizard"] = wizard
         return rec
@@ -160,21 +176,35 @@ class Wizard:
         ev["handled"] = "jack"
         return True
 
+    def _marked(self, refs: list[str]) -> set[str]:
+        try:
+            return set(self.page.evaluate(_TOUCHED_JS, [refs, ledger.TOUCH_ATTR]) or [])
+        except Exception:
+            return set()
+
     def _gate_pause(self, fill: pipeline.PageFill, result: dict) -> None:
         """
-        The gate stopped on this page: pause, telling Jack the reasons. If
-        he presses Enter, this page counts as reviewed by him: a field he
-        typed into (a trusted input recorded by the activity listener), a
-        field left empty, or one still holding what the agent put there.
-        A field that was empty before the pause and holds a value now with
-        no trusted input is the page's doing, not his, and stays stopped.
+        The gate stopped on this page: pause, telling Jack the reasons. Only
+        a pause he ended with Enter (ANSWERED) counts; a timeout or a busy
+        terminal waives nothing. Then this page counts as reviewed by him
+        for: a field with a touch mark that is new since before the pause
+        (a trusted input of his, the filler's own input being marked as the
+        agent's); a field that isn't a checkbox and reads empty (left so by
+        him); a field the filler filled that still reads the planned value.
+        A field that was empty before and holds a value now with no new
+        touch mark is the page's doing, not his, and stays stopped. A
+        checkbox counts only when he touched it.
         """
         reasons = "; ".join(_clean(r) for r in result["content_reasons"][:8])
         before = dict(fill.snapshot)
+        refs = [f["ref"] for f in fill.fields if f.get("type") != "file"]
+        kinds = {f["ref"]: (f.get("type") or "").lower() for f in fill.fields}
+        marked_before = self._marked(refs)
         _, how = self.pauser.wait("job-agent needs you",
                                   f"This page needs you: {reasons}. Answer in the browser, then "
                                   f"press Enter.", prompt="Press Enter when you've answered: ")
-        if how == "timed_out":
+        if how != pause_mod.ANSWERED:
+            self.out.events.append({"kind": "gate_pause", "detail": how, "handled": None})
             return
         if self.reload_profile is not None:
             try:
@@ -185,23 +215,33 @@ class Wizard:
             now = extract.snapshot(self.page, fill.fields)
         except Exception:
             now = {}
-        refs = [f["ref"] for f in fill.fields if f.get("type") != "file"]
-        try:
-            touched = set(self.page.evaluate(_TOUCHED_JS, [refs, ledger.TOUCH_ATTR]) or [])
-        except Exception:
-            touched = set()
+        touched = self._marked(refs) - marked_before
+        results = fill.step.get("results") or {}
         reviewed: list[str] = []
         for ref in refs:
-            was, is_now = _present(before.get(ref)), _present(now.get(ref))
-            if ref in touched or not is_now or (was and before.get(ref) == now.get(ref)):
+            is_now = _present(now.get(ref))
+            planned = (fill.plan.get(ref) or {}).get("value")
+            agents_own = (ref in fill.plan and bool((results.get(ref) or {}).get("filled"))
+                          and planned is not None and _same(now.get(ref), planned))
+            if ref in touched:
+                reviewed.append(ref)
+            elif kinds.get(ref) == "checkbox":
+                continue
+            elif not is_now or agents_own:
                 reviewed.append(ref)
         for ref in reviewed:
             if ref not in self.human_reviewed:
                 self.human_reviewed.append(ref)
         fill.snapshot = now
         self.snapshots.update(now)
+        try:
+            boxes = extract.checkbox_census(self.page)
+        except Exception:
+            boxes = []
+        if isinstance(boxes, list):
+            self.census.update({b["ref"]: b for b in boxes if isinstance(b, dict) and b.get("ref")})
         self.out.events.append({"kind": "gate_pause",
-                                "detail": f"{len(touched)} field(s) answered by Jack",
+                                "detail": f"{len(touched)} field(s) touched by Jack",
                                 "handled": "jack"})
 
     # -- the loop --------------------------------------------------------------
@@ -229,9 +269,10 @@ class Wizard:
                     return self._parked(res.reason)
                 browser_mod.settle(page, 800)
                 continue
-            fill = pipeline.fill_page(page, self.prof, guard=self.guard,
-                                      resume=None if self.resume_done else self.resume,
-                                      posting_text=self.posting_text, portal=self.portal)
+            with self.activity.filling(page):
+                fill = pipeline.fill_page(page, self.prof, guard=self.guard,
+                                          resume=None if self.resume_done else self.resume,
+                                          posting_text=self.posting_text, portal=self.portal)
             page_events: list[dict] = []
             if fill is not None:
                 self.out.pages_filled += 1
@@ -246,6 +287,8 @@ class Wizard:
                 page_events = list(fill.events)
                 self.out.events += fill.events
                 self.snapshots.update(fill.snapshot)
+                self.census.update({b["ref"]: b for b in fill.census
+                                    if isinstance(b, dict) and b.get("ref")})
                 self.results.update(fill.step.get("results") or {})
                 result = gate.decide(self._page_record(fill, page_events), self.prof,
                                      agent_submissions_today=self.agent_submissions_today)
@@ -310,7 +353,12 @@ class Wizard:
                                   f"Before submitting: {_clean(submission.reason)}. Fix it in the "
                                   f"browser, then press Enter.",
                                   prompt="Press Enter when it's ready to submit: ")
-        self.out.events[-1]["handled"] = "jack" if how != "timed_out" else None
+        self.out.events[-1]["handled"] = "jack" if how == pause_mod.ANSWERED else None
+        if how == pause_mod.ANSWERED and self.reload_profile is not None:
+            try:
+                self.prof = self.reload_profile()
+            except Exception:
+                pass
 
     def _moved(self, before) -> bool:
         """Has the page changed since `before` (address or field structure)?"""
@@ -319,6 +367,12 @@ class Wizard:
         if now is None or before is None:
             return now is not before
         return (now["url"], now["fields"]) != (before["url"], before["fields"])
+
+
+def _same(a, b) -> bool:
+    """The same answer as the filler left: equal once whitespace is collapsed."""
+    norm = lambda v: re.sub(r"\s+", " ", str("" if v in (None, False) else v)).strip()
+    return norm(a) == norm(b)
 
 
 def _present(value) -> bool:

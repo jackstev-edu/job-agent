@@ -228,6 +228,7 @@ class PageFill:
     events: list[dict] = dataclass_field(default_factory=list)
     uploaded: dict | None = None                # {file box ref: [names]} or None
     snapshot: dict = dataclass_field(default_factory=dict)   # read-back after filling
+    census: list[dict] = dataclass_field(default_factory=list)  # checkboxes after filling
     lines: list[str] = dataclass_field(default_factory=list) # what to print
 
 
@@ -276,8 +277,13 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
         snap = extract.snapshot(page, fields)
     except Exception:
         snap = {}
+    try:
+        census = extract.checkbox_census(page)
+    except Exception:
+        census = []
     return PageFill(fields=fields, categories=categories, plan=plan, flags=flags, rows=rows,
-                    step=step, events=events, uploaded=uploaded, snapshot=snap, lines=lines)
+                    step=step, events=events, uploaded=uploaded, snapshot=snap,
+                    census=census if isinstance(census, list) else [], lines=lines)
 
 
 def has_next(page: "Page", portal: str) -> bool:

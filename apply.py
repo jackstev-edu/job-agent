@@ -1093,7 +1093,8 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None) -> 
         page, prof, url=url, portal=landing.portal, portal_method=landing.portal_method,
         company=company, role=role, resume=prof.resume_path(args.resume),
         posting_text=posting_text, pauser=pauser, echo=print,
-        agent_submissions_today=submitted_today)
+        agent_submissions_today=submitted_today,
+        reload_profile=lambda: Profile.load(args.profile))
     for line in out.log:
         print(f"{DIM}  {line}{OFF}")
     _print_summary(out.rows, out.flags)

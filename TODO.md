@@ -1015,3 +1015,43 @@ VERDICT BLOCK, 3 BLOCKs and 15 FLAGs. Fixed in the next commit unless noted.
 - FLAG: a button's aria-label or title could satisfy APPLY_WORDS. Fixed: the
   visible text (or value) must; aria-label only for a control with none.
 - FLAG: --resume unused, prof unused in run_one. Both used since M4.
+
+Commits b9d160a and 8b6fbb8 (BLOCK fixes + gate 7; M4-M7): VERDICT BLOCK,
+2 BLOCKs and 8 FLAGs. Fixed in the next commit unless noted.
+- BLOCK: a pause ending as no_terminal (a busy terminal) was treated like
+  Jack's Enter. Fixed: only ANSWERED counts, in the page pause and the
+  final pause; a test with a no_terminal pause asserts nothing reviewed,
+  nothing more pressed.
+- BLOCK: the filler's own Playwright input left the same trusted-input
+  mark as Jack's, so a field the filler had typed into counted as his
+  whatever the page did to it during the pause. Fixed: the filler runs
+  under the activity listener's agent flag (its input is marked as the
+  agent's), only a mark new since before the pause counts, and only on the
+  field's own element (no wrapper). A test has the page rewrite a
+  filler-typed email during the pause: not Jack's.
+- FLAG: "still the agent's value" meant "unchanged since the snapshot".
+  Fixed: the field must be in the plan, filled, and still read the
+  planned value.
+- FLAG: a wrapper's touch mark waived every field under it. Fixed: own
+  element only.
+- FLAG: the census pass route accepted an aria-label. Fixed: consent_box_ok
+  (visible <label> only) on both routes.
+- FLAG: reload_profile was never passed by run. Fixed.
+- FLAG: CLAUDE.md stated the reviewed-page waiver as settled. Fixed: it
+  says the waiver is the main session's reading, pending Jack.
+- FLAG: an unticked required terms box went into human_reviewed and the
+  tick planning was skipped. Fixed: a checkbox is reviewed only when
+  touched; a test pauses on the final page and still submits.
+- FLAG: "Review and submit" could be pressed as Next. Fixed: anything that
+  mentions Submit is never a Next.
+- FLAG: autosubmit_portals and daily_submit_cap are computed and logged but
+  don't gate `run` (the owner's "all portals, no cap"). Not changed; noted
+  in README as reporting-only. Jack decides whether to keep the settings.
+- FLAG: control finders read .value off any role=button element. Fixed:
+  only off submit / button inputs, in all four finders.
+- Found while fixing: the final record carried only the final page's
+  checkbox census, so an allowlisted box on an earlier page read "left for
+  you" at the end. Fixed: every page's post-fill census travels into the
+  final record, like the read-backs.
+- Note: shell substitution ate three backticked words in 8b6fbb8's commit
+  message ("`applied`", "`needs-you`", "`status`").

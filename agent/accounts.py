@@ -104,8 +104,9 @@ _FIND_BUTTON_JS = r"""
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
   document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
-  const texts = el => [el.innerText, el.value, el.getAttribute('aria-label'), el.getAttribute('title')]
-      .map(norm).filter(Boolean);
+  const isBtnInput = el => el.tagName === 'INPUT' && ['submit', 'button'].includes((el.type || '').toLowerCase());
+  const texts = el => [el.innerText, isBtnInput(el) ? el.value : '', el.getAttribute('aria-label'),
+                       el.getAttribute('title')].map(norm).filter(Boolean);
   const hits = [...document.querySelectorAll(
       'button, a, [role=button], input[type=submit], input[type=button]')]
       .filter(visible)
@@ -113,11 +114,11 @@ _FIND_BUTTON_JS = r"""
                                                   && ts.some(t => WORDS.test(t)); });
   // A submit button beats a link; the first of several equals wins only
   // when they all read the same.
-  const words = new Set(hits.map(el => norm(el.innerText || el.value || el.getAttribute('aria-label')).toLowerCase()));
+  const words = new Set(hits.map(el => norm(el.innerText || (isBtnInput(el) ? el.value : '') || el.getAttribute('aria-label')).toLowerCase()));
   if (!hits.length || words.size > 1) return {found: hits.length, chosen: false, word: ''};
   const chosen = hits.find(el => (el.type || '').toLowerCase() === 'submit') || hits[0];
   chosen.setAttribute(attr, '1');
-  return {found: hits.length, chosen: true, word: norm(chosen.innerText || chosen.value || chosen.getAttribute('aria-label'))};
+  return {found: hits.length, chosen: true, word: norm(chosen.innerText || (isBtnInput(chosen) ? chosen.value : '') || chosen.getAttribute('aria-label'))};
 }
 """
 

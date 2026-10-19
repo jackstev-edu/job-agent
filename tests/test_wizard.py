@@ -77,8 +77,17 @@ LEGAL_PAGE = f"""<!doctype html><html><head><title>Engineer - Example Co</title>
 {CLICKS_JS}</body></html>"""
 
 
-def _site(marketing=""):
-    return {"/apply": PAGE1, "/apply/2": PAGE2, "/apply/3": PAGE3.replace("MARKETING", marketing),
+# Variants: a second Email box on page two (the filler fills it); the
+# required City on page three instead of page two.
+EMAIL2 = '<label for="em2">Email</label><input id="em2" name="email2">'
+CITY = '<label for="city">City</label><input id="city" name="city" required>'
+
+
+def _site(marketing="", email_on_2=False, city_on_3=False):
+    page2 = PAGE2.replace('<label for="city">City</label><input id="city" name="city" required>',
+                          (CITY if not city_on_3 else "") + (EMAIL2 if email_on_2 else ""))
+    page3 = PAGE3.replace("MARKETING", marketing + (CITY if city_on_3 else ""))
+    return {"/apply": PAGE1, "/apply/2": page2, "/apply/3": page3,
             "/thanks": THANKS, "/legal": LEGAL_PAGE}
 
 
@@ -92,14 +101,14 @@ def _routes(site):
 class _Jack(pause.Pauser):
     """Stands in for Jack at each pause: runs `act(page, body)` and reports how it ended."""
 
-    def __init__(self, page, act=None):
+    def __init__(self, page, act=None, how=pause.TIMED_OUT):
         super().__init__(notify_fn=lambda t, b, echo=print: None, echo=lambda *a, **k: None)
-        self.page, self.act, self.bodies = page, act, []
+        self.page, self.act, self.bodies, self.how = page, act, [], how
 
     def wait(self, title, body, *, prompt, hidden=False, until=None):
         self.bodies.append(body)
         if self.act is None:
-            return None, pause.TIMED_OUT
+            return None, self.how
         self.act(self.page, body)
         return "", pause.ANSWERED
 
@@ -112,7 +121,7 @@ def _profile():
     return Profile.load(path)
 
 
-def _run(site, start, act=None, portal="generic", method="default"):
+def _run(site, start, act=None, portal="generic", method="default", how=pause.TIMED_OUT):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -123,7 +132,7 @@ def _run(site, start, act=None, portal="generic", method="default"):
                 ctx.route(pattern, handler)
             page = ctx.new_page()
             page.goto(f"{HOST}{start}")
-            jack = _Jack(page, act)
+            jack = _Jack(page, act, how)
             with mock.patch("agent.classify.classify_fields", classify_by_label), \
                     mock.patch("agent.mapper.map_fields", map_from_profile):
                 out = wizard.run_application(page, _profile(), url=f"{HOST}{start}", portal=portal,
@@ -193,6 +202,63 @@ def test_a_preticked_marketing_box_keeps_submit_unpressed():
     check(any("newsletter" in r.lower() for r in (out.gate_result or {}).get("content_reasons", [])),
           f"the reason names the box ({(out.gate_result or {}).get('content_reasons')})")
     check(dict(ticks).get("tos") is not True, "the terms box wasn't ticked either (no submit, no tick)")
+    check.done()
+
+
+def test_a_busy_terminal_pause_waives_nothing():
+    # BLOCK fix: only a pause Jack ended with Enter counts. A pause that ends
+    # because the terminal is still owed a line (no_terminal) is as
+    # unattended as a timeout: nothing reviewed, nothing more pressed.
+    check = Checks()
+    out, jack, clicks, ticks, url = _run(_site(), "/apply", act=None, how=pause.NO_TERMINAL)
+    check(out.status == "needs_you" and "City" in out.reason and clicks == ["Next"],
+          f"parked after page two, nothing more pressed ({out.status}, {out.reason}, {clicks})")
+    check(not out.record and all(e.get("handled") is None for e in out.events if e["kind"] == "gate_pause"),
+          f"no field reviewed, the pause not handled ({[e for e in out.events if e['kind'] == 'gate_pause']})")
+    check.done()
+
+
+def test_a_field_the_filler_typed_and_the_page_changed_is_not_jacks():
+    # BLOCK fix: the filler's own (trusted, Playwright-sent) input used to
+    # leave the same mark as Jack's. Now the filler works under the agent
+    # flag and only a mark new since before the pause counts, so a box the
+    # page rewrites during the pause isn't his.
+    check = Checks()
+
+    def jack_types_the_city_while_the_page_rewrites_the_email(page, body):
+        if "City" in body:
+            page.fill("#city", "Springfield")                       # Jack: a trusted input
+            page.evaluate("document.getElementById('em2').value = 'rewritten@example.invalid'")
+    out, jack, clicks, ticks, url = _run(_site(email_on_2=True), "/apply",
+                                         jack_types_the_city_while_the_page_rewrites_the_email)
+    by_label = {}
+    for st in out.steps:
+        for f in st["fields"]:
+            by_label.setdefault(f["label"], []).append(f["ref"])
+    reviewed = (out.record or {}).get("human_reviewed", [])
+    em2 = [r for r in by_label.get("Email", []) if r in {f["ref"] for f in out.steps[1]["fields"]}]
+    check(out.status == "submitted", f"the run still submitted ({out.status}, {out.reason})")
+    check(by_label.get("City", [None])[0] in reviewed, "the city Jack typed is his")
+    check(em2 and em2[0] not in reviewed,
+          f"the email the filler typed and the page rewrote is not his ({em2}, {reviewed})")
+    detail = next(e["detail"] for e in out.events if e["kind"] == "gate_pause")
+    check(detail == "1 field(s) touched by Jack", f"one touch counted, the filler's not ({detail})")
+    check.done()
+
+
+def test_a_pause_on_the_final_page_still_lets_the_terms_box_be_ticked():
+    # FLAG fix: a required terms box left unticked at a pause is not
+    # "reviewed" (a checkbox counts only when touched), so the gate still
+    # plans its tick and the application is submitted.
+    check = Checks()
+
+    def jack_types_the_city(page, body):
+        if "City" in body:
+            page.fill("#city", "Springfield")
+    out, jack, clicks, ticks, url = _run(_site(city_on_3=True), "/apply", jack_types_the_city)
+    check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
+          f"submitted after a pause on the final page ({out.status}, {out.reason}, {clicks})")
+    check(len(jack.bodies) == 1 and "City" in jack.bodies[0], f"one pause, for the city ({jack.bodies})")
     check.done()
 
 
