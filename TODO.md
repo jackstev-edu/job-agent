@@ -1133,3 +1133,16 @@ Commit 8137f1a: VERDICT FLAG, 2 FLAGs.
   elsewhere); every request there is fulfilled locally, so it reads as a
   navigation wait under load. Not investigated; noted so a slower run
   tripping the 20-minute rule has a suspect.
+
+Commit df2724f: pushed with a failing suite run. The main session's
+compound command committed and pushed before checking the run, which had
+1 failed (the capture flake) and 274 passed. The second time this rule
+was broken in this run (3606540 was the first). The diagnostics the
+commit itself added were printed by that failure: hooked=True, no
+fill_step_failed event, final_read_off_form logged, capture "polled" with
+both fields unreadable. So the hook was armed; the leading candidate is
+now a later polled read displacing the exact one (Capture._keep replaces
+an exact read with any polled read whose snapshot differs, and a read
+with no entries differs). Proposed fix for Jack to approve: an exact
+read is never replaced by a polled one in the same watch (a new exact
+read still replaces it). Not changed here: outside the two items.
