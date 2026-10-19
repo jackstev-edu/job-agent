@@ -206,7 +206,6 @@ class Wizard:
         checkbox counts only when he touched it.
         """
         reasons = "; ".join(_clean(r) for r in result["content_reasons"][:8])
-        before = dict(fill.snapshot)
         refs = [f["ref"] for f in fill.fields if f.get("type") != "file"]
         kinds = {f["ref"]: (f.get("type") or "").lower() for f in fill.fields}
         marked_before = self._marked(refs)

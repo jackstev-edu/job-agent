@@ -308,7 +308,8 @@ def test_the_final_pause_and_the_record_merge_on_their_own():
                   f"earlier pages' boxes, before and after, are in the final record ({refs})")
             reasons = gate.decide(rec, _profile())["content_reasons"]
             check(not any("hidden, and ticked" in r for r in reasons),
-                  f"the pair's Yes on an earlier page passes with its pre-fill state ({reasons})")
+                  f"the pair's Yes on an earlier page clears the hidden-and-ticked stop with its "
+                  f"pre-fill state ({reasons})")
             w.prefill = {}
             reasons = gate.decide(w._record(w.out.steps, [], wizard=True), _profile())["content_reasons"]
             check(any("hidden, and ticked" in r for r in reasons),

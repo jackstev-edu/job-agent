@@ -1095,3 +1095,8 @@ Commit e31717b: VERDICT BLOCK, 1 BLOCK and 6 FLAGs. Fixed in the next commit.
 - FLAG: the merge test never ran the gate. Fixed: an earlier page's pair
   answered Yes passes the merged record and stops without its pre-fill.
 - FLAG: the final-snapshot gap wasn't on the MUST FIX list. Fixed: added.
+
+Commit 62bdcd4: VERDICT FLAG, 2 low FLAGs, both fixed in the next commit:
+the merge test's message overstated ("passes" -> "clears the
+hidden-and-ticked stop"); a dead `before` variable in _gate_pause removed.
+The BLOCK on e31717b was verified closed.
