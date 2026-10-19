@@ -144,15 +144,15 @@ How the code keeps them, and rules of its own:
   Next after the page's gate says would_submit (or after a pause Jack
   ended); submit.py presses Submit after the gate says would_submit on the
   full record. After a pause Jack ends with Enter (never a timeout or a
-  busy terminal), the page's fields count as reviewed by him (a field with
-  a touch mark new since before the pause, the filler's own input being
-  marked as the agent's; a non-checkbox field left empty; a field the
-  filler filled that still reads its planned value; a checkbox only when
-  touched), and the gate skips field-level stops for those, never the
-  required-but-empty check. A field that was empty before the pause and
-  holds a value after it with no new touch mark is never counted as his.
-  This waiver is the main session's reading of the owner decisions and is
-  listed in TODO for Jack to confirm or narrow. `filler.py` never presses Enter and never types a line break
+  busy terminal), a field counts as reviewed by him only if it carries a
+  touch mark that is new since before the pause and is not the filler's
+  own input (the filler works under the activity listener's agent flag,
+  and only the field's own element counts); the gate skips field-level
+  stops for those, never the required-but-empty check. Every other field
+  keeps the normal checks: a pause proves he was present, not that he
+  checked every field (Jack, 2026-10-19). A field that was empty before
+  the pause and holds a value after it with no new touch mark is never
+  counted as his. `filler.py` never presses Enter and never types a line break
   outside a textarea. At click time it checks again, on the element and on
   the button or input around it, that a dropdown, a dropdown row (or a
   button or input inside the row) and a text box can't submit the form; a

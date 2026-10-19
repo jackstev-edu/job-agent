@@ -83,9 +83,13 @@ EMAIL2 = '<label for="em2">Email</label><input id="em2" name="email2">'
 CITY = '<label for="city">City</label><input id="city" name="city" required>'
 
 
-def _site(marketing="", email_on_2=False, city_on_3=False):
+OPTIONAL_CITY = '<label for="city">City</label><input id="city" name="city">'
+
+
+def _site(marketing="", email_on_2=False, city_on_3=False, city_optional=False):
     page2 = PAGE2.replace('<label for="city">City</label><input id="city" name="city" required>',
-                          (CITY if not city_on_3 else "") + (EMAIL2 if email_on_2 else ""))
+                          ((OPTIONAL_CITY if city_optional else CITY) if not city_on_3 else "")
+                          + (EMAIL2 if email_on_2 else ""))
     page3 = PAGE3.replace("MARKETING", marketing + (CITY if city_on_3 else ""))
     return {"/apply": PAGE1, "/apply/2": page2, "/apply/3": page3,
             "/thanks": THANKS, "/legal": LEGAL_PAGE}
@@ -121,7 +125,8 @@ def _profile():
     return Profile.load(path)
 
 
-def _run(site, start, act=None, portal="generic", method="default", how=pause.TIMED_OUT):
+def _run(site, start, act=None, portal="generic", method="default", how=pause.TIMED_OUT,
+         mapper=map_from_profile):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -134,7 +139,7 @@ def _run(site, start, act=None, portal="generic", method="default", how=pause.TI
             page.goto(f"{HOST}{start}")
             jack = _Jack(page, act, how)
             with mock.patch("agent.classify.classify_fields", classify_by_label), \
-                    mock.patch("agent.mapper.map_fields", map_from_profile):
+                    mock.patch("agent.mapper.map_fields", mapper):
                 out = wizard.run_application(page, _profile(), url=f"{HOST}{start}", portal=portal,
                                              portal_method=method, company="Example Co",
                                              role="Engineer", resume=None, posting_text="",
@@ -202,6 +207,66 @@ def test_a_preticked_marketing_box_keeps_submit_unpressed():
     check(any("newsletter" in r.lower() for r in (out.gate_result or {}).get("content_reasons", [])),
           f"the reason names the box ({(out.gate_result or {}).get('content_reasons')})")
     check(dict(ticks).get("tos") is not True, "the terms box wasn't ticked either (no submit, no tick)")
+    check.done()
+
+
+def _medium_confidence_mapper(fields, profile, page_text=""):
+    """The stand-in mapper, but every answer comes back medium confidence."""
+    out = map_from_profile(fields, profile, page_text)
+    for item in out.values():
+        if item.get("value") is not None:
+            item["confidence"] = "medium"
+    return out
+
+
+def test_a_field_left_empty_at_a_pause_is_not_reviewed():
+    # Jack's narrowing (2026-10-19): an optional City the mapper left blank
+    # stops the gate ("left blank"); Jack presses Enter without typing. The
+    # old waiver counted the empty field as his and submitted; now it stays
+    # stopped and the job parks. Fails on a9d125d (status was submitted).
+    check = Checks()
+    out, jack, clicks, ticks, url = _run(_site(city_optional=True), "/apply",
+                                         act=lambda page, body: None)
+    check(out.status == "needs_you" and "City" in out.reason and "left blank" in out.reason,
+          f"an untouched empty field keeps its stop ({out.status}, {out.reason})")
+    check(clicks == ["Next"] and url.endswith("/apply/2"), f"nothing pressed after the stop ({clicks})")
+    check(len(jack.bodies) == 1 and "City" in jack.bodies[0], "one pause, for the city")
+    check.done()
+
+
+def test_a_field_the_filler_filled_is_not_reviewed_at_a_pause():
+    # Jack's narrowing (2026-10-19): the filler's own answers at medium
+    # confidence stop the gate ("model confidence is medium, not high") on
+    # page one; Jack presses Enter without touching them. The old waiver
+    # counted a field still holding the filler's value as his and went on;
+    # now it stays stopped. Fails on a9d125d (the run went on to page two).
+    check = Checks()
+    out, jack, clicks, ticks, url = _run(_site(), "/apply", act=lambda page, body: None,
+                                         mapper=_medium_confidence_mapper)
+    check(out.status == "needs_you" and "confidence is medium" in out.reason,
+          f"the filler's own untouched answer keeps its stop ({out.status}, {out.reason})")
+    check(clicks == [] and url.endswith("/apply"), f"Next never pressed on page one ({clicks}, {url})")
+    check(not (out.record or {}).get("human_reviewed") and all(
+        e.get("handled") == "jack" for e in out.events if e["kind"] == "gate_pause"),
+        "the pause was Jack's, but it reviewed nothing")
+    check.done()
+
+
+def test_a_field_jack_touched_at_a_pause_is_still_reviewed():
+    # The one case kept: the optional City the mapper left blank, which Jack
+    # types during the pause (a trusted input, a new mark), is his, and the
+    # run goes on to submit. Passes on a9d125d too: a regression guard, not
+    # a change.
+    check = Checks()
+
+    def jack_types_the_city(page, body):
+        if "City" in body:
+            page.fill("#city", "Springfield")
+    out, jack, clicks, ticks, url = _run(_site(city_optional=True), "/apply", jack_types_the_city)
+    check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
+          f"the touched field is waived and the run submits ({out.status}, {out.reason}, {clicks})")
+    by_label = {f["label"]: f["ref"] for st in out.steps for f in st["fields"]}
+    check(by_label.get("City") in (out.record or {}).get("human_reviewed", []), "the city is his")
     check.done()
 
 

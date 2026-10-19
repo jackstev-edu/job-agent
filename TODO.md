@@ -966,19 +966,12 @@ Commit eb4dc9f (M1 a and b), 4 FLAGs and 3 notes:
   Meanwhile: add such labels to `consent_allowlist` (exact text); the
   wizard reloads the profile after each pause, so an edit takes effect on
   the re-check.
-- **A page Jack reviews.** After a pause he ends with Enter (never a
-  timeout or a busy terminal), these fields count as his and the
-  field-level stops are skipped for them: a field with a touch mark new
-  since before the pause (the filler's own input is marked as the agent's,
-  and only the field's own element counts); a non-checkbox field that reads
-  empty; a field the filler filled that still reads its planned value. A
-  checkbox counts only when touched. The required-but-empty check and the
-  checkbox census still apply. A field that was empty before the pause and
-  holds a value after it with no new touch mark is never his. The reviewer
-  notes the second and third kinds lift stops on fields Jack never touched
-  (a loose-fit legal answer, a low-confidence model answer, an empty
-  optional EEO select); if you'd rather the waiver cover only fields you
-  touched, say so and the `elif not is_now or agents_own` branch goes.
+- ~~**A page Jack reviews.**~~ RESOLVED by Jack, 2026-10-19: after a pause
+  he ends with Enter, a field counts as his only if it carries a touch mark
+  new since before the pause that is not the filler's own input. The
+  "left empty" and "still the agent's value" cases are gone; those fields
+  get the normal gate checks. A pause proves he was present, not that he
+  checked every field.
 - **Chrome's save-password bubble.** Unverified whether bundled Chromium
   saves the generated password on its own. If not, every return to the
   same portal is a forgot-password pause.

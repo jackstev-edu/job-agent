@@ -196,18 +196,17 @@ class Wizard:
         """
         The gate stopped on this page: pause, telling Jack the reasons. Only
         a pause he ended with Enter (ANSWERED) counts; a timeout or a busy
-        terminal waives nothing. Then this page counts as reviewed by him
-        for: a field with a touch mark that is new since before the pause
-        (a trusted input of his, the filler's own input being marked as the
-        agent's); a field that isn't a checkbox and reads empty (left so by
-        him); a field the filler filled that still reads the planned value.
-        A field that was empty before and holds a value now with no new
-        touch mark is the page's doing, not his, and stays stopped. A
-        checkbox counts only when he touched it.
+        terminal waives nothing. Then a field counts as reviewed by him only
+        if it carries a touch mark that is new since before the pause (a
+        trusted input of his; the filler's own input is marked as the
+        agent's, and only the field's own element counts). Every other field
+        keeps the gate's normal checks: a pause proves he was present, not
+        that he checked every field (Jack, 2026-10-19). A field that was
+        empty before and holds a value now with no new touch mark is the
+        page's doing, not his.
         """
         reasons = "; ".join(_clean(r) for r in result["content_reasons"][:8])
         refs = [f["ref"] for f in fill.fields if f.get("type") != "file"]
-        kinds = {f["ref"]: (f.get("type") or "").lower() for f in fill.fields}
         marked_before = self._marked(refs)
         _, how = self.pauser.wait("job-agent needs you",
                                   f"This page needs you: {reasons}. Answer in the browser, then "
@@ -229,24 +228,8 @@ class Wizard:
         # with no trustworthy "before", no mark counts as new.
         touched = (set() if marked_before is None or marked_after is None
                    else marked_after - marked_before)
-        results = fill.step.get("results") or {}
-        reviewed: list[str] = []
         for ref in refs:
-            if ref in touched:
-                reviewed.append(ref)
-                continue
-            # With the read-back unreadable, only a touch of Jack's says
-            # anything: a failed read can only shrink the waiver.
-            if now is None or kinds.get(ref) == "checkbox":
-                continue
-            is_now = _present(now.get(ref))
-            planned = (fill.plan.get(ref) or {}).get("value")
-            agents_own = (ref in fill.plan and bool((results.get(ref) or {}).get("filled"))
-                          and planned is not None and _same(now.get(ref), planned))
-            if not is_now or agents_own:
-                reviewed.append(ref)
-        for ref in reviewed:
-            if ref not in self.human_reviewed:
+            if ref in touched and ref not in self.human_reviewed:
                 self.human_reviewed.append(ref)
         if now is not None:
             fill.snapshot = now
@@ -391,20 +374,6 @@ class Wizard:
         if now is None or before is None:
             return now is not before
         return (now["url"], now["fields"]) != (before["url"], before["fields"])
-
-
-def _same(a, b) -> bool:
-    """The same answer as the filler left: equal once whitespace is collapsed."""
-    norm = lambda v: re.sub(r"\s+", " ", str("" if v in (None, False) else v)).strip()
-    return norm(a) == norm(b)
-
-
-def _present(value) -> bool:
-    if value is None or value is False:
-        return False
-    if isinstance(value, (list, tuple)):
-        return any(_present(v) for v in value)
-    return bool(str(value).strip())
 
 
 def run_application(page: "Page", prof, **kw) -> Outcome:
