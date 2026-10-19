@@ -98,14 +98,17 @@ session's scratch folder, and is listed by kind in TODO):
   `agent/sensitive.py`, an early TODO);
 - an employer and a university in early README text, a university as the
   example in `agent/matching.py`'s docstring, and a city as a test value;
-- the first blob of this plan (9620262), which named those strings.
+- the first blob of this plan, which named those strings;
+- after the first push, one old comment in `agent/filler.py` still held the
+  area code of the phone number in two fragments (found by the reviewer);
+  a fourth pass replaced those and main was force-pushed again.
 
 Commit messages and author fields hold only GitHub noreply addresses; test
 stubs (555 numbers, example.invalid, 1 Example Street) stay.
 
 Steps: `git bundle` backup to the scratch folder; `git filter-repo
 --replace-text` with the list; re-add `origin`; re-scan all blobs and commit
-messages; confirm `v0.1-mvp` points at the rewritten 9d84445; force push
+messages; confirm `v0.1-mvp` points at the retagged commit; force push
 `main` and the tag; write the old hashes into TODO under "Jack: ask GitHub
 Support to purge".
 

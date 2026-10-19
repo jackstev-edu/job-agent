@@ -644,7 +644,7 @@ Plan: `docs/PLAN-autonomy.md`. Each FLAG from the rule-reviewer on this
 run, with what was done about it. Jack's instruction: FLAGs are logged and
 the run continues.
 
-Commit 9620262 (the plan), 12 FLAGs:
+Commit 9620262 (the plan, pre-rewrite hash), 13 FLAGs:
 - The plan named the strings M0 purges. Fixed: the plan now names them by
   kind; the old plan blob is in the M0 rewrite set.
 - The password rule was labelled "unchanged" while narrowed. Fixed: the plan
@@ -797,3 +797,134 @@ What was replaced, by kind: a real phone number in three shapes; the
 owner's full name as a test value; two company names in comments; an
 employer, a university and a city; and the first blob of the plan, which
 named them. The replacement list itself was kept outside the repo.
+
+Second force push (pass 4, same day): the reviewer found the area code of
+the purged number in two comment fragments in one old agent/filler.py blob.
+Those were replaced and main force-pushed again, under the same advance
+approval. The hashes pushed in between, also to purge:
+
+- 015f65d949ceb7ebf9fbea2dc3853505dccbe54b
+- 03706ba5ce1e873ea365eda2a5df2de5b179d232
+- 044dc1642b431f1b22b555ee20986fc12dcccbad
+- 05250d7cdc2829830df21f8fcbbcc38dd9eb60bd
+- 07c44a5425cc6af4ac7ab572ca39c29b48834747
+- 0859d24c931af8632845c8062e72ced6b19f8dfa
+- 0a2523ee1879347543372abe230a9299b26862b2
+- 0aea348b70bcf9be406795d0c0e44b6781a797e6
+- 0bd7da333c8cba3b4b759f114bb6ce636382d13b
+- 0e4b1b1cb8e2c947dbd0aa532a29e87bce964115
+- 0ee2a5eee1bd3933100e848abd1e3acd9e8cee0d
+- 1298d2d0a9caf4ac6715abdd5c93cf5ab67baaa0
+- 13777e2c2cd2a3afab0a65962654188ce5dd8ed2
+- 183cbce4ca731e3c9a8000d07b7645cc038eb418
+- 192453f566b218ba4431bd8ed5ff116ff7102ffb
+- 1a9d793077039a440e41fbc39870c1258c7ebb03
+- 1db7fdead54dbeec34d081f5a00e9e85b76b13d0
+- 21b0e7ac81649a9a1857157f44be84a5f8df1659
+- 22457d06368af682461898bf2569c6b0a20c099e
+- 24a31627780e216fee659ff7df75513d24f1e795
+- 27b62db2a2fc80ad05d197e5ecf0ce325772bbe0
+- 285952798958f6ad53da6f3639ba229c50479104
+- 28c9e10196b4464c4a809028d634810736f17b39
+- 2c33879d8131c9c524593b5f52b36603dd4d1b32
+- 2c7a1ab3fec4d94da842f52899d1b8240d016fc8
+- 2d7c3465ba088a83aa4e0ef8eddd671c6db670f6
+- 2d9e9042ac84d387d351f9346fbeb21c548e1f0a
+- 3158f399bbe7b59600630cf714937abada844492
+- 31770f4ce04b90b6ab2fe22cb7c63aafbc77c978
+- 35aba120223219a9c5331d72801dc961bc4f0f00
+- 3c01ece154fb9be91af094b7f7132bc5388125a3
+- 4203f62cda49fd9528da8cfc15e083591dc204e4
+- 42820170c24ce263276d5516ef82f76462982cbf
+- 4743ad7d722e1a32b5800273aa7ec7cb3e914a0d
+- 479cd5e75f129d2a4a09ebb382dd2de88a399455
+- 47f871cb6a3395b389d522e0374a5c9193ae5fe3
+- 4a5d553383cb8aa3276f2ac042fe8079a3ba9e91
+- 4ec285cc79f390e30443f600b624f1d2c6d51c7a
+- 4f9cb902acb451949326b66b4c9b540e62cfff5d
+- 4fedef12ba060e1c470a89669940476dda849716
+- 504077eda26c52e2aa4896ee5559ea01c4eb1faf
+- 54f039b48e0886f2416fd9ac4c239bfbf23dd378
+- 55238f6867c37ddf763e7a3d7c1ca083b03b7b68
+- 5895f15dd07c6795b370f615720ad03475b52b6d
+- 58f892d8889d0dcf2a9ff26260d3b01f3409d951
+- 612979387842168b4f6cbb2251b18b2d9455173f
+- 66f7616270e754148cae303e56170ef00384c3e4
+- 695fc7e6046561beb721516cd2e854b37a799f5d
+- 6ca0dc3a892fecda448582307831dd6022d158e0
+- 6d0cbfeab7902210d3c8a2cc8e558af2a504edbb
+- 7089f2e5db4e256709ac4ea3be6eb7387ef959de
+- 753d27f5187e0ac0782ea5d58af575375043de86
+- 7619f96d4e19dc35e9ec45cdd14caaba4fb7af31
+- 7b29c3d3f34f2f0688e1697db0b8b8b402c2f65d
+- 7c532f2c4ce35ef460d30717b627f18906000c61
+- 7c71a44da580a5e47a7f7906be9a06236f9b824e
+- 7fabb9f93d1112cfdb2d500825c9b20921fad8fb
+- 8300ab2d44fdd7bafadc9736e585c06ab1f234b8
+- 8424d173468a51eed9e70371c8a7091bbbe4eb62
+- 8b47afe744cefab5eaef0e8c9a8874d646833d66
+- 8d23bbffc7523bd4aa4ab730dd9dbfd475cf3337
+- 92d2e0ffced00849ed8da0bab20115e5312044b7
+- 9563bc59dc3e0f71f84a0cc33c75d6b88b35225f
+- 962026286e07f2e4f6d1dfe3e021563e5cd84e6b
+- 9a721b41d1b18f14fdf871e170a306f65be76306
+- 9b9e6159c91cbd9670255ebbe581e42dafb2ef66
+- 9ca5c2dd9b0722a440a540e835c79a39a12f3402
+- 9d844452529ced2c95938f8f25f7eafd3702bc2e
+- a0f25f534e505f18fb11bc1ca6bf11fcd6bd3c80
+- a348cb28e23db805b58108f33c2f9bbfffab9456
+- a3c3bd359c11ab006029af5752163b846dd291b6
+- a66b64bda2c156da5fcecfbd21637932cccf5bc5
+- a676d4f48d9b017981d19979e148e05adffa389f
+- a7c59c2f016d5cea0017979e7c02473c65d642f8
+- a83e73ee3fb00553b32393dbf7688588d01dfc45
+- a93dac37958bbe8dd1eac64072008e49628df8fa
+- aae94127e0f34a77926a88f0873dfd1fee3b205c
+- ac02be0a95d0738e93e9cd1fbc82f7e46e1829a8
+- ad0b9c5117c0ebc99e0b74e2a52a8f4129b83ef1
+- b10b5532cfe10819968ae657ece514f22db9e193
+- b2fd397dcfc32b529027bcebe5504795560571d0
+- b3087097e4898730c9448f3bbbd27c4393f7f867
+- b4193b223b5a31267e6cd20e77b034327ccea62f
+- b9049d2623ddc7b776ab74a62c78f7cc5c1ef2f0
+- b9ee30fe82f7dfc6328dfc47a0b3c5b607f7a57d
+- bf2b19966129c0c5e19201e350063c245f7372e3
+- c04d879448a8a757f4b757620ad223b807eb605f
+- c8f7f57a4387a704797ebce5fc19f500f61c4dbf
+- c932326d79df490d7002a31e237a3ec574622e0f
+- ca7c9ba8f023684ec0ea57715027fc895e5801af
+- d0d60d0d03865ef3b94b4b2be2a7e3c073f0b46f
+- d32b9305e86609b3c09e13438d97a81ff06cec75
+- d35cd496d93a84af71948a54dbeee4f5f2da16c8
+- d3c378bba1a711d819e9452ab5a395cb0dbe5d42
+- d6cf4fdc33e53771cebe6f7ab9780c9957e3bbda
+- da74ac7508c702ac3ffbf2e052ed81ff8aee0e5e
+- e17de4403198810cf6cb17e5190b0236dc75ef97
+- e2bea7a07dda8eb55017ed073e78760197bf788f
+- e2d8a65c00d6ce2a7b38ebff49af58e4e10a5a82
+- eb900c62a8991317be54a9d6d8cf53b9313e9cd8
+- edecdf413465fd41dbc70c09ef2f278e6690de73
+- eeb19b89dfa460e6ed4ad345e74ad6abb1db444c
+- eecafb982e2762bc0c52d40f9eb356be898359cc
+- ef603900d9056908885399a5f90551d05dc30102
+- efb6c5091789ff06bc25cdfed477b8683ba8119f
+- f0428252f5850b4480d438c5920c3b6a29a30ea1
+- f06dbaa0ea210fb624fa085656a94052ad9b162b
+- fb2fce3bab9fe57d41dd193a11164cc174b7d49d
+- fd7efe3f90a5ac6674a11350162a59591d748524
+- fd9329e0e139a6e0db01e6b69b801d8998737307
+
+Local copies of the pre-rewrite history (every purged string) are the
+bundles job-agent-pre-scrub.bundle and job-agent-pre-scrub-2.bundle in this
+session's scratch folder under %LOCALAPPDATA%\Temp\claude\. Delete them once
+GitHub Support confirms the purge, or sooner if you do not want a backup.
+
+Commit e2bea7a (milestone 0, pre-pass-4 hash), 6 FLAGs:
+- Area-code fragments survived in one old blob. Fixed: pass 4, above.
+- The pre-rewrite bundles are not named in TODO. Fixed: named above.
+- "Only comments, docstrings and test values changed" could not be
+  verified without the bundle. Jack can diff a clone of the bundle.
+- The plan named pre-rewrite hashes. Fixed.
+- "12 FLAGs" over 13 bullets. Fixed.
+- The plan records decisions CLAUDE.md does not yet hold. Noted: they
+  take effect only when CLAUDE.md records them (milestone 1).
