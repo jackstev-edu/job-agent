@@ -85,8 +85,9 @@ def test_edits_and_consent_baselines():
 
     same = {"t": "springfield ", "b": "", "w": True, "l": False, "c": "Exampleland"}
     check(kinds(same) == {}, "agent's answers kept, would_tick ticked, leave left -> no edits")
-    check(kinds({**same, "w": False}) == {"w": "unticked"},
-          "would_tick box left unticked -> an edit")
+    # "I certify" is a legal declaration: that it changed is kept, not which way.
+    check(kinds({**same, "w": False}) == {"w": "changed_withheld"},
+          "would_tick declaration box left unticked -> an edit, direction withheld")
     check(kinds({**same, "l": True}) == {"l": "ticked"}, "leave box ticked -> an edit")
     check(kinds({**same, "t": "Shelbyville", "b": "Q."}) == {"t": "changed", "b": "filled_blank"},
           "a changed answer and a filled blank")
@@ -99,6 +100,41 @@ def test_edits_and_consent_baselines():
     check(not any("Springfield" in json.dumps(e) for e in
                   outcome.compute_edits(rec, gate, {**same, "t": "Shelbyville"})),
           "edits name fields, never values")
+    check.done()
+
+
+def test_a_legal_or_eeo_checkbox_edit_never_says_which_way():
+    # Must-fix (a): a checkbox whose tick IS the answer (veteran status, a
+    # sponsorship declaration, a criminal-record box, a traced field, a
+    # legal category) records "changed_withheld", never ticked / unticked.
+    # Before this, every such row stored the answer as its kind.
+    check = Checks()
+    rec = {"fields": [{"ref": "v", "type": "checkbox", "label": "I am a protected veteran"},
+                      {"ref": "s", "type": "checkbox",
+                       "label": "I will require sponsorship for employment visa status"},
+                      {"ref": "k", "type": "checkbox", "label": "I have been convicted of a felony"},
+                      {"ref": "r", "type": "checkbox", "label": "Box", "raw_legal": True},
+                      {"ref": "c", "type": "checkbox", "label": "Tick to confirm"},
+                      {"ref": "u", "type": "checkbox", "label": "Also a box"},
+                      {"ref": "m", "type": "checkbox", "label": "Email me job alerts"}],
+           "categories": {"c": "consent"},
+           "plan": {"v": {"value": False}, "s": {"value": False}, "k": {"value": False},
+                    "r": {"value": False}, "c": {"value": False}, "u": {"value": False},
+                    "m": {"value": False}}}
+    gate = {"consent_actions": {}, "trace": [{"ref": "u"}]}
+    final = {"v": True, "s": True, "k": True, "r": True, "c": True, "u": True, "m": True}
+    edits = outcome.compute_edits(rec, gate, final)
+    kinds = {e["ref"]: e["kind"] for e in edits}
+    for ref, what in (("v", "an EEO line"), ("s", "a work-authorization guard"),
+                      ("k", "a HARD_STOPS legal pattern"), ("r", "the page's raw_legal flag"),
+                      ("c", "a consent category"), ("u", "a traced ref")):
+        check(kinds.get(ref) == "changed_withheld", f"{what}: the direction is withheld")
+    check(kinds.get("m") == "ticked", "an ordinary opt-in box still says ticked")
+    stored = json.dumps([e for e in edits if e["ref"] != "m"])
+    check("ticked" not in stored and "unticked" not in stored,
+          "no withheld row carries the words ticked or unticked")
+    check(len([e for e in edits if e["kind"] == "changed_withheld"]) == 6,
+          "a withheld change still counts as an edit (six of them)")
     check.done()
 
 

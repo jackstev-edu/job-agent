@@ -284,6 +284,14 @@ SPONSORSHIP = {"future": "eligibility.requires_sponsorship_future",
                "now": "eligibility.requires_sponsorship_now"}
 _SAYS_FUTURE = re.compile(r"future|later|any\s+time", re.I)
 _SAYS_NOW = re.compile(r"\bnow\b|currently|\bbegin\b|commenc", re.I)
+# The sponsorship clause: the sentence that actually asks about sponsorship.
+_SPONSOR_WORD = re.compile(r"sponsor|immigration|petition|work\s+permit|visa", re.I)
+_SENTENCE_END = re.compile(r"[.?!;:\r\n]+")
+
+
+def _sponsor_clauses(text: str) -> list[str]:
+    """The sentences of `text` that mention sponsorship at all."""
+    return [s for s in _SENTENCE_END.split(text) if _SPONSOR_WORD.search(s)]
 
 
 def sponsorship_line(text: str, lines: set[str]) -> str | None:
@@ -292,16 +300,22 @@ def sponsorship_line(text: str, lines: set[str]) -> str | None:
     matches both. "Future" with no "now" word is the future line; a "now"
     word with no "future" is the now line. Both words, or neither, is
     still yours: the question is asking about both times, or we can't tell.
-    None when this isn't that pair.
+    The deciding word must sit in the same sentence as the sponsorship
+    word ("Will you require sponsorship? Think about the future." decides
+    nothing), while a word of the other kind anywhere in the text still
+    blocks the decision. None when this isn't that pair.
     """
     if lines != set(SPONSORSHIP.values()):
         return None
     variants = text_variants(text)
-    future = any(_SAYS_FUTURE.search(v) for v in variants)
-    now = any(_SAYS_NOW.search(v) for v in variants)
-    if future and not now:
+    future_anywhere = any(_SAYS_FUTURE.search(v) for v in variants)
+    now_anywhere = any(_SAYS_NOW.search(v) for v in variants)
+    clauses = [c for v in variants for c in _sponsor_clauses(v)]
+    future_in_clause = any(_SAYS_FUTURE.search(c) for c in clauses)
+    now_in_clause = any(_SAYS_NOW.search(c) for c in clauses)
+    if future_in_clause and not now_anywhere:
         return SPONSORSHIP["future"]
-    if now and not future:
+    if now_in_clause and not future_anywhere:
         return SPONSORSHIP["now"]
     return None
 

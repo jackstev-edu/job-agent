@@ -377,5 +377,44 @@ def test_a_work_authorization_question_is_never_answered_from_a_relocation_line(
     check.done()
 
 
+def test_the_deciding_word_must_sit_in_the_sponsorship_sentence():
+    # Must-fix (b): a "future" or "now" word outside the sentence that asks
+    # about sponsorship decides nothing. Before this, the future line
+    # answered the first question below.
+    check = Checks()
+    prof = _Profile({"eligibility.requires_sponsorship_now": False,
+                     "eligibility.requires_sponsorship_future": True})
+    pair = {"eligibility.requires_sponsorship_now", "eligibility.requires_sponsorship_future"}
+
+    def ask(label):
+        return sensitive.decide({"label": label, "type": "select",
+                                 "options": ["Yes", "No"]}, "work_authorization", prof)
+
+    outside = "Will you require sponsorship? Think about the future."
+    check(sensitive.all_profile_lines(outside) == pair,
+          "the wording matches both lines (so the next check means something)")
+    check(sensitive.sponsorship_line(outside, pair) is None,
+          "'future' in another sentence decides nothing")
+    v = ask(outside)
+    check(v["action"] == "human" and "more than one profile line" in v.get("reason", ""),
+          f"  ...so the question is yours ({v['action']})")
+
+    inside = "Will you require sponsorship in the future?"
+    check(sensitive.sponsorship_line(inside, pair) == "eligibility.requires_sponsorship_future",
+          "the same word inside the sponsorship sentence still decides")
+    # A word of the other kind anywhere still blocks, as before.
+    check(sensitive.sponsorship_line("Will you require sponsorship in the future? "
+                                     "Answer now.", pair) is None,
+          "a now-word in another sentence still blocks a future decision")
+    check(sensitive.sponsorship_line("Do you need sponsorship to begin? "
+                                     "We may relocate you later.", pair) is None,
+          "a future-word in another sentence still blocks a now decision")
+    # Sentence breaks a page can use: line breaks and semicolons too.
+    check(sensitive.sponsorship_line("Will you require sponsorship?\nLater, "
+                                     "we will ask about relocation.", pair) is None,
+          "a line break ends the sentence too")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())

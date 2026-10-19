@@ -30,7 +30,7 @@ import time
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from . import extract, learn
+from . import extract, learn, sensitive
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -298,7 +298,9 @@ def compute_edits(record: dict, result: dict, final: dict | None) -> list[dict] 
     """
     Which fields you changed from what the agent left, by label and kind,
     never values. None if the form was never read. A field that can't be
-    read is "unreadable", so zero edits can't be claimed for it.
+    read is "unreadable", so zero edits can't be claimed for it. A checkbox
+    whose tick is itself a legal, eligibility, EEO, pay, consent or
+    declaration answer records only "changed_withheld", never which way.
 
     Baselines: what the agent typed or picked; for an allowlisted consent box,
     ticked if the gate planned would_tick and unticked for leave. So ticking a
@@ -313,6 +315,8 @@ def compute_edits(record: dict, result: dict, final: dict | None) -> list[dict] 
     plan = record.get("plan") or {}
     consent = result.get("consent_actions") or {}
     uploads = record.get("uploads")
+    categories = record.get("categories") or {}
+    traced = {t.get("ref") for t in result.get("trace") or []}
     edits = []
     for f in record.get("fields") or []:
         ref, ftype = f.get("ref"), (f.get("type") or "").lower()
@@ -338,8 +342,13 @@ def compute_edits(record: dict, result: dict, final: dict | None) -> list[dict] 
         now = final[ref]
         if ftype == "checkbox":
             if bool(baseline) != bool(now):
+                # A legal, eligibility, EEO or pay checkbox answers its
+                # question by being ticked, so "ticked" would be the answer.
+                # Only that it changed is kept.
+                withheld = _tick_is_an_answer(f, categories.get(ref), traced)
                 edits.append({"ref": ref, "label": label,
-                              "kind": "ticked" if now else "unticked"})
+                              "kind": "changed_withheld" if withheld
+                              else "ticked" if now else "unticked"})
             continue
         if _empty(baseline) and _empty(now):
             continue
@@ -350,6 +359,27 @@ def compute_edits(record: dict, result: dict, final: dict | None) -> list[dict] 
                     "cleared" if _empty(now) else "changed")
             edits.append({"ref": ref, "label": label, "kind": kind})
     return edits
+
+
+# Questions whose answer must never be stored: the gate's sensitive set.
+_SENSITIVE_CATEGORIES = {"work_authorization", "eeo", "compensation", "legal_declaration",
+                         "consent"}
+_SENSITIVE_PREFIXES = ("eligibility.", "eeo.", "compensation.")
+
+
+def _tick_is_an_answer(f: dict, category, traced: set) -> bool:
+    """
+    Does ticking this checkbox answer a legal, eligibility, EEO or pay
+    question (or a consent / declaration)? Judged on every reading of the
+    question text, the way the gate judges it, plus the gate's own trace.
+    Any doubt counts as yes: it only withholds a word from a local log.
+    """
+    text = sensitive._question_text(f)
+    return (f.get("ref") in traced or category in _SENSITIVE_CATEGORIES
+            or sensitive.sensitive_line(text, _SENSITIVE_PREFIXES) is not None
+            or sensitive.legal_guard(f) is not None
+            or "legal" in sensitive.stop_kinds(text)
+            or bool(f.get("raw_stop") or f.get("raw_legal")))
 
 
 def _file_edit(uploaded: list | None, now) -> str | None:
