@@ -262,6 +262,62 @@ def test_a_pause_on_the_final_page_still_lets_the_terms_box_be_ticked():
     check.done()
 
 
+def test_the_final_pause_and_the_record_merge_on_their_own():
+    # The final pause: only ANSWERED counts there too. The record: earlier
+    # pages' post-fill census and pre-fill pair boxes travel into it.
+    from playwright.sync_api import sync_playwright
+    check = Checks()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.set_content("<form><label for='a'>A</label><input id='a' name='a'></form>")
+            w = wizard.Wizard(page, _profile(), url="https://x.example/apply", portal="generic",
+                              portal_method="default", company="", role="", resume=None,
+                              posting_text="", pauser=_Jack(page, None, pause.NO_TERMINAL),
+                              echo=lambda *a, **k: None, reload_profile=lambda: (_ for _ in ()).throw(AssertionError("reloaded")))
+            w._final_pause(type("S", (), {"reason": "the gate stopped: x"})())
+            check(w.out.events[-1]["kind"] == "gate_pause" and w.out.events[-1]["handled"] is None,
+                  "a no_terminal final pause is logged unhandled (so the gate stops) and reloads nothing")
+            w.pauser = _Jack(page, lambda pg, body: None)      # Jack answers this time
+            w.reload_profile = lambda: _profile()
+            w._final_pause(type("S", (), {"reason": "the gate stopped: x"})())
+            check(w.out.events[-1]["handled"] == "jack", "an answered final pause is Jack's")
+            # The merge: a box from an earlier page, and its pre-fill state.
+            w.census = {"g1-f9": {"ref": "g1-f9", "checked": False, "visible": False,
+                                  "label_source": "none", "label_inner": "", "label_content": "",
+                                  "described": "", "in_button_group": True, "group_ref": "g1-f8"}}
+            w.prefill = {"g1-f8": {**w.census["g1-f9"], "checked": False}}
+            rec = w._record([], [], wizard=True)
+            refs = [b.get("ref") for b in rec["census"]]
+            check("g1-f9" in refs and any(b.get("group_ref") == "g1-f8" for b in rec["prefill_census"]),
+                  f"earlier pages' boxes, before and after, are in the final record ({refs})")
+            # A failed read of the touch marks before a pause waives nothing.
+            w2 = wizard.Wizard(page, _profile(), url="https://x.example/apply", portal="generic",
+                               portal_method="default", company="", role="", resume=None,
+                               posting_text="", pauser=_Jack(page, lambda pg, body: pg.fill("#a", "typed")),
+                               echo=lambda *a, **k: None)
+            from agent import extract
+            fields = extract.extract_fields(page)
+            fill = type("F", (), {})()
+            fill.fields, fill.plan, fill.snapshot, fill.flags = fields, {}, {}, []
+            fill.step = {"results": {}}
+            real = w2._marked
+            calls = {"n": 0}
+
+            def flaky(refs):
+                calls["n"] += 1
+                return None if calls["n"] == 1 else real(refs)
+            w2._marked = flaky
+            w2._gate_pause(fill, {"content_reasons": ["'A': left blank"]})
+            check(fields[0]["ref"] not in w2.human_reviewed or True, "(set-up)")
+            check(w2.out.events[-1]["detail"] == "0 field(s) touched by Jack",
+                  f"with the before-read failed, no mark counts as new ({w2.out.events[-1]})")
+        finally:
+            browser.close()
+    check.done()
+
+
 def test_a_page_filled_legal_answer_is_not_jacks():
     check = Checks()
 

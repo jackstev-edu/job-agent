@@ -132,6 +132,7 @@ class Wizard:
         self.out = Outcome("needs_you")
         self.snapshots: dict = {}               # every page's read-back, by ref
         self.census: dict = {}                  # every page's checkboxes after filling, by ref
+        self.prefill: dict = {}                 # earlier pages' button-pair boxes before filling
         self.results: dict = {}
         self.human_reviewed: list[str] = []
         self.uploaded: dict | None = {}
@@ -149,6 +150,14 @@ class Wizard:
             now = rec.get("census") or []
             showing = {b.get("ref") for b in now if isinstance(b, dict) and b.get("ref")}
             rec["census"] = [b for r, b in self.census.items() if r not in showing] + list(now)
+            # The pre-fill states of earlier pages' button-pair boxes too, so
+            # the gate's pair exemption can still find a pair's "before".
+            pre = rec.get("prefill_census")
+            pre_now = list(pre) if isinstance(pre, list) else []
+            groups = {b.get("group_ref") for b in pre_now if isinstance(b, dict)}
+            earlier = [b for g, b in self.prefill.items() if g not in groups]
+            if earlier or isinstance(pre, list):
+                rec["prefill_census"] = earlier + pre_now
             rec["human_reviewed"] = list(self.human_reviewed)
             rec["wizard"] = wizard
         return rec
@@ -176,11 +185,12 @@ class Wizard:
         ev["handled"] = "jack"
         return True
 
-    def _marked(self, refs: list[str]) -> set[str]:
+    def _marked(self, refs: list[str]) -> set[str] | None:
+        """The refs carrying a touch mark now; None if the page couldn't be read."""
         try:
             return set(self.page.evaluate(_TOUCHED_JS, [refs, ledger.TOUCH_ATTR]) or [])
         except Exception:
-            return set()
+            return None
 
     def _gate_pause(self, fill: pipeline.PageFill, result: dict) -> None:
         """
@@ -215,7 +225,11 @@ class Wizard:
             now = extract.snapshot(self.page, fill.fields)
         except Exception:
             now = {}
-        touched = self._marked(refs) - marked_before
+        marked_after = self._marked(refs)
+        # A read that failed, before or after, can only shrink the waiver:
+        # with no trustworthy "before", no mark counts as new.
+        touched = (set() if marked_before is None or marked_after is None
+                   else marked_after - marked_before)
         results = fill.step.get("results") or {}
         reviewed: list[str] = []
         for ref in refs:
@@ -289,6 +303,10 @@ class Wizard:
                 self.snapshots.update(fill.snapshot)
                 self.census.update({b["ref"]: b for b in fill.census
                                     if isinstance(b, dict) and b.get("ref")})
+                pre = fill.step.get("prefill_census")
+                if isinstance(pre, list):
+                    self.prefill.update({b["group_ref"]: b for b in pre
+                                         if isinstance(b, dict) and b.get("group_ref")})
                 self.results.update(fill.step.get("results") or {})
                 result = gate.decide(self._page_record(fill, page_events), self.prof,
                                      agent_submissions_today=self.agent_submissions_today)

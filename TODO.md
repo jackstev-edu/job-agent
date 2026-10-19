@@ -963,12 +963,19 @@ Commit eb4dc9f (M1 a and b), 4 FLAGs and 3 notes:
   Meanwhile: add such labels to `consent_allowlist` (exact text); the
   wizard reloads the profile after each pause, so an edit takes effect on
   the re-check.
-- **A page Jack reviews.** After a pause he ends with Enter, the page's
-  fields count as his (typed by him, left empty, or still the agent's own
-  value) and the field-level stops are skipped for them; the
-  required-but-empty check and the checkbox census still apply. A field the
-  page filled by itself during the pause is never his. If you'd rather the
-  waiver cover only fields you typed into, say so.
+- **A page Jack reviews.** After a pause he ends with Enter (never a
+  timeout or a busy terminal), these fields count as his and the
+  field-level stops are skipped for them: a field with a touch mark new
+  since before the pause (the filler's own input is marked as the agent's,
+  and only the field's own element counts); a non-checkbox field that reads
+  empty; a field the filler filled that still reads its planned value. A
+  checkbox counts only when touched. The required-but-empty check and the
+  checkbox census still apply. A field that was empty before the pause and
+  holds a value after it with no new touch mark is never his. The reviewer
+  notes the second and third kinds lift stops on fields Jack never touched
+  (a loose-fit legal answer, a low-confidence model answer, an empty
+  optional EEO select); if you'd rather the waiver cover only fields you
+  touched, say so and the `elif not is_now or agents_own` branch goes.
 - **Chrome's save-password bubble.** Unverified whether bundled Chromium
   saves the generated password on its own. If not, every return to the
   same portal is a forgot-password pause.
@@ -1055,3 +1062,17 @@ Commits b9d160a and 8b6fbb8 (BLOCK fixes + gate 7; M4-M7): VERDICT BLOCK,
   final record, like the read-backs.
 - Note: shell substitution ate three backticked words in 8b6fbb8's commit
   message ("`applied`", "`needs-you`", "`status`").
+
+Commit 9eca0e2 (second BLOCK fixes): VERDICT FLAG, 5 FLAGs and a note.
+- The waiver still lifts stops on untouched fields. Open decision above.
+- The TODO decision entry was stale against the code. Fixed: reworded.
+- Earlier pages' pre-fill census didn't travel, so an Ashby pair on an
+  earlier page would hit "hidden, and ticked" at the final gate. Fixed:
+  each page's pre-fill pair boxes are merged into the final record too.
+- A failed "before" read of the touch marks enlarged the waiver. Fixed: a
+  failed read, before or after, means no mark counts as new.
+- No test for the final pause's non-ANSWERED case. Fixed: a direct test of
+  _final_pause with a no_terminal pause.
+- Noted for MUST FIX: the gate never compares the final snapshot to the
+  planned value for a non-required field, so a value the page rewrites
+  after the fill is submitted unchecked (pre-existing).
