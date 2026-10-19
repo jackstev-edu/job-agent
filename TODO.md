@@ -637,3 +637,39 @@ Parked for after the MVP. Each one says what's known and what it needs.
      in", "Press Enter when you've finished"), whatever you type there is
      read as that Enter, and the command never runs. Run shell commands in a
      second terminal. Documented in the README too.
+
+## Autonomy run (2026-10-18): reviewer FLAGs logged
+
+Plan: `docs/PLAN-autonomy.md`. Each FLAG from the rule-reviewer on this
+run, with what was done about it. Jack's instruction: FLAGs are logged and
+the run continues.
+
+Commit 9620262 (the plan), 12 FLAGs:
+- The plan named the strings M0 purges. Fixed: the plan now names them by
+  kind; the old plan blob is in the M0 rewrite set.
+- The password rule was labelled "unchanged" while narrowed. Fixed: the plan
+  says typing a generated or pasted password is allowed by Jack's decision.
+- The rewrite and force push weren't in the decisions list. Fixed: Jack's
+  "I approve this rewrite and force-push in advance" is quoted in section 0.
+- TODO's MUST FIX BEFORE AUTO-SUBMIT list is not all closed before M5.
+  Not fixed: Jack's 2026-10-18 decision enables auto-submit from day one
+  and names four items for M1. The rest stay open and listed; Jack decides.
+- Consent ticks on a built-in pattern, not an exact Jack-written list.
+  Recorded as the owner's decision in plan section 3, for Jack to confirm.
+- human_filled waived a stop on page behaviour. Fixed: needs a trusted input
+  event recorded by the activity listener during the pause.
+- login_wall / captcha events no longer stopping, enablement informational.
+  Fixed: events carry `handled` (agent / jack); unhandled ones stop. The
+  no-cap / all-portals change is Jack's decision.
+- Password rules read off the page. Fixed: one fixed policy; a rejection
+  pauses as needs-you.
+- Password typing must read nothing back and go only to new-password /
+  confirm boxes; the outcome hook reused. Fixed in the plan.
+- Chrome's save-password bubble unverified without a click. Open question
+  for Jack; M3 reports what was proven headlessly.
+- The reviewer definition edit needs Jack's sign-off. One pointer paragraph
+  is added in M1 and reported as not asked for; Jack can revert it.
+- Storing 2000 characters of confirmation text. Fixed: URL, title, signals
+  and the matched sentence only.
+- "Email already exists" branches on page text. Noted as accepted detection
+  (both branches lead to forgot password).
