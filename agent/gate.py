@@ -120,6 +120,73 @@ def _allowlist_index(box: dict | None, allow: list[str]) -> int | None:
     return next((i for i, entry in enumerate(allow) if normalize_label(entry) == label), None)
 
 
+# --- the consent policy (owner decision, 2026-10-18; docs/PLAN-autonomy.md, section 3)
+# A terms-of-service / privacy-policy consent box may be ticked; marketing,
+# newsletter, SMS and talent-community opt-ins never; nor a certification,
+# a signature or anything else HARD_STOPS calls legal. Judged on every
+# reading of the label (sensitive.text_variants): the allow words must be
+# found on some reading, and no deny word on any. Page text can't make a
+# box anything but a consent box here, and it can only ever lead to a tick
+# of a consent box, never to an answer.
+CONSENT_AGREE = re.compile(
+    r"\b(i\s+)?(agree|accept|consent|acknowledge|have\s+read|read\s+and\s+(agree|accept|understood?))\b",
+    re.I)
+CONSENT_DOCUMENT = re.compile(
+    r"\b(terms(\s+(of\s+(use|service)|and\s+conditions|&\s+conditions))?"
+    r"|conditions|privacy\s+(policy|notice|statement)|data\s+(processing|protection|privacy)"
+    r"|cookie\s+policy|user\s+agreement)\b", re.I)
+CONSENT_MARKETING = re.compile(
+    r"newsletter|marketing|promotion|\bsms\b|text\s+messag|talent\s+(community|network|pool)"
+    r"|job\s+alert|updates?\s+(about|on|from)|keep\s+me\s+(informed|updated|posted)"
+    r"|subscri|communications?\s+(from|about)|contact\s+me|receive\s+(e-?mails?|news|offers)"
+    r"|opt[\s-]?in|notify\s+me|future\s+(opportunities|openings|roles|positions)|recruit", re.I)
+CONSENT_CERTIFY = re.compile(
+    r"certif|attest|signature|\bsign(ed|ing)?\b|true|accurate|correct|complete\b|penalty"
+    r"|perjury|background\s+check|drug|criminal|convict|felon|misdemean|arrest|authori[sz]e"
+    r"|arbitrat|waive|release|indemnif|non-?compete|reference\s+check|verify|investigat"
+    r"|my\s+(answers|responses|information)\s+(are|is)", re.I)
+CONSENT_MAX_CHARS = 240
+
+
+def consent_ok(label: Any) -> bool:
+    """
+    Does this checkbox label read as agreeing to terms / privacy and nothing
+    else? True only when some reading has an agreement word and a document
+    word, no reading has a marketing, certification or legal word, and the
+    label is short. Nothing about the box's state or fine print is judged
+    here (see consent_box_ok).
+    """
+    text = str(label or "")
+    if not text.strip() or len(text) > CONSENT_MAX_CHARS:
+        return False
+    variants = sensitive.text_variants(text)
+    if any(CONSENT_MARKETING.search(v) or CONSENT_CERTIFY.search(v) for v in variants):
+        return False
+    if any(sensitive.stop_kinds(v) - {"legal"} for v in variants):
+        return False
+    # The one HARD_STOPS legal pattern a consent box is allowed to match is
+    # the terms / privacy one; a criminal-record or declaration match says no.
+    record_rx = sensitive._STOPS[1][0]
+    if any(record_rx.search(v) for v in variants):
+        return False
+    return any(CONSENT_AGREE.search(v) and CONSENT_DOCUMENT.search(v) for v in variants)
+
+
+def consent_box_ok(box: dict | None) -> bool:
+    """
+    A census box the policy may tick: label from a <label> or aria-label,
+    rendered the same as written, no fine print attached, and a label that
+    passes consent_ok.
+    """
+    if not box or box.get("label_source") not in ALLOWLIST_LABEL_SOURCES:
+        return False
+    if normalize_label(box.get("label_inner")) != normalize_label(box.get("label_content")):
+        return False
+    if box.get("described"):
+        return False
+    return consent_ok(box.get("label_inner"))
+
+
 CAP_COUNT_UNKNOWN = "today's agent submissions couldn't be counted"
 NO_CAP = "no daily_submit_cap set"
 
