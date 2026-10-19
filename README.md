@@ -123,6 +123,42 @@ applications is somewhere under five dollars.
 
 ## 3. Using it
 
+### Unattended: `run`
+
+```bash
+python apply.py run https://company.example/careers/jobs/1234
+python apply.py run --queue links.txt          # one link per line, # comments
+python apply.py applied                        # what each link came to
+python apply.py needs-you                      # the parked ones, and why
+```
+
+`run` is the autonomous path (owner decisions of 2026-10-18, see CLAUDE.md).
+For each link it opens the page in the agent's Chrome profile, clicks the
+posting's Apply, follows it to the company's site, signs in or creates an
+account with your profile email (a generated password, typed once, never
+stored; an existing account goes through Forgot password and a hidden
+prompt for the password you set), fills every page, judges each page with
+the submit gate, presses Next, and on the final page ticks a terms /
+privacy consent box if one is required, judges the whole application again
+and presses Submit. Then it records the confirmation.
+
+It pauses, with a Windows notification and a prompt, for: verification
+codes or links, CAPTCHAs, legal / EEO / pay questions your profile can't
+answer, a forgot-password reset, and anything else the gate stops on. You
+have fifteen minutes to paste the code or password, or finish the step in
+the browser and press Enter. After a pause, a field you typed into counts
+as your answer; one the page filled in by itself does not. On timeout the
+link is parked as `needs_you` with the reason and `run` moves to the next
+link. LinkedIn Easy Apply and Handshake's own applications are refused and
+parked; an Apply that leaves those sites is followed.
+
+Never ticked: marketing, newsletter, SMS or talent-community boxes. A
+required one of those stops the gate, and the job is parked for you. An
+optional opt-in box that isn't on your `consent_allowlist` also stops the
+gate today (the rule predates `run`; see TODO for the decision).
+
+### Attended: `fill`
+
 ```bash
 python apply.py fill https://job-boards.greenhouse.io/company/jobs/1234 --dry-run
 ```
@@ -385,9 +421,10 @@ next to the form itself, which turns a ten-minute check into a one-minute one.
 
 ---
 
-## 5. Why it doesn't submit
+## 5. Why `fill` doesn't submit (and what `run` does instead)
 
-Three reasons, and I'd argue against removing the gate.
+`run` submits, behind the gate, by the owner decision of 2026-10-18. `fill`
+still stops before Submit. The reasons the gate exists at all:
 
 **Quality.** Applications sent by a bot read like applications sent by a bot.
 For specialised technical roles, one considered application beats forty
@@ -404,17 +441,19 @@ of that without having to think about it each time.
 
 ## What it deliberately won't do
 
-- **Solve CAPTCHAs.** It detects them, names them, and hands you the browser.
-- **Read, type, generate or store a password.** The browser's own password
-  manager, inside the agent's Chrome profile, may fill a login you saved
-  (see "Saving a portal login once"). You press Sign in.
-- **Create accounts.** Terms, verification codes and Create Account are yours.
-- **Touch LinkedIn Easy Apply.** LinkedIn's terms prohibit automated access, and
-  restrictions there are common and painful to reverse. Click those by hand.
+- **Solve CAPTCHAs.** It detects them, names them, and pauses for you.
+- **Read or store a password.** `run` may type a generated one (sign-up) or
+  one you paste at a hidden prompt (after a reset), once, in
+  `agent/accounts.py` only, and then forgets it. Nothing reads a password
+  box back. The browser's own password manager, inside the agent's Chrome
+  profile, may fill a login you saved.
+- **Touch LinkedIn Easy Apply or Handshake's built-in applications.** Those
+  are parked for you; an Apply that leaves the site is followed.
 - **Answer eligibility, EEO, or criminal-history questions with a model.**
-- **Click Submit, Next, Continue, Sign in, Create account or an SSO button.**
-  On a multi-page application it fills the page you're on, says more pages
-  follow, and you move on yourself.
+- **Tick marketing, newsletter, SMS or talent-community boxes.**
+- **Submit anywhere but `agent/submit.py`, after the gate says yes.** `fill`
+  and `fill --follow` never press Submit, Next, Sign in or a consent box.
+- **Find job postings.** It acts only on the links you give it.
 
 ---
 

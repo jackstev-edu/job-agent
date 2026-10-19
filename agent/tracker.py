@@ -67,6 +67,13 @@ MIGRATIONS: list[tuple[int, str]] = [
     );
     CREATE INDEX IF NOT EXISTS idx_gate_runs_portal ON gate_runs(portal, created_at);
     """),
+    (2, """
+    -- The unattended run (`apply.py run`): what the confirmation page showed
+    -- after the agent submitted, and whether it was the agent that did.
+    -- Statuses gain needs_you and failed; the reason lives in notes.
+    ALTER TABLE applications ADD COLUMN evidence_json TEXT;
+    ALTER TABLE applications ADD COLUMN agent_submitted INTEGER NOT NULL DEFAULT 0;
+    """),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -202,19 +209,35 @@ def awaiting_reply(days: int = 14) -> list[dict]:
 # --- the submit gate's shadow log ---------------------------------------------
 
 def record_gate_run(url: str, *, portal: str, portal_method: str, result: dict,
-                    record_json: dict) -> int:
-    """Log one gate verdict. Returns the row id, for the outcome to update later."""
+                    record_json: dict, agent_submitted: bool = False) -> int:
+    """
+    Log one gate verdict. Returns the row id, for the outcome to update
+    later. `agent_submitted` is True only when submit.py pressed Submit on
+    this run.
+    """
     enablement = {**(result.get("enablement") or {}),
                   "reasons": result.get("enablement_reasons") or []}
     with _connect() as conn:
         cur = conn.execute(
             "INSERT INTO gate_runs (application_url, portal, portal_method, verdict, "
-            "reasons_json, enablement_json, record_json, gate_version, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "reasons_json, enablement_json, record_json, gate_version, agent_submitted, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (url, portal, portal_method, result.get("content_verdict") or "would_stop",
              json.dumps(result.get("content_reasons") or []), json.dumps(enablement),
-             json.dumps(record_json, default=str), result.get("gate_version"), _timestamp()))
+             json.dumps(record_json, default=str), result.get("gate_version"),
+             1 if agent_submitted is True else 0, _timestamp()))
         return int(cur.lastrowid)
+
+
+def set_evidence(url: str, evidence: dict | None, *, agent_submitted: bool) -> None:
+    """What the confirmation page showed after the agent submitted (no page text at large)."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE applications SET evidence_json = ?, agent_submitted = ?, "
+            "submitted_at = CASE WHEN ? THEN COALESCE(submitted_at, ?) ELSE submitted_at END "
+            "WHERE url = ?",
+            (json.dumps(evidence or {}, default=str), 1 if agent_submitted else 0,
+             1 if agent_submitted else 0, _timestamp(), url))
 
 
 def set_gate_outcome(run_id: int, *, human_submitted: str, edits: list | None,

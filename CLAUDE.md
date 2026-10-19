@@ -45,6 +45,23 @@ run as `python apply.py <command>` (no make).
 - `agent/score.py` — scores logged runs against outcomes per portal; read by
   `apply.py shadow-report`.
 - `agent/report.py` — HTML review sheet. `agent/tracker.py` — SQLite log.
+- `agent/pipeline.py` — one page's fill, scan to read-back, shared by
+  `fill`, follow mode and the wizard (routing, mapper, reclassification
+  after upload, the fillable plan, the record for the gate).
+- `agent/intake.py` — from Jack's link to the form: finds and clicks the one
+  Apply control, follows a new tab or a redirect, refuses LinkedIn Easy
+  Apply and Handshake's own applications, detects the portal.
+- `agent/accounts.py` — sign-up, sign-in, forgot password and verification
+  pages. The only module that types a password (generated or pasted), once,
+  reading nothing back.
+- `agent/wizard.py` — the unattended loop: CAPTCHA pauses, account pages to
+  accounts.py, each page filled and gated, Next pressed, the final page to
+  submit.py. Caps: 25 pages, 60 minutes.
+- `agent/submit.py` — the only module that presses Submit: gate, the consent
+  ticks the gate allows, gate again, Submit, the confirmation sentence.
+- `agent/pause.py`, `agent/notify.py`, `agent/console.py` — a pause: a
+  Windows toast (fallback bell), a prompt (hidden via getpass for a
+  password), a 15-minute wait that also ends when the page moves on.
 
 ## Owner decisions (Jack, 2026-10-18)
 
@@ -121,9 +138,17 @@ How the code keeps them, and rules of its own:
   Three independent layers stop a plan-driven fill typing a password: the
   classifier, the regex backstop, and a hard refusal on `type="password"` in
   `filler.py`. Reading a password box's value is refused everywhere.
-- Until the autonomy milestones land (see "Current work"): on a login wall
-  `fill` pauses and you sign in; on a multi-page application `fill` fills
-  the page it's on and logs that more pages follow. `filler.py` never presses Enter and never types a line break
+- In `fill`: on a login wall it pauses and you sign in; on a multi-page
+  application it fills the page it's on and logs that more pages follow.
+  In `run`: accounts.py signs in or creates the account; wizard.py presses
+  Next after the page's gate says would_submit (or after a pause Jack
+  ended); submit.py presses Submit after the gate says would_submit on the
+  full record. After a pause Jack ends, the page's fields count as reviewed
+  by him (a field he typed into, by the activity listener's trusted-input
+  mark; one left empty; one still holding the agent's value), and the gate
+  skips field-level stops for those, never the required-but-empty check. A
+  field that was empty before the pause and holds a value after it with no
+  trusted input is never counted as his. `filler.py` never presses Enter and never types a line break
   outside a textarea. At click time it checks again, on the element and on
   the button or input around it, that a dropdown, a dropdown row (or a
   button or input inside the row) and a text box can't submit the form; a

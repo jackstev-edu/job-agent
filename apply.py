@@ -23,13 +23,13 @@ from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
                    filler, follow, gate, intake, learn, ledger, letters, mapper, outcome,
-                   pages, report, score, sensitive, shadow, template, tracker)
+                   pages, pause, pipeline, report, score, sensitive, shadow, template, tracker,
+                   wizard)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
 BOLD, DIM, GREEN, AMBER, RED, OFF = (
     "\033[1m", "\033[2m", "\033[32m", "\033[33m", "\033[31m", "\033[0m")
-
 
 
 # ---------------------------------------------------------------------------
@@ -452,6 +452,17 @@ def cmd_fill(args) -> None:
         _record_outcome(run_id, key, record, gate_result, watched, answer)
 
 
+# The page-fill pipeline lives in agent/pipeline.py, shared with the
+# unattended wizard; these names stay for the code and tests that use them.
+LEFT_OUT_REASON, HELD_AFTER_UPLOAD, HELD_IN_FOLLOW = (
+    pipeline.LEFT_OUT_REASON, pipeline.HELD_AFTER_UPLOAD, pipeline.HELD_IN_FOLLOW)
+_route, _ask_mapper, _for_model = pipeline.route, pipeline.ask_mapper, pipeline.for_model_copy
+_identity, _reclassify_after_upload = pipeline.identity, pipeline.reclassify_after_upload
+_fillable_plan, _prefill_census, _build_record = (
+    pipeline.fillable_plan, pipeline.prefill_census, pipeline.build_record)
+_resume_box = pipeline.resume_box
+
+
 _WATCH_ENDED = {
     "success": "The portal's confirmation page appeared.",
     "tab_closed": "The tab closed.",
@@ -460,91 +471,6 @@ _WATCH_ENDED = {
     "hard_cap": "Stopped following after 90 minutes.",
 }
 
-# Why follow mode left a field out of every model input (FieldLedger.left_out).
-LEFT_OUT_REASON = {
-    "value": "already holds a value the agent didn't put there; check it",
-    "touched": "you've typed in, changed or cleared this field (or one like it), "
-               "so it stays yours; check it",
-    "while_filling": "something was typed here while I was filling (my own attempt at "
-                     "it, or you), so it stays yours; check it",
-}
-
-# Why a field whose help text the classifier wasn't shown comes to you.
-HELD_AFTER_UPLOAD = ("Its help text changed or appeared after the resume upload (help "
-                     "text held back after upload), so the classifier couldn't be shown "
-                     "it. Answer it yourself.")
-HELD_IN_FOLLOW = ("Follow mode never shows a model help text (help text held back in "
-                  "follow mode), so the classifier couldn't be shown it. Answer it "
-                  "yourself.")
-
-
-def _route(fields: list[dict], categories: dict, prof, new_after_upload: set[str],
-           held_reason: str = HELD_AFTER_UPLOAD) -> tuple[dict, list[dict], list[dict]]:
-    """
-    The policy for one page's fields: (plan from the profile, flags for you,
-    fields for the mapper). Sensitive fields never reach the mapper. Shared
-    by a normal fill and follow mode, so both route a field the same way.
-    `new_after_upload` holds the fields whose help text the classifier
-    wasn't shown; `held_reason` says why, on the review sheet.
-    """
-    plan: dict[str, dict] = {}
-    flags: list[dict] = []
-    for_model: list[dict] = []
-    for field in fields:
-        if field.get("type") == "file":
-            continue
-        if field.get("submits"):
-            # Opening this dropdown means clicking a button that can
-            # submit the form, so it's never touched.
-            flags.append({"ref": field["ref"], "label": field.get("label"),
-                          "options": field.get("options"), "action": "human",
-                          "value": None, "source": "human",
-                          "category": categories.get(field["ref"], "unknown"),
-                          "reason": "This dropdown is a button that could submit "
-                                    "the form, so I don't click it. Answer it yourself."})
-            continue
-        category = categories.get(field["ref"], "unknown")
-        if (field["ref"] in new_after_upload and (field.get("help_text") or "").strip()
-                and classify.action_for(category) not in ("profile", "human")):
-            # Its question may be in help text the classifier wasn't shown.
-            flags.append({"ref": field["ref"], "label": field.get("label"),
-                          "options": field.get("options"), "action": "human",
-                          "value": None, "source": "human", "category": category,
-                          "reason": held_reason})
-            continue
-        verdict = sensitive.decide(
-            field, categories.get(field["ref"], "unknown"), prof)
-        if verdict["action"] == "human":
-            flags.append({**verdict, "ref": field["ref"]})
-        elif verdict["action"] == "fill":
-            plan[field["ref"]] = verdict
-        else:
-            field["_draft"] = verdict["action"] == "draft"
-            for_model.append(field)
-    return plan, flags, for_model
-
-
-def _ask_mapper(for_model: list[dict], prof, posting_text: str,
-                new_after_upload: set[str], plan: dict) -> None:
-    """The mapper answers only what's left, into `plan`."""
-    if not for_model:
-        return
-    mapped = mapper.map_fields(
-        [_for_model(f, f["ref"] not in new_after_upload) for f in for_model],
-        prof, posting_text[:3000])
-    for ref, decision in mapped.items():
-        if next((f for f in for_model
-                 if f["ref"] == ref and f.get("_draft")), None):
-            decision["needs_review"] = True
-            decision["draft"] = True
-            # The mapper prompt tells the model to flag every
-            # draft, so its own flag on one is the draft's flag.
-            # Flags raised in code (too long, approximate option,
-            # low confidence) keep their own names.
-            decision["review_reasons"] = ["draft"] + [
-                r for r in decision.get("review_reasons", []) if r != "model"]
-        plan[ref] = decision
-
 
 # ---------------------------------------------------------------------------
 #  follow mode: you move through the application; the agent fills each page
@@ -552,21 +478,6 @@ def _ask_mapper(for_model: list[dict], prof, posting_text: str,
 FOLLOW_IDLE_S = 20 * 60        # no new page and no input from you for this long
 FOLLOW_CAP_S = 90 * 60         # and never longer than this
 FOLLOW_POLL_MS = 500
-
-# A file box the agent may put your resume in: its label or name says resume
-# or CV, and not cover letter. Exactly one such box, or none is used.
-_RESUME_BOX = re.compile(r"\b(r.sum.|cv|curriculum\s+vitae)\b", re.I)
-_COVER = re.compile(r"\bcover\b", re.I)
-
-
-def _resume_box(fields: list[dict]) -> dict | None:
-    """The one file box labelled or named as the resume (resume_file, resumeUpload too)."""
-    def words(f):
-        name = str(f.get("name") or "")
-        return f"{f.get('label') or ''} {name} {sensitive._identifier_words(name)}"
-    boxes = [f for f in fields if f.get("type") == "file"
-             and _RESUME_BOX.search(words(f)) and not _COVER.search(words(f))]
-    return boxes[0] if len(boxes) == 1 else None
 
 
 class _FollowRun:
@@ -809,7 +720,6 @@ def _follow(page, args, prof, url, key, ats, detected_by, events, posting_text,
     _record_outcome(run_id, key, record, gate_result, watched, answer)
 
 
-
 class _EnterWatcher:
     """
     Notices Enter in this terminal without blocking the watch. A background
@@ -896,93 +806,6 @@ def _shadow_gate(record, prof, url, portal, detected_by, *,
     except Exception as e:
         print(f"{DIM}  couldn't log the gate's verdict ({type(e).__name__}){OFF}")
         return None, result
-
-
-def _for_model(field: dict, send_help: bool) -> dict:
-    """A field as a model call is given it: a copy, without its help text unless allowed."""
-    return dict(field) if send_help else {**field, "help_text": ""}
-
-
-def _identity(f: dict) -> tuple | None:
-    """
-    What a field is known by across a rescan: its kind, tag, name attribute
-    and explicit label (a real <label> or aria-label). None without a name
-    or an explicit label: an id or a nearby-text label isn't an identity.
-    """
-    name = f.get("dom_name") if "dom_name" in f else (
-        f.get("name") if f.get("type") == "radio" else "")
-    label = f.get("explicit_label") or ""
-    if not (name or label):
-        return None
-    return (f.get("type"), f.get("tag") or "", name or "", label)
-
-
-def _reclassify_after_upload(before: list[dict], before_categories: dict,
-                             after: list[dict]) -> tuple[dict, set[str]]:
-    """
-    The categories for the post-upload scan, and the refs treated as new.
-    A field keeps its pre-upload category only when it's the one field with
-    its identity before and after, and its label AND help text are exactly
-    the same (compared here, never sent). Every other field is classified
-    again with no help text at all.
-    """
-    def unique(fields):
-        seen: dict = {}
-        for f in fields:
-            key = _identity(f)
-            if key is not None and f.get("type") != "file":
-                seen.setdefault(key, []).append(f)
-        return {k: v[0] for k, v in seen.items() if len(v) == 1}
-    was, now = unique(before), unique(after)
-    categories: dict[str, str] = {}
-    new: list[dict] = []
-    for f in after:
-        if f.get("type") == "file":
-            continue
-        key = _identity(f)
-        old = was.get(key) if key in now else None
-        if (old is not None and old.get("ref") in before_categories
-                and old.get("label") == f.get("label")
-                and (old.get("help_text") or "") == (f.get("help_text") or "")):
-            categories[f["ref"]] = before_categories[old["ref"]]
-        else:
-            new.append(f)
-    if new:
-        categories.update(classify.classify_fields([_for_model(f, False) for f in new]))
-    return categories, {f["ref"] for f in new}
-
-
-def _fillable_plan(fields: list[dict], plan: dict) -> dict:
-    """
-    The plan entries the filler may act on. The policy already hands every
-    secret box to you; this makes sure no entry for one can reach the
-    filler, nor one whose ref isn't from the latest scan. filler.py resolves
-    refs without checking their generation, so this is where an old
-    generation's ref is treated as missing, never filled. Nor can a dropdown
-    that is a submit-capable button (opening it would click it).
-    """
-    secret_refs = {f["ref"] for f in fields if extract.is_secret(f) or f.get("submits")}
-    return {ref: d for ref, d in plan.items()
-            if ref not in secret_refs and extract.is_current(ref)}
-
-
-def _prefill_census(page) -> list[dict] | None:
-    """The checkbox census before filling; None if unreadable, which the gate never exempts."""
-    try:
-        return extract.checkbox_census(page)
-    except Exception:
-        return None
-
-
-def _build_record(page, url, portal, detected_by, company, steps, events, *,
-                  dry_run: bool, uploads: dict | None = None) -> dict:
-    """The submit gate's record of this run; a failed build is itself a record."""
-    try:
-        return shadow.build_record(page, url=url, portal=portal, portal_method=detected_by,
-                                   company=company, steps=steps, events=events,
-                                   dry_run=dry_run, uploads=uploads)
-    except Exception as e:
-        return shadow.failed_record(url, portal, f"record not built: {type(e).__name__}")
 
 
 def _get_past_login_wall(page) -> bool:
@@ -1237,12 +1060,13 @@ def _park(url: str, reason: str, *, company: str = "", role: str = "", ats: str 
     tracker.record(url, company=company, role=role, ats=ats, status=status, notes=reason)
 
 
-def run_one(ctx, url: str, prof, args) -> tuple[str, str]:
+def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None) -> tuple[str, str]:
     """
-    One link, end to end. Returns (status, reason). Milestone 2: open the
-    link, click Apply, follow to the form, detect the portal. The milestones
-    after this one fill, sign in, step through and submit.
+    One link, end to end: open it, click Apply, follow to the form, detect
+    the portal, then the wizard (accounts, every page, the gate, Submit).
+    Returns (status, reason); everything is logged in the tracker.
     """
+    pauser = pauser or pause.Pauser()
     landing = intake.open_link(ctx, url)
     for step in landing.steps:
         print(f"{DIM}  {step}{OFF}")
@@ -1258,10 +1082,53 @@ def run_one(ctx, url: str, prof, args) -> tuple[str, str]:
         _park(url, landing.parked, company=company, role=role, ats=ats)
         return NEEDS_YOU, landing.parked
     print(f"  {BOLD}{ats}{OFF} {DIM}({landing.portal_method}) at {landing.url[:90]}{OFF}")
-    reason = ("the form was reached; filling, accounts and submit arrive with the next "
-              "milestones (use `fill --follow` on this link meanwhile)")
-    _park(url, reason, company=company, role=role, ats=ats)
-    return NEEDS_YOU, reason
+    # The posting's text, for the mapper, taken once before anything is
+    # typed, as `fill` takes it.
+    posting_text = extract.page_text(page, 6000)
+    try:
+        submitted_today = tracker.agent_submissions_today()
+    except Exception:
+        submitted_today = None
+    out = wizard.run_application(
+        page, prof, url=url, portal=landing.portal, portal_method=landing.portal_method,
+        company=company, role=role, resume=prof.resume_path(args.resume),
+        posting_text=posting_text, pauser=pauser, echo=print,
+        agent_submissions_today=submitted_today)
+    for line in out.log:
+        print(f"{DIM}  {line}{OFF}")
+    _print_summary(out.rows, out.flags)
+    sheet = None
+    try:
+        sheet = report.build(url=url, ats_name=ats, report_rows=out.rows, flags=out.flags,
+                             company=company, role=role)
+    except Exception as e:
+        print(f"{DIM}  couldn't write the review sheet ({type(e).__name__}){OFF}")
+    status = out.status if out.status in ("submitted", NEEDS_YOU, FAILED) else NEEDS_YOU
+    tracker.record(url, company=company, role=role, ats=ats,
+                   resume_used=str(prof.resume_path(args.resume) or ""), answers=out.rows,
+                   flags=out.flags, report_path=str(sheet or ""), status=status, notes=out.reason)
+    if out.record is not None and out.gate_result is not None:
+        try:
+            run_id = tracker.record_gate_run(
+                url, portal=landing.portal, portal_method=landing.portal_method,
+                result=out.gate_result, record_json=shadow.redacted(out.record, out.gate_result),
+                agent_submitted=(status == "submitted"))
+            if status == "submitted":
+                tracker.set_gate_outcome(run_id, human_submitted="unknown", edits=[],
+                                         capture="none",
+                                         success_signal=json.dumps(
+                                             {"ended": "agent_submit", "detected":
+                                              out.evidence.get("portal_signal"),
+                                              "signals": out.evidence.get("signals"),
+                                              "url_shape": out.evidence.get("url_shape"),
+                                              "answer": None, "hooked": False}))
+        except Exception as e:
+            print(f"{DIM}  couldn't log the gate's verdict ({type(e).__name__}){OFF}")
+    try:
+        tracker.set_evidence(url, out.evidence, agent_submitted=(status == "submitted"))
+    except Exception as e:
+        print(f"{DIM}  couldn't store the evidence ({type(e).__name__}){OFF}")
+    return status, out.reason
 
 
 def cmd_run(args) -> None:
@@ -1285,7 +1152,11 @@ def cmd_run(args) -> None:
               f"{OFF} ({detail}). Set a new ANTHROPIC_API_KEY and try again.")
         sys.exit(1)
     results: list[tuple[str, str, str]] = []
+    pauser = pause.Pauser()
     with browser_mod.browser() as ctx:
+        # What Jack touches at a pause is marked by the activity listener,
+        # so an answer of his can be told from one the page filled in.
+        ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
         for url in links:
             print(f"\n{BOLD}{url[:100]}{OFF}")
             existing = tracker.find(url)
@@ -1295,16 +1166,59 @@ def cmd_run(args) -> None:
                 results.append((url, "skipped", existing["status"]))
                 continue
             try:
-                status, reason = run_one(ctx, url, prof, args)
+                status, reason = run_one(ctx, url, prof, args, pauser)
             except Exception as e:
                 status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
                 _park(url, reason, status=FAILED)
             colour = GREEN if status == "submitted" else AMBER if status == NEEDS_YOU else RED
             print(f"  {colour}{status}{OFF} {DIM}{reason}{OFF}")
             results.append((url, status, reason))
-    print(f"\n{BOLD}{len(results)} link(s):{OFF} "
-          + ", ".join(f"{s} {sum(1 for _, st, _ in results if st == s)}"
-                      for s in dict.fromkeys(st for _, st, _ in results)))
+    summary = ", ".join(f"{s} {sum(1 for _, st, _ in results if st == s)}"
+                        for s in dict.fromkeys(st for _, st, _ in results))
+    print(f"\n{BOLD}{len(results)} link(s):{OFF} {summary}")
+    # One notification at the end of the batch, with the counts.
+    try:
+        pauser.notify_fn("job-agent: batch done", f"{len(results)} link(s): {summary}", echo=print)
+    except Exception:
+        pass
+
+
+def cmd_applied(args) -> None:
+    """Every link `run` or `fill` has logged: company, role, URL, date, portal, status."""
+    rows = tracker.all_applications()
+    if not rows:
+        print("Nothing logged yet.")
+        return
+    for r in rows:
+        colour = GREEN if r["status"] == "submitted" else AMBER if r["status"] in (NEEDS_YOU, "draft") \
+            else RED if r["status"] == FAILED else ""
+        who = " (agent)" if r.get("agent_submitted") else ""
+        print(f"{r['created_at'][:10]}  {colour}{r['status']:<10}{OFF if colour else ''}{who:<8} "
+              f"{(r['ats'] or ''):<14} {(r['company'] or '')[:30]:<32} {(r['role'] or '')[:30]:<32}")
+        print(f"            {DIM}{r['url'][:110]}{OFF}")
+        if r["status"] in (NEEDS_YOU, FAILED) and r.get("notes"):
+            print(f"            {DIM}{_clean_line(r['notes'])}{OFF}")
+    print(f"\n{len(rows)} application(s).")
+
+
+def cmd_needs_you(args) -> None:
+    """The parked jobs: what stopped each one, oldest first."""
+    rows = [r for r in tracker.all_applications() if r["status"] in (NEEDS_YOU, FAILED)]
+    if not rows:
+        print("Nothing is waiting for you.")
+        return
+    for r in sorted(rows, key=lambda r: r["created_at"]):
+        print(f"\n{AMBER if r['status'] == NEEDS_YOU else RED}{r['status']}{OFF}  "
+              f"{r['created_at'][:10]}  {(r['company'] or '')[:40]}  {DIM}{(r['role'] or '')[:40]}{OFF}")
+        print(f"  {r['url'][:110]}")
+        print(f"  {_clean_line(r.get('notes') or '(no reason recorded)')}")
+    print(f"\n{len(rows)} waiting. When you've finished one in the browser: "
+          f"`python apply.py status <url> submitted`; to retry it: `python apply.py run <url> --force`.")
+
+
+def _clean_line(text: str) -> str:
+    """Page-derived text for the terminal: no control or escape characters."""
+    return re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", str(text or ""))[:300]
 
 
 # ---------------------------------------------------------------------------
@@ -1375,6 +1289,11 @@ def main() -> None:
                        help="redo links already logged; ignore profile warnings")
     p_run.set_defaults(fn=cmd_run)
 
+    sub.add_parser("applied", help="every link run has logged, with its status"
+                   ).set_defaults(fn=cmd_applied)
+    sub.add_parser("needs-you", help="the parked jobs and why each one stopped"
+                   ).set_defaults(fn=cmd_needs_you)
+
     sub.add_parser("learn", help="suggest profile fixes from your logged corrections "
                    "(changes nothing)").set_defaults(fn=cmd_learn)
 
@@ -1392,7 +1311,8 @@ def main() -> None:
     p_status = sub.add_parser("status", help="update an application's status")
     p_status.add_argument("url")
     p_status.add_argument("new_status",
-                          choices=["draft", "submitted", "rejected", "interview", "offer"])
+                          choices=["draft", "submitted", "rejected", "interview", "offer",
+                                   "needs_you", "failed"])
     p_status.set_defaults(fn=cmd_status)
 
     args = parser.parse_args()

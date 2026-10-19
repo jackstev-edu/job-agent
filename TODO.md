@@ -950,3 +950,68 @@ Commit eb4dc9f (M1 a and b), 4 FLAGs and 3 notes:
   read "polled" with both fields unreadable while the reviewer's own suite
   ran on the same machine. Alone and in two later full runs of its file it
   passes. The claim in that message was wrong; it is corrected here.
+
+## Autonomy run: open decisions for Jack (milestones 4-7)
+
+- **Unticked opt-in boxes stop the gate.** Rule 4 still requires every
+  checkbox on a page, ticked or not, to be on `consent_allowlist` or a
+  terms / privacy consent (gate version 7). An unticked, optional
+  newsletter box therefore parks the application after one pause. Not
+  relaxed: that is a check failing toward a pass, which needs your word.
+  Recommendation: let an unticked, visible, explicitly labelled, optional
+  box pass (it sends nothing), keeping every ticked box under the rule.
+  Meanwhile: add such labels to `consent_allowlist` (exact text); the
+  wizard reloads the profile after each pause, so an edit takes effect on
+  the re-check.
+- **A page Jack reviews.** After a pause he ends with Enter, the page's
+  fields count as his (typed by him, left empty, or still the agent's own
+  value) and the field-level stops are skipped for them; the
+  required-but-empty check and the checkbox census still apply. A field the
+  page filled by itself during the pause is never his. If you'd rather the
+  waiver cover only fields you typed into, say so.
+- **Chrome's save-password bubble.** Unverified whether bundled Chromium
+  saves the generated password on its own. If not, every return to the
+  same portal is a forgot-password pause.
+- **Live portals.** Everything in milestones 2-7 is tested on mock pages
+  only: Greenhouse, Lever, Ashby, Workday, iCIMS and SmartRecruiters word
+  lists are from memory, not from a live run.
+
+Commits 3606540, 90bc403, cc7e282, 59b28d4 (M1 c/d, M1 wrap-up, M2, M3):
+VERDICT BLOCK, 3 BLOCKs and 15 FLAGs. Fixed in the next commit unless noted.
+- BLOCK: accounts could press a bare "Submit" / "Continue" / "Next" (the
+  words sat in four step lists). Fixed: removed from every list; NEVER_WORDS
+  refuses them whole; a wall whose only buttons read so gets no press.
+- BLOCK: the reset-page press checked the page kind against itself. Fixed:
+  the press happens only on a page with no password or code box and exactly
+  one text box that reads as the email box; otherwise parked.
+- BLOCK: consent_ok ignored LEGAL_GUARD and PROFILE_PATHS, so "I agree to
+  the terms and do not require visa sponsorship" could be ticked. Fixed:
+  any LEGAL_GUARD or PROFILE_PATHS match, any age / declaration wording
+  (CONSENT_DECLARE) refuses; six such labels in the tests.
+- FLAG: a fullwidth "?" no longer ended a sentence. Fixed: sentences are cut
+  from the NFKC reading.
+- FLAG: a submit event with a non-Submit submitter stayed "exact". Fixed:
+  only an empty submitter or a Submit word is exact.
+- FLAG: the owner-decisions section is the main session's quotation of
+  Jack's prompt; Jack to confirm it verbatim. The reviewer definition still
+  disagrees with CLAUDE.md and Jack must edit it himself.
+- FLAG: PASSWORD_MIN was 12. Fixed: 20; a maxlength below 20 parks.
+- FLAG: the policy could read an aria-label. Fixed: only a visible <label>
+  (for / wrap) satisfies the policy; aria-label keeps only the exact route.
+- FLAG: "Agree and continue" in CREATE_WORDS. Fixed: removed.
+- FLAG: a blocked terminal made every later pause park at once. Fixed: the
+  wait and the page poll still run; the pause reports no_terminal.
+- FLAG: FORGOT_WORDS was an unanchored search. Fixed: whole-text.
+- FLAG: every policy-passing box was ticked, not only required ones.
+  Fixed: required only, as the plan says.
+- FLAG: the record stop was picked by table position. Fixed: by its reason.
+- FLAG: "exactly as the contained path" overstated; no test for a box that
+  turns secret. Fixed: docstring says the difference; a test turns a box
+  into a password box on input and asserts unconfirmed, no value read.
+- FLAG: a lone email box counted as the form. Fixed: two fields or a file
+  box.
+- FLAG: Handshake's Apply was pressed three times. Fixed: the same control
+  on the same address is never pressed twice.
+- FLAG: a button's aria-label or title could satisfy APPLY_WORDS. Fixed: the
+  visible text (or value) must; aria-label only for a control with none.
+- FLAG: --resume unused, prof unused in run_one. Both used since M4.

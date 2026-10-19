@@ -18,7 +18,7 @@ from argparse import Namespace
 from contextlib import ExitStack, redirect_stdout
 from unittest import mock
 
-from _fill_run import PROFILE, _headless
+from _fill_run import PROFILE, _headless, classify_by_label, map_from_profile
 from _harness import TEST_HOME, Checks, run_as_script
 from agent import tracker
 
@@ -50,7 +50,9 @@ def _run(urls, queue=None, force=False):
     out = io.StringIO()
     with ExitStack() as stack:
         for target, name, value in ((apply.config, "check_api_key", lambda: ("ok", "")),
-                                    (apply.browser_mod, "browser", lambda: _headless(_routes()))):
+                                    (apply.browser_mod, "browser", lambda: _headless(_routes())),
+                                    (apply.classify, "classify_fields", classify_by_label),
+                                    (apply.mapper, "map_fields", map_from_profile)):
             stack.enter_context(mock.patch.object(target, name, value))
         with redirect_stdout(out):
             apply.cmd_run(args)
@@ -79,8 +81,9 @@ def test_run_logs_every_link_with_a_status_and_reason():
           f"the Easy Apply link is parked as needs-you with the reason ({easy and easy['notes']})")
     posting = tracker.find(f"{COMPANY}/jobs/1")
     check(posting and posting["status"] == "needs_you" and posting["company"] == "Example Co"
-          and "clicked 'Apply now'" in text,
-          f"the company posting was followed to its form and logged ({posting})")
+          and "clicked 'Apply now'" in text and "no Next or Submit" in (posting["notes"] or ""),
+          f"the company posting was followed to its form, filled, and parked: the mock has no "
+          f"Next or Submit ({posting and posting['notes']})")
     check("2 link(s)" in text and "needs_you 2" in text, "the batch summary counts both")
     check.done()
 
