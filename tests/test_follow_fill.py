@@ -949,14 +949,27 @@ def _outcome(url):
     return run["capture"], json.loads(run["edits_json"] or "null")
 
 
+def _diagnostics(url, records):
+    """What a flaky capture needs explaining: was the hook on, did a fill fail?"""
+    run = [r for r in tracker.gate_runs() if r["application_url"] == url][-1]
+    try:
+        hooked = json.loads(run["success_signal"] or "{}").get("hooked")
+    except ValueError:
+        hooked = "?"
+    events = [e.get("kind") for r in records for e in r.get("events", [])]
+    return f"hooked={hooked}, events={events}"
+
+
 def test_your_submit_in_follow_mode_is_captured_exactly():
     check = Checks()
 
     def act(page, state):
         # Once the agent has filled the box, let a few polls go by before
-        # acting: the hook is re-armed after the fill, and under load a click
-        # on the very next poll could land before it (a polled read, never a
-        # match, but not what this test is about).
+        # acting. This test has failed twice under load with capture
+        # "polled" and both fields unreadable; the cause is unconfirmed (the
+        # loop arms the hook synchronously before the next poll, so a race
+        # with arming can't be it). The wait lowers the odds; the failure
+        # message carries what the next occurrence needs.
         if not state.get("sent") and page.input_value("#fn"):
             state["seen"] = state.get("seen", 0) + 1
             if state["seen"] <= 6:
@@ -970,7 +983,8 @@ def test_your_submit_in_follow_mode_is_captured_exactly():
     text, records, error, you = _follow(SUBMITTABLE, act, path="/submitted")
     capture, edits = _outcome(f"{HOST}/submitted")
     check(error is None and capture == "exact",
-          f"the submit hook read the form at the moment you submitted ({capture}, {error})")
+          f"the submit hook read the form at the moment you submitted ({capture}, {error}; "
+          f"{_diagnostics(f'{HOST}/submitted', records)})")
     kinds = {e["label"]: e["kind"] for e in edits or []}
     check(kinds.get("First Name") == "changed" and "City" not in kinds,
           f"your edit counts; the field neither of you filled doesn't ({kinds})")

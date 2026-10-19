@@ -1118,3 +1118,18 @@ Commit 78795a0: VERDICT FLAG, 3 FLAGs.
   Not changed.
 - Low: the slowest tests differ run to run (machine load); the 2h50m
   reviewer run is unexplained by the tests. Noted.
+
+Commit 8137f1a: VERDICT FLAG, 2 FLAGs.
+- Medium: the stated mechanism for the capture flake can't happen (the
+  loop arms the hook synchronously before the next poll), so the six-poll
+  wait only lowers the odds. Fixed: the comment says the cause is
+  unconfirmed, and the failure message now carries whether the hook was
+  on and which run events were logged, so the next occurrence can be
+  diagnosed. Candidates per the reviewer: a fill_step raising before
+  arm (swallowed into fill_step_failed), or a later polled snapshot
+  displacing the exact read in Capture._keep.
+- Low: tests/test_intake.py::test_linkedin_easy_apply_is_parked_and_an_
+  external_apply_is_followed took 389s in the reviewer's run (about 60s
+  elsewhere); every request there is fulfilled locally, so it reads as a
+  navigation wait under load. Not investigated; noted so a slower run
+  tripping the 20-minute rule has a suspect.
