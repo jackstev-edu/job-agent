@@ -953,7 +953,14 @@ def test_your_submit_in_follow_mode_is_captured_exactly():
     check = Checks()
 
     def act(page, state):
+        # Once the agent has filled the box, let a few polls go by before
+        # acting: the hook is re-armed after the fill, and under load a click
+        # on the very next poll could land before it (a polled read, never a
+        # match, but not what this test is about).
         if not state.get("sent") and page.input_value("#fn"):
+            state["seen"] = state.get("seen", 0) + 1
+            if state["seen"] <= 6:
+                return False
             page.fill("#fn", "Someone Else")           # you change what the agent put
             page.click("#go")                          # ...and submit
             state["sent"] = True

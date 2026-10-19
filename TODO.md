@@ -1104,3 +1104,17 @@ Commits 38510fb and 3a46f15 (Jack's items of 2026-10-19): VERDICT FLAG,
 - The reviewer's full run took 2h50m against 12m36s in the worktree just
   before. Investigated with --durations=10 on the next run (see the
   commit message for the slowest tests).
+
+Commit 78795a0: VERDICT FLAG, 3 FLAGs.
+- Medium: test_your_submit_in_follow_mode_is_captured_exactly is a known
+  flake under load (seen once by the main session on 3606540, once by the
+  reviewer here; passes alone and on rerun; fails in the cautious
+  direction, a polled read). Fixed: the scripted "you" waits six polls
+  after the agent's fill before changing the box and submitting, as the
+  sibling page-change test already did.
+- Low: GATE_VERSION stays 7 while what the wizard writes into
+  human_reviewed narrowed on 2026-10-19, so version-7 gate_runs rows mix
+  both semantics. Jack's call: bump to 8, or add a record-level marker.
+  Not changed.
+- Low: the slowest tests differ run to run (machine load); the 2h50m
+  reviewer run is unexplained by the tests. Noted.
