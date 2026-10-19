@@ -43,6 +43,13 @@ NEVER = [
     ("I agree to the terms " + "and the privacy policy " * 12, "over-long"),
     ("Email me job alerts and I agree to the privacy policy", "job alerts"),
     ("I agree to the terms and to a drug screen", "drug screen"),
+    # BLOCK fix: a tick that would answer an eligibility, EEO, pay or age question.
+    ("I agree to the privacy policy and confirm I am legally eligible to work in the US", "eligibility"),
+    ("I accept the terms and do not require visa sponsorship", "sponsorship"),
+    ("I agree to the terms and I am not a veteran", "EEO"),
+    ("I have read the terms and I am at least 18", "age"),
+    ("I agree to the privacy policy and my salary expectation is flexible", "pay"),
+    ("I accept the terms; my gender is listed below", "gender"),
 ]
 
 
@@ -69,8 +76,10 @@ def test_the_census_shape():
           "fine print attached refuses")
     check(not gate.consent_box_ok(box(label_content="I agree to the Privacy Policy and arbitration")),
           "hidden text refuses")
-    for source in ("aria-labelledby", "self", "none"):
-        check(not gate.consent_box_ok(box(label_source=source)), f"label source {source} refuses")
+    for source in ("aria-label", "aria-labelledby", "self", "none"):
+        check(not gate.consent_box_ok(box(label_source=source)),
+              f"label source {source} refuses (the policy reads only a visible <label>)")
+    check(gate.consent_box_ok(box(label_source="wrap")), "a wrapping <label> is read")
     check(not gate.consent_box_ok(None) and not gate.consent_box_ok({}), "nothing refuses")
     check.done()
 

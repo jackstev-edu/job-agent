@@ -182,8 +182,9 @@ def test_handshakes_built_in_application_is_parked():
         landing = intake.open_link(ctx, f"{HANDSHAKE}/jobs/9")
         check(landing.parked and "handshake" in landing.parked,
               f"the application stays on Handshake: parked ({landing.parked})")
-        check(_clicks(landing, landing.page) == ["Apply"] * len(_clicks(landing, landing.page)),
-              f"only Apply was ever pressed, never Submit ({_clicks(landing, landing.page)})")
+        check(_clicks(landing, landing.page) == ["Apply"],
+              f"Apply pressed once, then parked: the same control on the same address isn't "
+              f"pressed again ({_clicks(landing, landing.page)})")
     check.done()
 
 

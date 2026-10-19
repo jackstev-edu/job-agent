@@ -114,6 +114,15 @@ FORM = STATE_JS + """<h1>Application</h1><form><label for="city">City</label><in
 <button type="submit">Submit application</button></form>"""
 SUBMIT_ONLY_WALL = STATE_JS + """<h1>Sign in</h1><form><label for="em">Email</label><input id="em" type="email">
 <label for="pw">Password</label><input id="pw" type="password"><button type="submit">Submit application</button></form>"""
+# A wall whose buttons read as the wizard's words: bare Submit, Continue, Next.
+BARE_WALL = STATE_JS + """<h1>Sign in</h1><form><label for="em">Email</label><input id="em" type="email">
+<label for="pw">Password</label><input id="pw" type="password">
+<button type="submit">Submit</button><button type="button">Continue</button><button type="button">Next</button></form>"""
+# A reset link that leads to an ordinary form, not a reset page.
+FORGOT_TO_FORM = STATE_JS + """<h1>Application</h1><form><label for="em">Email</label><input id="em" type="email">
+<label for="city">City</label><input id="city" name="city"><button type="submit">Submit</button></form>"""
+# A register page whose password boxes allow only 16 characters.
+SHORT_REGISTER = REGISTER.replace('id="p1" type="password"', 'id="p1" type="password" maxlength="16"')
 
 
 BLANK = TEST_HOME / "accounts_blank.html"
@@ -125,7 +134,9 @@ def _site(create_link=True, exists=False):
     link = "<a href='/register'>Create account</a>" if create_link else ""
     return {"/apply": html(SIGN_IN.replace("CREATE_LINK", link)), "/register": html(REGISTER),
             "/verify": html(VERIFY), "/forgot": html(FORGOT), "/sent": html(SENT), "/form": html(FORM),
-            "/wall": html(SUBMIT_ONLY_WALL)}
+            "/wall": html(SUBMIT_ONLY_WALL), "/bare": html(BARE_WALL),
+            "/short": html(SHORT_REGISTER), "/forgot-form": html(FORGOT_TO_FORM),
+            "/apply-forgot-form": html(SIGN_IN.replace("CREATE_LINK", "").replace("/forgot", "/forgot-form"))}
 
 
 def _routes(site):
@@ -288,6 +299,49 @@ def test_no_code_in_time_is_parked_and_submit_is_never_pressed():
     check.done()
 
 
+def test_bare_submit_next_and_continue_are_never_pressed_by_accounts():
+    # BLOCK fix: a wall whose only buttons read Submit / Continue / Next gets
+    # no press at all (those words belong to the wizard and submit.py), and
+    # a Forgot link leading to an ordinary form presses nothing there.
+    check = Checks()
+    with mock_page(BLANK, _routes(_site())) as page:
+        page.goto(f"{HOST}/bare")
+        check(pages.page_kind(page) == pages.SIGN_IN, "the bare wall reads as a sign-in page")
+        res, printed = _run(page, pages.SIGN_IN, _Profile(), _Pauser([None]))
+        check(res.status == accounts.PARKED and page.evaluate("window.__clicks") == [],
+              f"Submit, Continue and Next: none pressed; parked ({res.status}, {res.reason})")
+        for word in ("Submit", "Continue", "Next", " submit ", "Proceed", "Done"):
+            check(bool(accounts.NEVER_WORDS.search(word)), f"'{word.strip()}' is never a button for accounts")
+        for rx in (accounts.SIGN_IN_WORDS, accounts.CREATE_WORDS, accounts.RESET_SEND_WORDS,
+                   accounts.VERIFY_WORDS):
+            check(not any(rx.match(w) for w in ("Submit", "Continue", "Next", "Go", "Proceed", "Enter")),
+                  f"no step list contains a wizard word ({rx.pattern[:30]}...)")
+        page.goto(f"{HOST}/apply-forgot-form")
+        page.evaluate("sessionStorage.setItem('clicks', '[]')")
+        page.reload()
+        res, printed = _run(page, pages.SIGN_IN, _Profile(), _Pauser([PASTED]))
+        clicks = page.evaluate("window.__clicks")
+        check(res.status == accounts.PARKED and "reset page" in res.reason
+              and clicks == ["Sign In", "Forgot password?"],
+              f"a Forgot link that leads to an ordinary form: nothing pressed there ({res.reason}, {clicks})")
+        check(page.evaluate("document.getElementById('city').value") == "",
+              "  ...and nothing typed into the form's other box")
+    check.done()
+
+
+def test_a_password_box_shorter_than_the_policy_parks():
+    check = Checks()
+    with mock_page(BLANK, _routes(_site())) as page:
+        page.goto(f"{HOST}/short")
+        res, printed = _run(page, pages.ACCOUNT, _Profile(), _Pauser([CODE]))
+        check(res.status == accounts.PARKED and "16 characters" in res.reason
+              and page.evaluate("window.__clicks") == [],
+              f"maxlength 16 is below the 20-character policy: parked, nothing pressed ({res.reason})")
+        check(json.loads(_session(page, "created") or "{}") == {}, "nothing was typed into the form")
+        _nowhere(check, "short box", printed, json.dumps(res.__dict__, default=str))
+    check.done()
+
+
 def test_the_generator_policy():
     check = Checks()
     seen = {accounts.generate_password() for _ in range(5)}
@@ -296,8 +350,8 @@ def test_the_generator_policy():
     for name, cls in (("upper", str.isupper), ("lower", str.islower), ("digit", str.isdigit)):
         check(any(cls(c) for c in pw), f"has a {name} case character")
     check(any(c in "!@#$%^&*-_=+?" for c in pw), "has a symbol")
-    check(len(accounts.generate_password(16)) == 16 and len(accounts.generate_password(4)) == 12,
-          "a maxlength shortens it, never below 12")
+    check(len(accounts.generate_password(22)) == 22 and len(accounts.generate_password(4)) == 20
+          and accounts.PASSWORD_MIN == 20, "a maxlength shortens it, never below the owner's 20")
     check.done()
 
 

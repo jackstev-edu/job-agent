@@ -269,6 +269,16 @@ def stop_reason(text: str) -> str | None:
     return next((why for rx, why in _STOPS if any(rx.search(v) for v in variants)), None)
 
 
+# The HARD_STOPS entry about a criminal record, found by its reason rather
+# than its position in the table.
+_RECORD_STOP = next(re.compile(p, re.I) for p, why, _ in HARD_STOPS if "your record" in why)
+
+
+def record_stop(text: str) -> bool:
+    """Does this one reading of a text match the criminal-record stop?"""
+    return bool(_RECORD_STOP.search(str(text or "")))
+
+
 def stop_kinds(text: str) -> set[str]:
     """Every HARD_STOPS kind any reading of `text` hits."""
     variants = text_variants(text)
@@ -305,11 +315,12 @@ def sponsorship_line(text: str, lines: set[str]) -> str | None:
     variants = text_variants(text)
     future_anywhere = any(_SAYS_FUTURE.search(v) for v in variants)
     now_anywhere = any(_SAYS_NOW.search(v) for v in variants)
-    # Sentences are cut from the text as written, before any reading
-    # collapses a line break into a space; each sentence is then read every
-    # way, so an invisible character inside a word still can't hide it.
-    clauses = [c for s in _SENTENCE_END.split(str(text or ""))
-               for c in text_variants(s) if _SPONSOR_WORD.search(c)]
+    # NFKC first, so a fullwidth question mark ends a sentence like a plain
+    # one (NFKC never removes a sentence end, only adds them); each sentence
+    # is then read every way, so an invisible character inside a word still
+    # can't hide it. Line breaks survive NFKC, so a bare one ends a sentence.
+    sentences = _SENTENCE_END.split(unicodedata.normalize("NFKC", str(text or "")))
+    clauses = [c for s in sentences for c in text_variants(s) if _SPONSOR_WORD.search(c)]
     future_in_clause = any(_SAYS_FUTURE.search(c) for c in clauses)
     now_in_clause = any(_SAYS_NOW.search(c) for c in clauses)
     if future_in_clause and not now_anywhere:

@@ -267,6 +267,35 @@ def test_a_normal_fill_reads_the_value_back():
     check.done()
 
 
+# A box that turns itself into a password box as soon as anything is typed.
+TURNS_SECRET = """<!doctype html><html><body><form>
+  <label for="ci">City</label><input id="ci" name="city">
+</form><script>
+  document.getElementById('ci').addEventListener('input', e => { e.target.type = 'password'; }, {once: true});
+</script></body></html>"""
+
+
+def test_a_box_that_turns_secret_after_typing_is_never_read_back():
+    check = Checks()
+    with mock_page(_write("turns_secret.html", TURNS_SECRET)) as page:
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        f = next(f for f in fields if (f.get("label") or "").startswith("City"))
+        seen, real = [], page.evaluate
+
+        def spy(*a, **k):
+            out = real(*a, **k)
+            seen.append(out)
+            return out
+        page.evaluate = spy
+        ok, detail = filler.fill_one(page, f, "Springfield")
+        page.evaluate = real
+    check(ok and "couldn't be read back" in detail and filler.UNCONFIRMED in detail,
+          f"typed, then unreadable: unconfirmed, never claimed ({detail})")
+    check("Springfield" not in str(seen) and "Springfield" not in detail,
+          "no value word came back from the page or into the detail")
+    check.done()
+
+
 def test_without_containment_filling_is_unchanged():
     check = Checks()
     with mock_page(_write("plain.html", PLAIN)) as page:

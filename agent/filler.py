@@ -10,7 +10,9 @@ WHY IT MATTERS: This file contains the hard stop. It has no code path that
 clicks Submit, presses Enter, or types a line break outside a textarea — not
 as an option, not behind a flag. That's deliberate. Either way a text box is
 read back afterwards: the same text counts as filled, anything else is kept
-but marked unconfirmed, and an emptied box is reported unfilled.
+but marked unconfirmed, and an emptied box is reported unfilled. A box that
+can't be read back (it became secret) is never read: the typed fill is
+reported unconfirmed, where the contained path reports a set as not made.
 """
 
 from __future__ import annotations

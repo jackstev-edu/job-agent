@@ -33,32 +33,35 @@ if TYPE_CHECKING:
 # reads like Submit application: on these pages there is no application to
 # submit, and the page kind is checked again right before every press.
 SIGN_IN_WORDS = re.compile(
-    r"^(sign ?in|log ?in|login|sign ?in with (email|password)|continue|next|go|proceed"
-    r"|enter|submit|sign ?in to (apply|continue|your account))$", re.I)
+    r"^(sign ?in|log ?in|login|sign ?in with (email|password)"
+    r"|sign ?in to (apply|continue|your account))$", re.I)
 CREATE_WORDS = re.compile(
-    r"^(create (an |my |your |a new )?account|sign ?up|register|create|join|continue|next"
-    r"|submit|get started|create account and continue|register now|agree (and|&) (continue|create account))$",
-    re.I)
+    r"^(create (an |my |your |a new )?account|sign ?up|register|register now"
+    r"|create account and continue)$", re.I)
 CREATE_LINK_WORDS = re.compile(
     r"^(create (an |my |your |a new )?account|sign ?up|register|register (here|now)|new user"
     r"|create one|create one here|don'?t have an account\??( ?(sign ?up|register|create (an |one)?( account)?))?"
     r"|new to \S+\??( ?(sign ?up|register|create (an )?account))?|i'?m a new user|new candidate)$", re.I)
-FORGOT_WORDS = re.compile(r"forgot|forgotten|reset (your |my |the )?password|trouble (signing|logging) in"
-                          r"|can'?t (sign|log) in|need help signing in", re.I)
+FORGOT_WORDS = re.compile(
+    r"^(forgot(ten)? (your |my )?password\??|forgot\??|reset (your |my |the )?password\??"
+    r"|trouble (signing|logging) in\??|can'?t (sign|log) in\??|need help signing in\??)$", re.I)
 RESET_SEND_WORDS = re.compile(
-    r"^(send|submit|reset|reset password|continue|next|send (reset |me a |a )?(link|email|code|instructions)"
+    r"^(send|reset|reset password|send (reset |me a |a )?(link|email|code|instructions)"
     r"|email me|request( reset)?|send reset link|recover)$", re.I)
-VERIFY_WORDS = re.compile(r"^(verify|verify (code|email|now)|confirm|continue|next|submit|validate"
-                          r"|confirm (code|email))$", re.I)
-NEVER_WORDS = re.compile(r"submit (my |your |the )?application|apply|withdraw|delete|google|microsoft"
-                         r"|apple|facebook|linkedin|sso|single sign", re.I)
+VERIFY_WORDS = re.compile(r"^(verify|verify (code|email|now)|confirm|validate|confirm (code|email))$",
+                          re.I)
+# Never pressed by this module, whatever list matched: a bare Submit, Next
+# or Continue belongs to the wizard and to submit.py, behind the gate.
+NEVER_WORDS = re.compile(r"^\s*(submit|continue|next|proceed|go|enter|done|finish)\s*$"
+                         r"|submit (my |your |the )?application|apply|withdraw|delete|google"
+                         r"|microsoft|apple|facebook|linkedin|sso|single sign", re.I)
 
 EMAIL_BOX = re.compile(r"e-?mail|username|user name|user id|login id", re.I)
 FIRST_BOX = re.compile(r"first\s*name|given\s*name|\bfname\b|firstname", re.I)
 LAST_BOX = re.compile(r"last\s*name|family\s*name|surname|\blname\b|lastname", re.I)
 
 PASSWORD_LENGTH = 24
-PASSWORD_MIN = 12
+PASSWORD_MIN = 20              # the owner decision: 20+ characters
 _CLASSES = (string.ascii_uppercase, string.ascii_lowercase, string.digits, "!@#$%^&*-_=+?")
 
 CONTINUE, PARKED = "continue", "parked"
@@ -74,9 +77,10 @@ class Result:
 
 def generate_password(length: int = PASSWORD_LENGTH) -> str:
     """
-    One fixed policy: `length` characters (never below PASSWORD_MIN), at
-    least one of each class, shuffled with `secrets`. No page text is read
-    for rules; a site that rejects it gets a pause, not a parse.
+    One fixed policy: `length` characters (never below PASSWORD_MIN, the
+    owner's 20), at least one of each class, shuffled with `secrets`. No
+    page text is read for rules; a site that rejects it gets a pause, not a
+    parse.
     """
     length = max(int(length or 0), PASSWORD_MIN)
     chars = [secrets.choice(c) for c in _CLASSES]
@@ -308,7 +312,7 @@ def _tick_consent(page: "Page", steps: list[str]) -> None:
     except Exception:
         return
     for b in boxes:
-        if not isinstance(b, dict) or b.get("checked"):
+        if not isinstance(b, dict) or b.get("checked") or not b.get("required"):
             continue
         if not gate.consent_box_ok(b):
             continue
@@ -333,7 +337,10 @@ def sign_up(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
         return Result(PARKED, "an account page with no new-password box to create an account in")
     _fill_identity(page, prof, res.steps)
     limits = [int(b["maxlength"]) for b in new_boxes if isinstance(b.get("maxlength"), int)
-              and 8 <= int(b["maxlength"]) < PASSWORD_LENGTH]
+              and 0 < int(b["maxlength"]) < PASSWORD_LENGTH]
+    if limits and min(limits) < PASSWORD_MIN:
+        return Result(PARKED, f"the password box allows only {min(limits)} characters; the "
+                              f"policy is {PASSWORD_MIN}+", res.steps)
     password = generate_password(min(limits) if limits else PASSWORD_LENGTH)
     typed = all(_type_secret(page, b["key"], password) for b in new_boxes)
     del password
@@ -380,8 +387,11 @@ def forgot_password(page: "Page", prof, pauser: pause_mod.Pauser, res: Result) -
         return Result(PARKED, "sign-in failed and there is no Forgot password link", res.steps,
                       res.events)
     res.steps.append(f"pressed '{pressed}'")
+    if not _is_reset_page(page):
+        return Result(PARKED, "the Forgot password link didn't lead to a reset page (one email "
+                              "box, no password box)", res.steps, res.events)
     _fill_identity(page, prof, res.steps)
-    sent = _press(page, RESET_SEND_WORDS, pages.page_kind(page), "Send")
+    sent = _press(page, RESET_SEND_WORDS, None, "Send")
     if sent is not None:
         res.steps.append(f"pressed '{sent}'")
     res.events.append({"kind": "password_reset", "detail": "requested by the agent", "handled": "agent"})
@@ -416,6 +426,23 @@ def forgot_password(page: "Page", prof, pauser: pause_mod.Pauser, res: Result) -
     if not ok:
         return Result(PARKED, "the password you pasted didn't sign in", res.steps, res.events)
     return res
+
+
+def _is_reset_page(page: "Page") -> bool:
+    """
+    A reset page as this module will act on one: no password or code box
+    (page_kind None), and exactly one visible text box, which reads as the
+    email box. Anything else is some other page, and nothing is pressed.
+    """
+    if pages.page_kind(page) is not None:
+        return False
+    try:
+        boxes = page.evaluate(_TEXT_BOXES_JS, _TEXT_ATTR) or []
+    except Exception:
+        return False
+    return (len(boxes) == 1 and isinstance(boxes[0], dict)
+            and (boxes[0].get("type") == "email"
+                 or bool(EMAIL_BOX.search(str(boxes[0].get("words") or "")))))
 
 
 def _sign_in_with(page: "Page", prof, password: str | None, res: Result) -> bool:

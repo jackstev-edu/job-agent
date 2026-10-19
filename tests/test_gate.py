@@ -382,6 +382,58 @@ def test_6_free_text_only_canned_verbatim():
     check.done()
 
 
+def test_7_owner_decisions_consent_policy_reviewed_fields_and_handled_events():
+    # Gate version 7 (owner decisions of 2026-10-18). Each fails on version 6.
+    check = Checks()
+    check(gate.GATE_VERSION == 7, "gate version 7")
+    tos = "I have read and agree to the Terms of Service and Privacy Policy"
+    # A terms / privacy box passes the census check without an allowlist entry...
+    r = base(); r["census"].append(box(tos, checked=True))
+    check(run(r)["content_verdict"] == "would_submit", "a ticked terms / privacy box passes the census")
+    # ...and a flagged required one gets a would_tick action from the policy alone.
+    r = base()
+    r["fields"].append({"ref": "f6", "type": "checkbox", "label": tos, "required": True})
+    r["categories"]["f6"] = "consent"
+    r["flags"] = [{"ref": "f6", "category": "consent", "reason": "consent"}]
+    r["census"].append(box(tos, ref="f6"))
+    v = run(r)
+    check(v["content_verdict"] == "would_submit" and v["consent_actions"].get("f6") == "would_tick"
+          and any(t.get("source") == "consent_policy" for t in v["trace"]),
+          f"a required terms box: would_tick by the policy, traced ({v['content_reasons']})")
+    # A marketing box is still not allowed, ticked or not.
+    r = base(); r["census"].append(box("Email me job alerts", checked=True))
+    stops(check, r, "not on consent_allowlist", "a ticked job-alerts box still stops")
+    # A field Jack reviewed skips the field-level stops, never required-but-empty.
+    r = base(); r["plan"]["f4"]["value"] = "Something the model wrote"
+    stops(check, r, "canned answers", "a drafted essay not canned stops (control)")
+    r["human_reviewed"] = ["f4"]
+    check(run(r)["content_verdict"] == "would_submit", "...unless Jack reviewed that field")
+    r = base(); r["human_reviewed"] = ["f0"]; r["snapshot"]["f0"] = ""
+    stops(check, r, "required, but empty", "a reviewed field that reads empty still stops when required")
+    r = base(); r["human_reviewed"] = ["f1"]; del r["plan"]["f1"]
+    v = run(r)
+    check(v["content_verdict"] == "would_submit"
+          and any(t["ref"] == "f1" and t["source"] == "human" for t in v["trace"]),
+          "a legal field Jack answered himself is traced as his, no value stored")
+    r = base(); r["human_reviewed"] = "f4"
+    r["plan"]["f4"]["value"] = "Something the model wrote"
+    stops(check, r, "canned answers", "human_reviewed must be a list of refs; a string waives nothing")
+    # Handled events don't stop; a CAPTCHA only when Jack handled it.
+    for kind, handled, passes in (("login_wall", "agent", True), ("next", "agent", True),
+                                  ("gate_pause", "jack", True), ("captcha", "jack", True),
+                                  ("captcha", "agent", False), ("captcha", None, False),
+                                  ("login_wall", None, False), ("login_wall", "page", False)):
+        r = base(); r["events"] = [{"kind": kind, "detail": "x", "handled": handled}]
+        got = run(r)["content_verdict"] == "would_submit"
+        check(got == passes, f"event {kind} handled by {handled}: {'passes' if passes else 'stops'}")
+    # More than one step is fine only when the record says it is a wizard run.
+    r = base(); r["steps"] = 3; r["wizard"] = True
+    check(run(r)["content_verdict"] == "would_submit", "three wizard steps pass")
+    r = base(); r["steps"] = 3; r["wizard"] = "yes"
+    stops(check, r, "wizard steps", "wizard must be exactly True")
+    check.done()
+
+
 def test_9_nothing_unexpected():
     check = Checks()
     for kind in ("captcha", "login_wall", "no_fields", "upload_failed", "advanced", "host_changed"):

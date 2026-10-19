@@ -106,9 +106,11 @@ def read_kind(how) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     if NEXT_WORDS.match(text):
         return "polled"
-    if source == "submit" or SUBMIT_WORDS.match(text):
+    if SUBMIT_WORDS.match(text):
         return "exact"
-    return "polled"
+    # A submit event with no submitter (Enter in a box, a scripted submit)
+    # is exact; one whose submitter reads as anything else is not.
+    return "exact" if source == "submit" and not text else "polled"
 
 _MAX_VALUE = 5000
 _MAX_FILES, _MAX_FILE_NAME = 50, 1000

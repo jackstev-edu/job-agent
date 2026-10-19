@@ -178,6 +178,8 @@ def test_a_next_press_is_never_an_exact_read():
     check = Checks()
     for how, want in (("submit:", "exact"), ("submit:Submit Application", "exact"),
                       ("submit:Continue", "polled"), ("submit:Next", "polled"),
+                      ("submit:Save and continue later", "polled"), ("submit:Submit & next", "polled"),
+                      ("submit:Continue \u2192", "polled"), ("submit:Next step", "polled"),
                       ("click:Submit Application", "exact"), ("click:Apply now", "exact"),
                       ("click:Next", "polled"), ("click:Save and continue", "polled"),
                       ("click:Sign in", "polled"), ("click:Show more", "polled"),

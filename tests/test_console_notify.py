@@ -14,10 +14,11 @@ and a pasted password must reach exactly one caller.
 Run from anywhere:  .venv/Scripts/python.exe tests/test_console_notify.py
 """
 import threading
+import time
 from unittest import mock
 
 from _harness import Checks, run_as_script
-from agent import console, notify
+from agent import console, notify, pause
 
 
 class _Terminal:
@@ -75,6 +76,23 @@ def test_answers_timeouts_and_draining():
         got = c.ask("Paste or finish in the browser: ", timeout_s=10, poll=finished, poll_every_s=0.05)
         check(got is None and ticks["n"] >= 2, "a poll returning True ends the wait with None")
         term.feed("unblock")                         # release that read's thread
+        c._pending.wait(5)                           # ...and let it take the line
+        # A terminal still owed a line: the next ask can't read, but it still
+        # waits out its deadline (polling), and says the terminal was busy.
+        check(c.ask("Stuck: ", timeout_s=0.5) is None and not c.blocked,
+              "a read that never comes -> None (control)")
+        t0 = time.monotonic(); ticks["n"] = 0
+        got = c.ask("Blocked: ", timeout_s=5, poll=finished, poll_every_s=0.05)
+        check(got is None and c.blocked and ticks["n"] >= 2 and time.monotonic() - t0 >= 0.04,
+              "with the terminal busy, the wait still polls until the page moves on")
+        t0 = time.monotonic()
+        check(c.ask("Blocked again: ", timeout_s=0.3) is None and time.monotonic() - t0 >= 0.25,
+              "  ...and still waits out the deadline, never parking at once")
+        pz = pause.Pauser(console=c, notify_fn=lambda t, b, echo=print: None,
+                          echo=lambda *a, **k: None, timeout_s=0.2)
+        answer, how = pz.wait("t", "b", prompt="p: ")
+        check(answer is None and how == pause.NO_TERMINAL, f"the pause reports no_terminal ({how})")
+        term.feed("release")
     check.done()
 
 

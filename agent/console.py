@@ -61,6 +61,7 @@ class Console:
     def __init__(self, clock=time.monotonic):
         self._pending: Request | None = None
         self._clock = clock
+        self.blocked = False                 # the last ask found the terminal busy
 
     def start(self, prompt: str, hidden: bool = False, drain_s: float = 0.0) -> Request | None:
         """
@@ -87,9 +88,22 @@ class Console:
         terminal can't be read.
         """
         req = self.start(prompt, hidden)
-        if req is None:
-            return None
+        self.blocked = req is None
         deadline = None if timeout_s is None else self._clock() + timeout_s
+        if req is None:
+            # The terminal is still owed a line from an earlier prompt, so
+            # nothing can be read now; the wait, and the poll, still happen.
+            while True:
+                if poll is not None:
+                    try:
+                        if poll():
+                            return None
+                    except Exception:
+                        pass
+                if deadline is not None and self._clock() >= deadline:
+                    return None
+                time.sleep(poll_every_s if deadline is None
+                           else max(0.0, min(poll_every_s, deadline - self._clock())))
         while True:
             step = poll_every_s if deadline is None else max(0.0, min(poll_every_s, deadline - self._clock()))
             if req.wait(step):

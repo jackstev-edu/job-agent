@@ -51,6 +51,8 @@ class Pauser:
             how = FINISHED
         elif answer is not None:
             how = ANSWERED                 # an empty line: Jack pressed Enter
+        elif getattr(self.console, "blocked", False):
+            how = NO_TERMINAL              # an earlier prompt still owns the terminal
         else:
             how = TIMED_OUT
         self.log.append({"title": title, "ended": how})

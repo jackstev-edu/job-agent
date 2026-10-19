@@ -415,6 +415,9 @@ def test_the_deciding_word_must_sit_in_the_sponsorship_sentence():
     check(sensitive.sponsorship_line("Will you require sponsorship\nLater, "
                                      "we will ask about relocation", pair) is None,
           "a bare line break ends the sentence too")
+    check(sensitive.sponsorship_line("Will you require sponsorship\uff1f Think about the future.",
+                                     pair) is None,
+          "a fullwidth question mark (NFKC: '?') ends the sentence too")
     check(sensitive.sponsorship_line("Will you require spon­sorship in the future",
                                      pair) == "eligibility.requires_sponsorship_future",
           "an invisible character inside the word still can't hide the clause")

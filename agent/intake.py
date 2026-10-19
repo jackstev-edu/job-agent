@@ -74,8 +74,10 @@ _FIND_APPLY_JS = r"""
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
   document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
-  const texts = el => [el.innerText, el.getAttribute('aria-label'), el.value,
-                       el.getAttribute('title')].map(norm).filter(Boolean);
+  // The text Jack sees: innerText, or an input's value; an aria-label only
+  // for a control with no visible text at all (an icon button).
+  const texts = el => { const seen = norm(el.innerText || el.value);
+                        return [seen || norm(el.getAttribute('aria-label'))].filter(Boolean); };
   const all = [...document.querySelectorAll(
       'a, button, [role=button], input[type=submit], input[type=button]')].filter(visible);
   const hits = [], manual = [];
@@ -105,13 +107,18 @@ _FIND_APPLY_JS = r"""
 }
 """
 
+# A form worth filling: two or more visible fields, or a file box (a lone
+# email box is a newsletter sign-up, not the application).
 _HAS_FIELDS_JS = r"""
-() => [...document.querySelectorAll('input, select, textarea')].some(el => {
-  const t = (el.type || '').toLowerCase();
-  if (['hidden', 'submit', 'button', 'reset', 'image', 'search'].includes(t)) return false;
-  const r = el.getBoundingClientRect();
-  return r.width > 0 && r.height > 0;
-})
+() => {
+  const boxes = [...document.querySelectorAll('input, select, textarea')].filter(el => {
+    const t = (el.type || '').toLowerCase();
+    if (['hidden', 'submit', 'button', 'reset', 'image', 'search'].includes(t)) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
+  return boxes.length >= 2 || boxes.some(el => (el.type || '').toLowerCase() === 'file');
+}
 """
 
 
@@ -186,12 +193,21 @@ def open_link(ctx: "BrowserContext", url: str, max_clicks: int = 3) -> Landing:
         landing.parked = f"the link didn't open ({type(e).__name__})"
         return landing
     landing.page = page
+    last_click: tuple[str, str] | None = None
     for _ in range(max_clicks):
         board = job_board(page.url)
         if not board and has_form_fields(page):
             break                          # the form is here: nothing to click
         found = find_apply(page)
         if found.get("chosen"):
+            here = (page.url, str(found.get("word") or "").lower())
+            if here == last_click:
+                # The same control on the same address again: the click
+                # went nowhere the agent can follow.
+                landing.parked = (f"{board}: Apply stays on the job board" if board
+                                  else "Apply didn't lead anywhere; check the page")
+                return landing
+            last_click = here
             landing.steps.append(f"clicked '{found.get('word')}' on {urlparse(page.url).hostname}")
             try:
                 page = _click_marked(ctx, page)

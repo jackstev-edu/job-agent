@@ -37,7 +37,16 @@ from . import sensitive
 #    (work authorization from an explicit set of lines), and stops when it
 #    spans two or more areas; the page's raw_stop / raw_legal flags make a
 #    field legal; a dropdown fill the page couldn't confirm stops.
-GATE_VERSION = 6
+# 7: the owner decisions of 2026-10-18. A checkbox whose label passes the
+#    consent policy (terms / privacy wording only) counts like an
+#    allowlisted one; a field in the record's human_reviewed list (set by
+#    the wizard after a pause Jack ended, for a field he touched, left blank
+#    or reviewed) is his answer and skips the field-level stops, never the
+#    required-but-empty check; an event marked handled by the agent (a
+#    sign-in, a Next press) or by Jack (a CAPTCHA, a pause) doesn't stop,
+#    a CAPTCHA only when Jack handled it; more than one step is fine when
+#    the record says it is a wizard run.
+GATE_VERSION = 7
 
 WOULD_SUBMIT, WOULD_STOP = "would_submit", "would_stop"
 
@@ -145,6 +154,12 @@ CONSENT_CERTIFY = re.compile(
     r"|perjury|background\s+check|drug|criminal|convict|felon|misdemean|arrest|authori[sz]e"
     r"|arbitrat|waive|release|indemnif|non-?compete|reference\s+check|verify|investigat"
     r"|my\s+(answers|responses|information)\s+(are|is)", re.I)
+# Words that make a consent label an answer to a question about age or
+# anything else a person declares: never ticked.
+CONSENT_DECLARE = re.compile(
+    r"\b(age|aged|years?\s+old|older|over\s+\d+|at\s+least\s+\d+|\d{2}\+?|eligible|eligib\w*"
+    r"|legally|not\s+require|i\s+am\s+(a|an|not)\b|i\s+(do|have|will)\s+not|confirm\s+(that\s+)?i)",
+    re.I)
 CONSENT_MAX_CHARS = 240
 
 
@@ -160,25 +175,36 @@ def consent_ok(label: Any) -> bool:
     if not text.strip() or len(text) > CONSENT_MAX_CHARS:
         return False
     variants = sensitive.text_variants(text)
-    if any(CONSENT_MARKETING.search(v) or CONSENT_CERTIFY.search(v) for v in variants):
+    if any(CONSENT_MARKETING.search(v) or CONSENT_CERTIFY.search(v) or CONSENT_DECLARE.search(v)
+           for v in variants):
         return False
     if any(sensitive.stop_kinds(v) - {"legal"} for v in variants):
         return False
+    # Anything that reads as eligibility, EEO or pay (LEGAL_GUARD, or a
+    # PROFILE_PATHS line) is a question, and a tick would answer it.
+    if (sensitive.legal_guard({"label": text}) is not None
+            or sensitive.sensitive_line(text, SENSITIVE_PREFIXES) is not None
+            or sensitive.all_profile_lines(text)):
+        return False
     # The one HARD_STOPS legal pattern a consent box is allowed to match is
     # the terms / privacy one; a criminal-record or declaration match says no.
-    record_rx = sensitive._STOPS[1][0]
-    if any(record_rx.search(v) for v in variants):
+    if any(sensitive.record_stop(v) for v in variants):
         return False
     return any(CONSENT_AGREE.search(v) and CONSENT_DOCUMENT.search(v) for v in variants)
 
 
+# The policy reads only a visible <label> (for= or wrapping): an aria-label
+# is text Jack never sees, so it can satisfy only the exact allowlist.
+POLICY_LABEL_SOURCES = {"for", "wrap"}
+
+
 def consent_box_ok(box: dict | None) -> bool:
     """
-    A census box the policy may tick: label from a <label> or aria-label,
-    rendered the same as written, no fine print attached, and a label that
-    passes consent_ok.
+    A census box the policy may tick: label from a visible <label> (for= or
+    wrapping, never aria-label), rendered the same as written, no fine print
+    attached, and a label that passes consent_ok.
     """
-    if not box or box.get("label_source") not in ALLOWLIST_LABEL_SOURCES:
+    if not box or box.get("label_source") not in POLICY_LABEL_SOURCES:
         return False
     if normalize_label(box.get("label_inner")) != normalize_label(box.get("label_content")):
         return False
@@ -337,6 +363,9 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
     allow = profile.consent_allowlist()
     census_by_ref = {b.get("ref"): b for b in (record.get("census") or []) if b.get("ref")}
     consent_actions: dict[str, str] = {}
+    # Fields Jack answered, left blank or reviewed himself after a pause (the
+    # wizard writes this list; a missing key waives nothing).
+    reviewed = {r for r in (record.get("human_reviewed") or []) if isinstance(r, str)}
 
     for f in fields:
         ref, label = f.get("ref"), f.get("label") or f.get("name") or "(unlabelled)"
@@ -351,6 +380,14 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
                            or "legal" in kinds or sensitive.legal_guard(f) is not None
                            or bool(f.get("raw_stop") or f.get("raw_legal")))
 
+        if ref in reviewed:
+            # Jack's own answer: traced as his, never judged on content. The
+            # required-but-empty check below still applies to it.
+            if sensitive_field:
+                trace.append({"ref": ref, "label": label[:120], "category": category,
+                              "profile_path": None, "source": "human", "fit": None})
+            continue
+
         # 5. per-company questions are never answered from the profile yet.
         if category == "per_company" or "per_company" in kinds:
             content.append(f"{name}: {PER_COMPANY_REASON}")
@@ -364,14 +401,18 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         # action is recorded for scoring only.
         if f.get("type") == "checkbox" and ref in flags:
             idx = _allowlist_index(census_by_ref.get(ref), allow)
+            # The consent policy (owner decision): terms / privacy wording
+            # read from the census box, which is the label on the element.
+            policy = idx is None and consent_box_ok(census_by_ref.get(ref))
             legal_hit = "legal" in kinds
             consent_handoff = (category == "consent"
                                or (legal_hit and category == "legal_declaration"))
-            if (idx is not None and consent_handoff and not kinds - {"legal"}
+            if ((idx is not None or policy) and consent_handoff and not kinds - {"legal"}
                     and line is None and sensitive.legal_guard(f) is None):
                 if legal_hit or category in SENSITIVE_CATEGORIES:
                     trace.append({"ref": ref, "label": label[:120], "category": category,
-                                  "profile_path": None, "source": "consent_allowlist",
+                                  "profile_path": None,
+                                  "source": "consent_policy" if policy else "consent_allowlist",
                                   "fit": "exact", "allowlist_index": idx})
                 consent_actions[ref] = "would_tick" if _is_required(f) else "leave"
                 continue
@@ -487,16 +528,22 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             content.append(f"{name}: label contains hidden text")
         elif box.get("described"):
             content.append(f"{name}: has fine print attached")
-        elif normalize_label(box.get("label_inner")) not in allow:
-            content.append(f"{name}: not on consent_allowlist")
+        elif (normalize_label(box.get("label_inner")) not in allow
+              and not consent_ok(box.get("label_inner"))):
+            content.append(f"{name}: not on consent_allowlist, and not a terms / privacy consent")
 
-    # 9. nothing unexpected along the way.
+    # 9. nothing unexpected along the way. An event the agent handled under
+    # the owner decisions (a sign-in, an account, a Next press) or Jack
+    # handled at a pause doesn't stop; a CAPTCHA only when Jack did.
     for ev in record.get("events") or []:
         if ev.get("kind") in INFORMATIONAL_EVENTS:
             continue
+        handled = ev.get("handled")
+        if handled == "jack" or (handled == "agent" and ev.get("kind") != "captcha"):
+            continue
         detail = f" ({ev.get('detail')})" if ev.get("detail") else ""
         content.append(f"run: {ev.get('kind', 'unknown event')}{detail}")
-    if (record.get("steps") or 0) > 1:
+    if (record.get("steps") or 0) > 1 and record.get("wizard") is not True:
         content.append(f"run: {record['steps']} wizard steps")
     for fr in record.get("frames") or []:
         if fr.get("visible") and not _KNOWN_FRAME.match(fr.get("src") or ""):
