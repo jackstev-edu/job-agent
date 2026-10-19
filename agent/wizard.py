@@ -132,7 +132,7 @@ class Wizard:
         self.out = Outcome("needs_you")
         self.snapshots: dict = {}               # every page's read-back, by ref
         self.census: dict = {}                  # every page's checkboxes after filling, by ref
-        self.prefill: dict = {}                 # earlier pages' button-pair boxes before filling
+        self.prefill: dict = {}                 # earlier pages' pair boxes before filling, by group
         self.results: dict = {}
         self.human_reviewed: list[str] = []
         self.uploaded: dict | None = {}
@@ -155,7 +155,7 @@ class Wizard:
             pre = rec.get("prefill_census")
             pre_now = list(pre) if isinstance(pre, list) else []
             groups = {b.get("group_ref") for b in pre_now if isinstance(b, dict)}
-            earlier = [b for g, b in self.prefill.items() if g not in groups]
+            earlier = [b for g, boxes in self.prefill.items() if g not in groups for b in boxes]
             if earlier or isinstance(pre, list):
                 rec["prefill_census"] = earlier + pre_now
             rec["human_reviewed"] = list(self.human_reviewed)
@@ -224,7 +224,7 @@ class Wizard:
         try:
             now = extract.snapshot(self.page, fill.fields)
         except Exception:
-            now = {}
+            now = None                  # unreadable: nothing about values is known
         marked_after = self._marked(refs)
         # A read that failed, before or after, can only shrink the waiver:
         # with no trustworthy "before", no mark counts as new.
@@ -233,21 +233,25 @@ class Wizard:
         results = fill.step.get("results") or {}
         reviewed: list[str] = []
         for ref in refs:
+            if ref in touched:
+                reviewed.append(ref)
+                continue
+            # With the read-back unreadable, only a touch of Jack's says
+            # anything: a failed read can only shrink the waiver.
+            if now is None or kinds.get(ref) == "checkbox":
+                continue
             is_now = _present(now.get(ref))
             planned = (fill.plan.get(ref) or {}).get("value")
             agents_own = (ref in fill.plan and bool((results.get(ref) or {}).get("filled"))
                           and planned is not None and _same(now.get(ref), planned))
-            if ref in touched:
-                reviewed.append(ref)
-            elif kinds.get(ref) == "checkbox":
-                continue
-            elif not is_now or agents_own:
+            if not is_now or agents_own:
                 reviewed.append(ref)
         for ref in reviewed:
             if ref not in self.human_reviewed:
                 self.human_reviewed.append(ref)
-        fill.snapshot = now
-        self.snapshots.update(now)
+        if now is not None:
+            fill.snapshot = now
+            self.snapshots.update(now)
         try:
             boxes = extract.checkbox_census(self.page)
         except Exception:
@@ -305,8 +309,11 @@ class Wizard:
                                     if isinstance(b, dict) and b.get("ref")})
                 pre = fill.step.get("prefill_census")
                 if isinstance(pre, list):
-                    self.prefill.update({b["group_ref"]: b for b in pre
-                                         if isinstance(b, dict) and b.get("group_ref")})
+                    # Every box of a group, so a second box sharing the
+                    # group_ref still counts against the pair exemption.
+                    for b in pre:
+                        if isinstance(b, dict) and b.get("group_ref"):
+                            self.prefill.setdefault(b["group_ref"], []).append(b)
                 self.results.update(fill.step.get("results") or {})
                 result = gate.decide(self._page_record(fill, page_events), self.prof,
                                      agent_submissions_today=self.agent_submissions_today)

@@ -283,21 +283,47 @@ def test_the_final_pause_and_the_record_merge_on_their_own():
             w.reload_profile = lambda: _profile()
             w._final_pause(type("S", (), {"reason": "the gate stopped: x"})())
             check(w.out.events[-1]["handled"] == "jack", "an answered final pause is Jack's")
-            # The merge: a box from an earlier page, and its pre-fill state.
-            w.census = {"g1-f9": {"ref": "g1-f9", "checked": False, "visible": False,
-                                  "label_source": "none", "label_inner": "", "label_content": "",
-                                  "described": "", "in_button_group": True, "group_ref": "g1-f8"}}
-            w.prefill = {"g1-f8": {**w.census["g1-f9"], "checked": False}}
-            rec = w._record([], [], wizard=True)
+            # The merge: an Ashby pair on an earlier page, answered Yes: its
+            # hidden box read unticked before the fill and ticked after. With
+            # both states in the final record the gate's pair exemption holds;
+            # without the pre-fill state the box is hidden-and-ticked.
+            from agent import gate
+            box = {"ref": "g1-f9", "checked": True, "visible": False, "label_source": "none",
+                   "label_inner": "", "label_content": "", "described": "",
+                   "in_button_group": True, "group_ref": "g1-f8"}
+            w.census = {"g1-f9": box}
+            w.prefill = {"g1-f8": [{**box, "checked": False}]}
+            pair = {"ref": "g1-f8", "type": "radio", "widget": "buttons", "label": "Relocate?",
+                    "options": ["Yes", "No"], "option_refs": ["g1-f8", "g1-f8b"]}
+            w.out.steps = [{"fields": [pair], "categories": {"g1-f8": "preference"},
+                            "plan": {"g1-f8": {"value": "Yes", "source": "profile",
+                                               "profile_path": "eligibility.willing_to_relocate",
+                                               "fit": "bool"}},
+                            "flags": [], "results": {"g1-f8": {"filled": True, "unconfirmed": False}},
+                            "prefill_census": None}]
+            w.snapshots = {"g1-f8": "Yes"}
+            rec = w._record(w.out.steps, [], wizard=True)
             refs = [b.get("ref") for b in rec["census"]]
             check("g1-f9" in refs and any(b.get("group_ref") == "g1-f8" for b in rec["prefill_census"]),
                   f"earlier pages' boxes, before and after, are in the final record ({refs})")
-            # A failed read of the touch marks before a pause waives nothing.
+            reasons = gate.decide(rec, _profile())["content_reasons"]
+            check(not any("hidden, and ticked" in r for r in reasons),
+                  f"the pair's Yes on an earlier page passes with its pre-fill state ({reasons})")
+            w.prefill = {}
+            reasons = gate.decide(w._record(w.out.steps, [], wizard=True), _profile())["content_reasons"]
+            check(any("hidden, and ticked" in r for r in reasons),
+                  "  ...and stops without it (control)")
+            # A failed read of the touch marks before a pause waives nothing,
+            # even when Jack's mark is on the field afterwards.
+            from agent import extract
+
+            def jack_marks_and_types(pg, body):
+                pg.fill("#a", "typed")
+                pg.eval_on_selector("#a", "(el, a) => el.setAttribute(a, '1')", ledger.TOUCH_ATTR)
             w2 = wizard.Wizard(page, _profile(), url="https://x.example/apply", portal="generic",
                                portal_method="default", company="", role="", resume=None,
-                               posting_text="", pauser=_Jack(page, lambda pg, body: pg.fill("#a", "typed")),
+                               posting_text="", pauser=_Jack(page, jack_marks_and_types),
                                echo=lambda *a, **k: None)
-            from agent import extract
             fields = extract.extract_fields(page)
             fill = type("F", (), {})()
             fill.fields, fill.plan, fill.snapshot, fill.flags = fields, {}, {}, []
@@ -310,9 +336,27 @@ def test_the_final_pause_and_the_record_merge_on_their_own():
                 return None if calls["n"] == 1 else real(refs)
             w2._marked = flaky
             w2._gate_pause(fill, {"content_reasons": ["'A': left blank"]})
-            check(fields[0]["ref"] not in w2.human_reviewed or True, "(set-up)")
-            check(w2.out.events[-1]["detail"] == "0 field(s) touched by Jack",
+            check(page.evaluate(f"document.getElementById('a').hasAttribute('{ledger.TOUCH_ATTR}')"),
+                  "the mark is on the field (so the next check means something)")
+            check(fields[0]["ref"] not in w2.human_reviewed
+                  and w2.out.events[-1]["detail"] == "0 field(s) touched by Jack",
                   f"with the before-read failed, no mark counts as new ({w2.out.events[-1]})")
+            # A failed read-back after the pause: only a touch of Jack's counts.
+            page.set_content("<form><label for='a'>A</label><input id='a' name='a'>"
+                             "<label for='b'>B</label><input id='b' name='b'></form>")
+            w3 = wizard.Wizard(page, _profile(), url="https://x.example/apply", portal="generic",
+                               portal_method="default", company="", role="", resume=None,
+                               posting_text="", pauser=_Jack(page, lambda pg, body: None),
+                               echo=lambda *a, **k: None)
+            fields = extract.extract_fields(page)
+            fill = type("F", (), {})()
+            fill.fields, fill.plan, fill.flags = fields, {}, []
+            fill.snapshot = {fields[0]["ref"]: "", fields[1]["ref"]: ""}
+            fill.step = {"results": {}}
+            with mock.patch.object(extract, "snapshot", side_effect=RuntimeError("mid-navigation")):
+                w3._gate_pause(fill, {"content_reasons": ["'A': left blank"]})
+            check(w3.human_reviewed == [] and fill.snapshot == {fields[0]["ref"]: "", fields[1]["ref"]: ""},
+                  f"an unreadable read-back reviews nothing and keeps the old snapshot ({w3.human_reviewed})")
         finally:
             browser.close()
     check.done()

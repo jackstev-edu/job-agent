@@ -196,7 +196,12 @@ def fillable_plan(fields: list[dict], plan: dict) -> dict:
 
 
 def prefill_census(page) -> list[dict] | None:
-    """The checkbox census before filling; None if unreadable, which the gate never exempts."""
+    """
+    The checkbox census before filling; None if unreadable, which the gate
+    never exempts on a one-page record. The wizard merges earlier pages'
+    pair boxes into the final record's list, so there a current page that
+    couldn't be read contributes no entries and its boxes get no exemption.
+    """
     try:
         return extract.checkbox_census(page)
     except Exception:

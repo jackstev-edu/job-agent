@@ -456,6 +456,9 @@
 
 ## MUST FIX BEFORE AUTO-SUBMIT
 
+- The gate never compares the final read-back to the planned value for a
+  non-required field: a value the page rewrites after the fill is
+  submitted unchecked (found by the reviewer on 9eca0e2; pre-existing).
 - The dropdown display check compares whole words by Unicode letters and
   numbers; a script with no letter or number marks (and look-alike
   characters generally) still falls under the Unicode parity item below.
@@ -1076,3 +1079,19 @@ Commit 9eca0e2 (second BLOCK fixes): VERDICT FLAG, 5 FLAGs and a note.
 - Noted for MUST FIX: the gate never compares the final snapshot to the
   planned value for a non-required field, so a value the page rewrites
   after the fill is submitted unchecked (pre-existing).
+
+Commit e31717b: VERDICT BLOCK, 1 BLOCK and 6 FLAGs. Fixed in the next commit.
+- BLOCK: a failed post-pause read-back made every field read empty, and
+  the "left empty" branch waived them all. Fixed: an unreadable read-back
+  leaves only Jack's touches counting; the snapshots keep their old
+  values. A test patches the read-back to raise.
+- FLAG: pre-fill pair boxes were kept one per group. Fixed: every box.
+- FLAG: a current page with no readable pre-fill census now yields a list
+  (earlier pages' boxes) rather than None. Its own boxes still get no
+  exemption; the pipeline docstring says so.
+- FLAG: the failed-before-read test put no mark on the field. Fixed: it
+  does, and asserts the field isn't reviewed.
+- FLAG: a vacuous `or True` check. Fixed.
+- FLAG: the merge test never ran the gate. Fixed: an earlier page's pair
+  answered Yes passes the merged record and stops without its pre-fill.
+- FLAG: the final-snapshot gap wasn't on the MUST FIX list. Fixed: added.
