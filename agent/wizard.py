@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections import Counter
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
@@ -294,7 +295,10 @@ class Wizard:
         ticked: list[str] = []
         if now is not None:
             for ref, shown in (approved or {}).items():
-                if ref in refs and shown is not None and _same(now.get(ref), shown):
+                # "Still holds exactly the value he was shown" needs a read: a ref
+                # the snapshot left out (stale, or a group it couldn't read whole)
+                # is unknown, never "still empty".
+                if ref in refs and ref in now and shown is not None and _same(now[ref], shown):
                     ticked.append(ref)
         for ref in refs:
             if (ref in touched or ref in ticked) and ref not in self.human_reviewed:
@@ -396,6 +400,11 @@ class Wizard:
         return self.run()
 
     # -- resuming after other jobs ran -------------------------------------------
+    # A matched field keeps its old-scan judgement (secret, raw stop / legal
+    # hits, readability, required), so the new scan must agree on each or the
+    # pair is refused and the field stays unreadable.
+    _REMAP_FLAGS = ("secret", "raw_stop", "raw_legal", "stable_identity", "required")
+
     @staticmethod
     def _ident(f: dict) -> tuple:
         return ((f.get("type") or "", f.get("tag") or "", f.get("dom_name") or f.get("name") or "",
@@ -409,8 +418,10 @@ class Wizard:
         refs are stale. Re-scan the page and carry the plan, results, flags,
         read-backs, marks and approvals over to the new refs, by field
         identity (type, tag, name, id, labels, options), one-to-one matches
-        only. A field with no single match keeps its stale ref: unreadable,
-        so the gate stops on it rather than reading the wrong box.
+        only: exactly one old field and exactly one new field with that
+        identity, agreeing on every _REMAP_FLAGS flag. A field with no such
+        match keeps its stale ref: unreadable, so the gate stops on it
+        rather than reading the wrong box (or waiving a review it never had).
         """
         if fill is None or not fill.fields or extract.is_current(fill.fields[0]["ref"]):
             return
@@ -421,13 +432,17 @@ class Wizard:
         by_key: dict = {}
         for nf in new_fields:
             by_key.setdefault(self._ident(nf), []).append(nf)
+        old_count = Counter(self._ident(o) for o in fill.fields)
         pairs: list[tuple[dict, dict]] = []
         mapping: dict[str, str] = {}
         for old in fill.fields:
-            cands = by_key.get(self._ident(old), [])
-            if len(cands) != 1:
+            key = self._ident(old)
+            cands = by_key.get(key, [])
+            if len(cands) != 1 or old_count[key] != 1:
                 continue
             nf = cands[0]
+            if any(old.get(k) != nf.get(k) for k in self._REMAP_FLAGS):
+                continue
             pairs.append((old, nf))
             mapping[old["ref"]] = nf["ref"]
             for o, n in zip(old.get("option_refs") or [], nf.get("option_refs") or []):

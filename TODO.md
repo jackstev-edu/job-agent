@@ -1183,3 +1183,35 @@ dry-run test's model stand-ins now raise. Also folded: wait_for removed,
 a negative Content-Length clamped, the token compared in constant time.
 Noted: the server-only tests pass on the previous commit only with gui.py
 carried along; the apply-dependent ones fail there.
+
+Commit a05bc54 (GUI item 2): VERDICT FLAG, 8 FLAGs. Folded into the next
+commit (safety direction): `_remap` pairs a field only when exactly one
+old and exactly one new field share its identity and they agree on
+secret / raw_stop / raw_legal / stable_identity / required (two old
+fields of one identity could collapse onto one new field and inherit
+either's review); a ticked field counts as "still holds the shown value"
+only when the resume snapshot actually read it (a missing read used to
+compare as ""). Logged, not folded (not safety-relevant, or Jack's call):
+- GUI mode: the `gate_pause (final page)` and `captcha` events stay
+  `handled: None` after a Deferred, so the full-record gate stops on them
+  on every Continue: a GUI job that hits a CAPTCHA or a final-page gate
+  stop can never submit. Fix: mark the matching event "jack" in `_loop`'s
+  pending branch for kind "final" (and "captcha" once the page is clear),
+  with a test for each. Recommended for the next round; fails safe now.
+- GUI mode: on Continue after a failed sign-up ("didn't go through") the
+  loop re-runs `accounts.handle`, so each Continue retries account
+  creation (new password, consent tick, Create account) where the terminal
+  path parks after one try. Fix: park on resume when the page kind is
+  unchanged, or carry a tried flag.
+- The threat model's "Accepted, local only" line (the GUI shows a
+  read-back value beside the tick) was written by the main session from
+  Jack's answer 2 of 2026-10-19; Jack to confirm the wording.
+- An exception from `on_pause` is swallowed in `run()`: the job sits in
+  waiting with its row still "working" and no Continue. Fix: let it
+  propagate, or set needs_you without on_wait.
+- `test_ticked_values_count_only_while_the_page_still_holds_them` asserts
+  only the positive case; the negative lives in
+  `test_a_ticked_field_the_page_changed_is_not_jacks`. Rename.
+- The reviewer did not run the new tests on fcd44d4 (it would alter the
+  tree); the main session did, per test.
+
