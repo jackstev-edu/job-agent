@@ -1226,3 +1226,15 @@ and trailing-dot negatives. Logged, not folded:
   for up to ~75 s if Google is slow. Fix: a 15 s timeout and no settle for
   that tab.
 
+Commit 5cba445 (fold of a05bc54's safety FLAGs): VERDICT FLAG, 2 FLAGs
+and a note. Folded into the next commit (safety direction): an unpaired
+field on a resumed page now loses its fill-time read-back (wizard
+snapshots and the page's snapshot), its result (set to not filled) and
+its review, so the gate stops on it instead of judging it by a value read
+before the pause. Logged: the reviewer did not run the remap tests on
+afbe337 itself (the main session did, before the commit; the reviewer
+confirmed by reading). Note, not new: a page that swaps two fields'
+identities between scans would move a review to the other box; the
+accepted structure-change route (threat model), under MUST FIX BEFORE
+AUTO-SUBMIT.
+

@@ -4,10 +4,12 @@ test_remap.py — the re-scan on resume carries nothing to the wrong box.
 WHAT THIS DOES: Drives `Wizard._remap` and `Wizard._after_pause` on a
 small mock page after another scan made the page's refs stale: two old
 fields of one identity never both land on one new field (neither is
-paired, so the review one of them had is not inherited); a pair whose
+paired, and the review one of them had is dropped, not inherited); a pair whose
 old-scan flags (raw_stop here) differ from the new scan's is refused; and
 a ticked field whose value the resume snapshot could not read is not
 counted as "still holding" the shown value, even when that value was "".
+An unpaired field also loses its fill-time read-back, result and review,
+so the gate judges its box as unknown, not as read before.
 WHY IT MATTERS: The refs are the only link between a review Jack gave and
 the box it was for; a loose match could waive the gate's stops on a field
 he never saw (reviewer on a05bc54).
@@ -72,7 +74,7 @@ def test_two_old_fields_of_one_identity_never_share_a_new_field():
         fn = next(f for f in fill.fields if f.get("name") == "first_name")
         check(now == old_refs and not any(extract.is_current(r) for r in now),
               f"neither old field was paired; both keep their stale refs ({now})")
-        check(w.human_reviewed == [old_refs[0]], f"the review stays on its stale ref ({w.human_reviewed})")
+        check(w.human_reviewed == [], f"the review is dropped with the unpaired field ({w.human_reviewed})")
         check(extract.is_current(fn["ref"]), "the one-to-one field was remapped")
     check.done()
 
@@ -103,6 +105,37 @@ def test_a_ticked_value_the_resume_could_not_read_is_not_held():
         w._after_pause(fill, set(), {fn["ref"]: ""})
         check(fn["ref"] not in w.human_reviewed, "an unread field is not 'still holding' the shown value")
         check(w.out.events[-1]["detail"].endswith("0 approved in the GUI"), "the event counts no approval")
+    check.done()
+
+
+def test_an_unpaired_field_loses_its_read_back_result_and_review():
+    check = Checks()
+    with _headless(_routes(ONE)) as ctx:
+        page = ctx.new_page(); page.goto(f"{HOST}/form")
+        w = _wizard(page); fill = _fill(w)
+        extra = next(f for f in fill.fields if f.get("name") == "extra")
+        fn = next(f for f in fill.fields if f.get("name") == "first_name")
+        old_extra, old_fn = extra["ref"], fn["ref"]
+        fill.snapshot = {old_extra: "kept", old_fn: "Test"}
+        w.snapshots = dict(fill.snapshot)
+        fill.step["results"] = {old_extra: {"filled": True, "unconfirmed": False},
+                                old_fn: {"filled": True, "unconfirmed": False}}
+        w.results = dict(fill.step["results"])
+        w.human_reviewed = [old_extra, old_fn]
+        # A second "Extra" box appears: the old one now has two candidates.
+        page.evaluate("document.querySelector('input[name=extra]').closest('label')"
+                      ".insertAdjacentHTML('afterend', '<label>Extra <input name=\"extra\"></label>')")
+        _stale(ctx)
+        w._remap(fill, {}, {})
+        check(extra["ref"] == old_extra and extract.is_current(fn["ref"]) and fn["ref"] != old_fn,
+              "the extra box is unpaired; first name is remapped")
+        check(old_extra not in w.snapshots and old_extra not in fill.snapshot,
+              f"its fill-time read-back is gone ({w.snapshots}, {fill.snapshot})")
+        check(fill.step["results"][old_extra] == {"filled": False} and w.results[old_extra] == {"filled": False},
+              f"its result says not filled ({fill.step['results']})")
+        check(w.human_reviewed == [fn["ref"]], f"its review is gone; first name's moved ({w.human_reviewed})")
+        check(w.snapshots.get(fn["ref"]) == "Test" and fill.step["results"][fn["ref"]]["filled"] is True,
+              "first name's read-back and result moved with it")
     check.done()
 
 

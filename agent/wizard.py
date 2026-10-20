@@ -420,8 +420,10 @@ class Wizard:
         identity (type, tag, name, id, labels, options), one-to-one matches
         only: exactly one old field and exactly one new field with that
         identity, agreeing on every _REMAP_FLAGS flag. A field with no such
-        match keeps its stale ref: unreadable, so the gate stops on it
-        rather than reading the wrong box (or waiving a review it never had).
+        match keeps its stale ref, and its fill-time read-back, result and
+        review are dropped: its box is unknown now, so the gate stops on it
+        ("filling it failed" / "required, but empty") rather than judging
+        it by a value read before, or waiving a review it never had.
         """
         if fill is None or not fill.fields or extract.is_current(fill.fields[0]["ref"]):
             return
@@ -447,8 +449,10 @@ class Wizard:
             mapping[old["ref"]] = nf["ref"]
             for o, n in zip(old.get("option_refs") or [], nf.get("option_refs") or []):
                 mapping[o] = n
+        unpaired = {r for f in fill.fields if f not in [o for o, _ in pairs]
+                    for r in [f["ref"], *(f.get("option_refs") or [])]}
         m = lambda r: mapping.get(r, r)
-        remap_keys = lambda d: {m(k): v for k, v in (d or {}).items()}
+        remap_keys = lambda d: {m(k): v for k, v in (d or {}).items() if k not in unpaired}
         remap_box = lambda b: {**b, "ref": m(b.get("ref")) if b.get("ref") else b.get("ref"),
                                "group_ref": m(b.get("group_ref")) if b.get("group_ref") else b.get("group_ref")}
         for old, nf in pairs:
@@ -457,8 +461,8 @@ class Wizard:
                 old["option_refs"] = list(nf.get("option_refs") or [])
             old["sigs"] = dict(nf.get("sigs") or {})
             old["credential_step"] = nf.get("credential_step")
-        fill.plan = remap_keys(fill.plan)
-        fill.categories = remap_keys(fill.categories)
+        fill.plan = {m(k): v for k, v in (fill.plan or {}).items()}
+        fill.categories = {m(k): v for k, v in (fill.categories or {}).items()}
         fill.snapshot = remap_keys(fill.snapshot)
         for fl in fill.flags:
             fl["ref"] = m(fl.get("ref"))
@@ -470,21 +474,25 @@ class Wizard:
                 sf["option_refs"] = [m(r) for r in sf["option_refs"]]
             if sf.get("sigs"):
                 sf["sigs"] = {m(k): v for k, v in sf["sigs"].items()}
-        step["plan"] = remap_keys(step.get("plan"))
-        step["categories"] = remap_keys(step.get("categories"))
+        step["plan"] = {m(k): v for k, v in (step.get("plan") or {}).items()}
+        step["categories"] = {m(k): v for k, v in (step.get("categories") or {}).items()}
         if step.get("results") is not None:
             step["results"] = remap_keys(step.get("results"))
+            for r in unpaired:
+                step["results"][r] = {"filled": False}     # unknown box: never "filled"
         for fl in step.get("flags") or []:
             fl["ref"] = m(fl.get("ref"))
         if isinstance(step.get("prefill_census"), list):
             step["prefill_census"] = [remap_box(b) for b in step["prefill_census"] if isinstance(b, dict)]
         self.snapshots = remap_keys(self.snapshots)
         self.results = remap_keys(self.results)
-        self.census = {m(k): remap_box(b) for k, b in self.census.items()}
+        for r in unpaired:
+            self.results[r] = {"filled": False}
+        self.census = {m(k): remap_box(b) for k, b in self.census.items() if k not in unpaired}
         self.prefill = {m(g): [remap_box(b) for b in boxes] for g, boxes in self.prefill.items()}
-        self.human_reviewed = [m(r) for r in self.human_reviewed]
+        self.human_reviewed = [m(r) for r in self.human_reviewed if r not in unpaired]
         if isinstance(pending.get("marked_before"), set):
-            pending["marked_before"] = {m(r) for r in pending["marked_before"]}
+            pending["marked_before"] = {m(r) for r in pending["marked_before"] if r not in unpaired}
         if isinstance(info.get("approved"), dict):
             info["approved"] = remap_keys(info["approved"])
         self.out.log.append(f"re-scanned after other jobs ran: {len(pairs)} of {len(fill.fields)} "
