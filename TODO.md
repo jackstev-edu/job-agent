@@ -1480,3 +1480,20 @@ overlay fixture carries a border so the padding-box offset is
 exercised. Noted: the full run sits within a minute of the 20-minute
 line; the slimmed Google test brought it to 18 minutes.
 
+Commit 2b39159 (item 4): VERDICT BLOCK, 1 BLOCK and 3 FLAGs. Fixed in
+the next commit: the new Department of Defense row claimed any DoD
+question near "work", "employ" or "contract" ("willing to work at a DoD
+facility" would have been answered "No" from the employment line); the
+row (new this round, so tightening it narrows nothing that existed)
+now requires the DoD, "employ" and a past-two-years (or current) scope
+all in the text, and every other DoD question has no line and is Jack's
+through the guard; the decline fit matches the whole profile value, so
+a value that merely contains a decline phrase ("I do not identify as
+...") is not a decline. Decision for Jack: the one-case resolution of
+"two profile lines" (the label names one line, only the field's
+identifier adds another in the same area) is recorded under "How the
+code keeps them"; confirm it as an owner decision or have it reverted.
+Logged: "Do you hold a Secret clearance?" has no LEGAL_GUARD kind and
+goes to the model when the classifier calls it ordinary (pre-existing);
+a "clearance" guard kind mapped to the clearance lines would close it.
+

@@ -58,9 +58,13 @@ PROFILE_PATHS: list[tuple[str, str]] = [
      "eligibility.export_control_us_person"),
     # Employment by the Department of Defense in the past two years (a
     # post-government-employment question), above the clearance row so a
-    # "DoD" employment question isn't read as a clearance one.
-    (r"(department\s+of\s+defen[cs]e|\bdod\b).{0,80}\b(employ\w*|work\w*|contract\w*)"
-     r"|\b(employ\w*|work\w*|contract\w*).{0,80}(department\s+of\s+defen[cs]e|\bdod\b)",
+    # "DoD" employment question isn't read as a clearance one. The row
+    # claims only the question it was written for: the DoD, "employ" and
+    # the two-year (or current) scope all in the text; any other DoD
+    # question (a facility, a contract, an interest) has no line and is
+    # Jack's through the guard.
+    (r"^(?=[\s\S]*(department\s+of\s+defen[cs]e|\bdod\b))(?=[\s\S]*\bemploy\w*)"
+     r"(?=[\s\S]*((past|last|previous|within(\s+the)?|preceding|prior)\s+(two|2)\s+years?|\bcurrently\b))",
      "eligibility.dod_employment_past_two_years"),
     (r"security\s+clearance|\bdod\b\s+clearance|(secret|ts/sci)\s+clearance",
      "eligibility.security_clearance"),
@@ -134,6 +138,18 @@ HARD_STOPS: list[tuple[str, str, str]] = [
      r"|non-?compete|restrictive\s+covenant",
      "Per-company relationship or contract question.", "per_company"),
 ]
+
+# A profile VALUE that is itself a decline, as a whole: "Prefer not to say",
+# "Decline to self-identify", "I don't wish to answer". Matched whole so a
+# value that merely contains a decline phrase ("I do not identify as ...")
+# is not read as one.
+_DECLINE_VALUE = re.compile(
+    r"(i\s+)?(would\s+)?(prefer\s+not\s+to\s+(say|answer|disclose|specify|identify|state|self[\s-]?identify)"
+    r"|decline(\s+to\s+(self[\s-]?)?(identify|answer|state|say|disclose|specify))?"
+    r"|do\s*n.?t\s+wish\s+to\s+(answer|say|disclose|identify|specify)"
+    r"|no\s+answer|not\s+(specified|disclosed)|rather\s+not\s+(say|answer))\.?",
+    re.I,
+)
 
 # Every way a form writes "I would rather not answer". Matching this as a
 # regex rather than a list of substrings is deliberate: Greenhouse ships
@@ -557,11 +573,12 @@ def fit_with_kind(raw: Any, field: dict) -> tuple[Any, str | None]:
     for opt in options:
         if opt.strip().lower() == target:
             return opt, "exact"
-    # A value that is itself a decline ("Prefer not to say") takes the form's
-    # decline option before any substring guess: "No" sits inside "not", and
-    # the substring step used to take it, turning every EEO default into a
-    # loose fit the gate refuses (found on Greenhouse's EEO selects, 2026-10-20).
-    if _DECLINE.search(target):
+    # A value that is itself a decline ("Prefer not to say"), as a whole,
+    # takes the form's decline option before any substring guess: "No" sits
+    # inside "not", and the substring step used to take it, turning every
+    # EEO default into a loose fit the gate refuses (found on Greenhouse's
+    # EEO selects, 2026-10-20).
+    if _DECLINE_VALUE.fullmatch(target):
         for opt in options:
             if _DECLINE.search(opt.lower()):
                 return opt, "decline"
@@ -569,4 +586,8 @@ def fit_with_kind(raw: Any, field: dict) -> tuple[Any, str | None]:
         low = opt.strip().lower()
         if target and (target in low or low in target):
             return opt, "substring"
+    if _DECLINE.search(target):
+        for opt in options:
+            if _DECLINE.search(opt.lower()):
+                return opt, "decline"
     return None, None
