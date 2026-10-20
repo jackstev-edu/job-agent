@@ -606,8 +606,10 @@ def forgot_password(page: "Page", prof, pauser: pause_mod.Pauser, res: Result) -
         until=lambda: pages.page_kind(page) not in (pages.SIGN_IN, pages.ACCOUNT, None)
         or pages.page_kind(page) is None and False)
     if password is None:
-        kind = pages.page_kind(page)
-        if how == pause_mod.FINISHED or kind not in (pages.SIGN_IN, pages.ACCOUNT):
+        # Only a pause the page itself ended (the sign-in page went away
+        # while Jack was there) counts as Jack signing in. A page of no kind
+        # after a pause nobody answered is parked (Jack, 2026-10-20).
+        if how == pause_mod.FINISHED:
             res.events.append({"kind": "login_wall", "detail": "signed in by Jack", "handled": "jack"})
             return res
         return Result(PARKED, f"forgot-password reset: no password pasted ({how})", res.steps, res.events)

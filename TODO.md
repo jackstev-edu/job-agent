@@ -1328,7 +1328,8 @@ Found while testing: forgot_password reads a page of no kind after a
 timed-out pause as "signed in by Jack" (a handled: jack event with
 nothing done), pre-existing; on Google it now parks first. Jack to
 decide whether a None-kind page after an unanswered pause should park
-instead (recommended).
+instead (recommended). DONE 2026-10-20 (item 4 of the second-set round): it parks
+unless the pause ended FINISHED.
 
 Commit fca6d00 (fold of f9392f6's FLAGs): VERDICT FLAG, 5 low FLAGs.
 Folded into the next commit: _google_first (a pressing primitive) sits
@@ -1554,3 +1555,10 @@ type to "submit". Only author shadow roots (shadowRootType "open" or
 unknown kind still does. 722bf10's own note (user-agent roots counted
 too) is closed by that decision.
 
+
+Item 4 (forgot_password after an unanswered pause): a page of no kind
+after the reset pause counts as Jack signing in only when the pause
+ended FINISHED (the sign-in page went away while he was there); a timed
+out or otherwise unanswered pause there parks the job instead of
+logging "signed in by Jack" with nothing done (the pre-existing read
+noted after the Google round).

@@ -283,6 +283,24 @@ def test_an_existing_account_goes_through_forgot_password_and_the_pasted_passwor
     check.done()
 
 
+def test_an_unanswered_reset_pause_on_a_page_of_no_kind_is_parked():
+    # Jack, 2026-10-20: the "sent" page after a reset request has no
+    # password box, so it reads as no kind; an unanswered pause there is
+    # not Jack signing in.
+    check = Checks()
+    with mock_page(BLANK, _routes(_site(create_link=False))) as page:
+        page.goto(f"{HOST}/apply")
+        pauser = _Pauser([None])
+        res, printed = _run(page, pages.SIGN_IN, _Profile(), pauser)
+        check(page.url.endswith("/sent") and pages.page_kind(page) is None,
+              f"the reset was requested and the page is the 'sent' one, of no kind ({page.url})")
+        check(res.status == accounts.PARKED and "no password pasted" in res.reason,
+              f"parked, not read as signed in ({res.status}, {res.reason})")
+        check(not any(e.get("detail") == "signed in by Jack" for e in res.events),
+              f"no event says Jack signed in ({res.events})")
+    check.done()
+
+
 def test_no_code_in_time_is_parked_and_submit_is_never_pressed():
     check = Checks()
     with mock_page(BLANK, _routes(_site())) as page:
