@@ -62,6 +62,10 @@ run as `python apply.py <command>` (no make).
 - `agent/wizard.py` — the unattended loop: CAPTCHA pauses, account pages to
   accounts.py, each page filled and gated, Next pressed, the final page to
   submit.py. Caps: 25 pages, 60 minutes.
+- `agent/chooser.py` — "choose how to apply" pages: Workday's Apply
+  Manually, Avature's From Device (the resume through the page's file
+  input) or Without Resume, by whole label; LinkedIn, Indeed, paste and a
+  previous application never; nothing allowed parks with the options shown.
 - `agent/submit.py` — the only module that presses Submit: gate, the consent
   ticks the gate allows, gate again, Submit, the confirmation sentence.
 - `agent/pause.py`, `agent/notify.py`, `agent/console.py` — a pause: a
@@ -201,7 +205,8 @@ Added by Jack on 2026-10-20 (second set):
 - No LinkedIn Easy Apply. Never solve CAPTCHAs.
 - Clicks on Apply, Sign in, Create account, Forgot password, Next / Continue
   and Submit live only in the modules the plan names (`intake.py`,
-  `accounts.py`, `wizard.py`, `submit.py`). `filler.py` and every plan-driven
+  `accounts.py`, `wizard.py`, `submit.py`); a way-to-apply control from the
+  allowlist in `chooser.py` (Jack, 2026-10-20) is the one other click. `filler.py` and every plan-driven
   fill path still click none of them, tick no consent box and accept no terms.
 - Submit happens only in `submit.py`, only after `gate.decide` on the full
   record says would_submit. Nothing else submits.

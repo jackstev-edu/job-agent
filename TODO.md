@@ -1522,3 +1522,22 @@ the `dod` guard kind stays, so every DoD question is Jack's.
 question is Jack's": the three wordings the row answered, nine others,
 help text, and a DoD clearance question, each as radio, text and
 checkbox and under four classifier categories.
+
+Item 2 (the previous round's item 5, from the stash
+`r3-item5-chooser-ready`): `agent/chooser.py` handles a "choose how to
+apply" page by an allowlist of whole control labels (Workday's Apply
+Manually; Avature's From Device through the page's own file input, else
+Without Resume); LinkedIn, Indeed, Copy & Paste, Use My Last Application
+and any autofill / import are never chosen; a chooser offering nothing
+allowed parks with the options shown; a page with a form is not a
+chooser. The wizard calls it where it parked "a page with no fields, no
+Next and no Submit" (Wayfair's Avature step 1 on Jack's first GUI run).
+
+Commit f98c07b (item 1): VERDICT FLAG, 3 low FLAGs. Logged: the Working
+rule still says 20 minutes while the decision says 30 (item 6 of this
+round changes the rule); this section's heading says "reviewer FLAGs
+logged" and its first entries describe the items (both kinds are kept
+here); the help-text DoD check asserts the action only, not value None
+(every human branch sets None). Verified by the reviewer: the removal is
+safe-direction only, an old profile still carrying the DoD key loads
+unchanged, and no row was narrowed.

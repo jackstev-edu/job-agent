@@ -26,7 +26,7 @@ from collections import Counter
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
-from . import (accounts, browser as browser_mod, extract, follow, gate, google, gui as gui_mod, ledger,
+from . import (accounts, browser as browser_mod, chooser, extract, follow, gate, google, gui as gui_mod, ledger,
                pages, pause as pause_mod, pipeline, submit as submit_mod)
 
 if TYPE_CHECKING:
@@ -655,6 +655,19 @@ class Wizard:
                 raise _Parked("a Submit control with nothing filled; check the page")
             return self._submit(fill)
         if fill is None:
+            # A "choose how to apply" page: one allowed control, or parked
+            # with the options shown (never LinkedIn, Indeed, paste or a
+            # previous application).
+            try:
+                chosen = chooser.choose(page, self.resume, self.out.log)
+            except ValueError as e:
+                raise _Parked(str(e))
+            if chosen is not None:
+                # The record's uploads map is keyed by file-box ref; a resume
+                # the chooser put in is logged as a step and an event, not
+                # claimed as a box's upload. A later resume box still gets it.
+                self.out.events.append({"kind": "apply_method", "detail": chosen, "handled": "agent"})
+                return None
             raise _Parked("a page with no fields, no Next and no Submit")
         raise _Parked("no Next or Submit control found after filling the page")
 
