@@ -17,6 +17,7 @@ import argparse
 from argparse import Namespace
 import json
 import re
+import unicodedata
 import sys
 import threading
 import time
@@ -1095,8 +1096,9 @@ def dry_report(landing: "intake.Landing", ats: str, role: str = "", company: str
 
 
 def _clean_title(text: str) -> str:
-    """Page-derived text for the terminal: no control or escape characters, capped."""
-    return re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", str(text or ""))[:80]
+    """Page-derived text for the terminal: no control, escape or format characters, capped."""
+    cleaned = "".join(" " if unicodedata.category(c) == "Cf" else c for c in str(text or ""))
+    return re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", cleaned)[:80]
 
 
 def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,

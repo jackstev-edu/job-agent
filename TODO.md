@@ -1340,3 +1340,20 @@ directly on a Google-host page. Already logged (Jack's decision): a page
 of no kind after an unanswered pause is read as "signed in by Jack" in
 forgot_password; recommended: park unless the pause ended FINISHED.
 
+## Round of 2026-10-20 (Jack's first GUI run): reviewer FLAGs logged
+
+Commit 8534e1d (the 2026-10-20 decisions): VERDICT FLAG, 7 FLAGs and a
+low note. Folded into the next commit: the sentence rule now requires one
+visible text block of the page to equal the sentence exactly (it was a
+substring search over the body text, so prose before or after it, or
+"within" / "without limit to", passed); the fixed words end with their
+space, so the app name starts after "with "; the app name may hold no
+joining word ("and", "with", "or", "your", "share", "also", "plus"), so
+another clause can't ride in the app slot (an app called "Acme and Sons"
+pauses); the tautological rebuild check is gone; the "not secure" check
+reads the whole page text again, not the first 20,000 characters;
+negatives for each case; README says what the code does; the dry
+report's role / company line also drops Unicode format characters.
+Noted: the app-name slot is the one variable Jack allowed, bounded as
+above; an app name with a comma ("Acme, Inc") is still accepted.
+

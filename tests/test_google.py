@@ -139,6 +139,8 @@ GOOGLE_PAGES = {
     "/share-lang-list": lambda q: _consent([], SHARE_LANG, extra=f"<ul><li>{DRIVE}</li></ul>"),
     "/share-lang-box": lambda q: _consent([], SHARE_LANG, extra='<input type="text" aria-label="Note">'),
     "/share-more": lambda q: _consent([], SHARE_LANG.replace("and profile picture", "profile picture, and contacts")),
+    "/share-wrapped": lambda q: _consent([], "If you do not want this, press Cancel. " + SHARE_LANG + " Google will also share your contacts with Example Co."),
+    "/share-bold": lambda q: _consent([], SHARE_LANG.replace("Example Co", "<b>Example Co</b>")),
     "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE,
     # A consent whose Continue sends the portal a callback that bounces straight back to Google.
     "/consent-bounce": lambda q: _consent(OK_LINES).replace(f"{PORTAL}/form?google=1", f"{PORTAL}/form?bounce=1"),
@@ -293,7 +295,8 @@ def test_any_other_permission_screen_pauses_without_a_click():
         for g, why in (("consent-broad", "more than name"), ("share-ok", "never touches"),
                        ("share-more", "never touches"), ("share-lang-tick", "never touches"),
                        ("share-lang-two", "never touches"), ("share-lang-list", "more than name"),
-                       ("share-lang-box", "never touches"), ("consent-outside", "more than name"),
+                       ("share-lang-box", "never touches"), ("share-wrapped", "never touches"),
+                       ("consent-outside", "more than name"),
                        ("consent-two", "never touches"), ("consent-box", "never touches")):
             page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g={g}")
             pauser = _Pauser([None])
@@ -308,14 +311,28 @@ def test_any_other_permission_screen_pauses_without_a_click():
                           (["see your primary google account email address"], True),
                           (["See  your primary Google Account email address "], True)):
         check(google.permissions_ok(entries) is want, f"permissions_ok({entries}) -> {want}")
-    for text, want in ((SHARE_LANG, True), ("Sign in to Example Co " + SHARE_LANG + " See Example Co's privacy policy.", True),
-                       (SHARE_LANG.replace("Example Co", "Acme, Inc"), True),
-                       (SHARE_LANG.upper(), True), (SHARE_OK, False),
-                       (SHARE_LANG.replace("and profile picture", "profile picture, and contacts"), False),
-                       (SHARE_LANG.replace("with Example Co.", "with ."), False),
-                       (SHARE_LANG.replace("with Example Co.", "with Example Co"), False),
-                       (SHARE_LANG.replace("To continue, ", ""), False), ("", False), (None, False)):
-        check(google.sentence_ok(text) is want, f"sentence_ok({str(text)[:50]!r}...) -> {want}")
+    for blocks, want in (([SHARE_LANG], True), (["Sign in to Example Co", SHARE_LANG, "See Example Co's privacy policy."], True),
+                         ([SHARE_LANG.replace("Example Co", "Acme, Inc")], True),
+                         ([SHARE_LANG.upper()], True), (["  " + SHARE_LANG.replace(" ", "  ") + " "], True),
+                         ([SHARE_OK], False),
+                         ([SHARE_LANG.replace("and profile picture", "profile picture, and contacts")], False),
+                         ([SHARE_LANG.replace("with Example Co.", "with .")], False),
+                         ([SHARE_LANG.replace("with Example Co.", "with Example Co")], False),
+                         ([SHARE_LANG.replace("To continue, ", "")], False),
+                         # The sentence inside a larger block, before or after other words.
+                         (["If you do not want " + SHARE_LANG], False),
+                         ([SHARE_LANG + " Google will also share your contacts with Example Co."], False),
+                         (["Sign in to Example Co " + SHARE_LANG + " See Example Co's privacy policy."], False),
+                         # The fixed words must end where the app name starts.
+                         ([SHARE_LANG.replace("with Example Co.", "within Example Co.")], False),
+                         ([SHARE_LANG.replace("with Example Co.", "without limit to Example Co.")], False),
+                         # Another clause smuggled into the app slot.
+                         ([SHARE_LANG.replace("with Example Co.", "with Example Co, and your contacts with Example Co.")], False),
+                         ([SHARE_LANG.replace("with Example Co.", "with Example Co or anyone.")], False),
+                         ([SHARE_LANG.replace("Example Co", "A" * 81)], False),
+                         ([SHARE_LANG.replace("Example Co", "A" * 80)], True),
+                         ([], False), (None, False), ("not a list", False), ([3, None], False)):
+        check(google.sentence_ok(blocks) is want, f"sentence_ok({str(blocks)[:60]!r}...) -> {want}")
     check.done()
 
 
@@ -332,6 +349,11 @@ def test_googles_one_sentence_consent_is_accepted_on_its_own():
               f"the approved sentence alone gets Continue pressed ({res.status}, {res.reason}, {page.url})")
         check("pressed Continue on Google's permission screen (name, email address, profile picture only)" in res.steps,
               f"the step says so ({res.steps})")
+        # The app name in a <b> inside the sentence's block is still one block.
+        page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g=share-bold")
+        res, _ = _run(page, pages.SIGN_IN, _Pauser([]))
+        check(res.status == accounts.CONTINUE and page.url == f"{PORTAL}/form?google=1",
+              f"the sentence with its app name in bold is one block ({res.status}, {page.url})")
     check.done()
 
 

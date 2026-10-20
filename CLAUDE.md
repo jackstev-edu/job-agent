@@ -270,8 +270,10 @@ How the code keeps them, and rules of its own:
   when the page has no box to type into, no tick box, exactly one such
   button, and every visible permission line on the page equals an entry
   of `ALLOWED_PERMISSIONS`, compared the same way, or, with no lines at
-  all, the page holds `ALLOWED_SENTENCE` word for word with the app name
-  as the only variable (Jack, 2026-10-20). A sign-in box, a code box,
+  all, one visible text block of the page equals `ALLOWED_SENTENCE` word
+  for word with the app name as the only variable (1-80 characters, no
+  sentence end, no joining word such as "and", "with" or "or"; Jack,
+  2026-10-20). A sign-in box, a code box,
   "this browser may not be secure", no list and no sentence, an
   unreadable list or any other line pauses for Jack;
   nothing is ever typed on a Google page. `pages.fill_allowed`, the

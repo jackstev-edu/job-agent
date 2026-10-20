@@ -128,9 +128,16 @@ _SHAPE_JS = r"""
   const btnText = b => norm(b.innerText || (b.tagName === 'INPUT' ? b.value : '') || b.getAttribute('aria-label'));
   const ok = [...document.querySelectorAll('button, [role=button], input[type=submit], input[type=button]')]
     .filter(visible).filter(b => OK.test(btnText(b))).length;
-  const text = norm(document.body.innerText).slice(0, 20000);
-  const insecure = /browser or app may not be secure|couldn.t sign you in/i.test(text);
-  return {boxes, ticks, ids, entries, ok, insecure, text};
+  const insecure = /browser or app may not be secure|couldn.t sign you in/i.test(norm(document.body.innerText));
+  // The page's visible text blocks: elements with no block-level child, so
+  // a sentence is one block even when its app name sits in a <b>. The
+  // sentence rule needs a block that IS the sentence, not a page that
+  // contains it somewhere.
+  const inline = el => /^(inline|inline-block|contents|none)$/.test(getComputedStyle(el).display);
+  const blocks = [...document.querySelectorAll('p, div, span, li, td, th, h1, h2, h3, h4, h5, h6, section, article, main, label, dd, dt')]
+    .filter(visible).filter(el => [...el.children].every(inline))
+    .map(el => norm(el.innerText)).filter(t => t && t.length <= 400).slice(0, 400);
+  return {boxes, ticks, ids, entries, ok, insecure, blocks};
 }
 """
 
@@ -181,7 +188,7 @@ def classify(page: "Page") -> tuple[str, dict]:
         return OTHER, shape
     if shape["ids"]:
         return CHOOSER, shape
-    if shape["ok"] == 1 and shape["ticks"] == 0 and (shape["entries"] or sentence_ok(shape.get("text"))):
+    if shape["ok"] == 1 and shape["ticks"] == 0 and (shape["entries"] or sentence_ok(shape.get("blocks"))):
         return CONSENT, shape
     return OTHER, shape
 
@@ -193,23 +200,31 @@ def permissions_ok(entries: list) -> bool:
     return bool(got) and len(got) == len(entries) and all(g in allowed for g in got)
 
 
-def sentence_ok(text) -> bool:
+# What may stand in for the app name: 1-80 characters, no sentence end, no
+# joining word that could smuggle another clause in ("Acme, and your
+# contacts with Acme"). An app called "Acme and Sons" pauses: a false
+# pause costs seconds, a false pass would share more than Jack allowed.
+_APP_NAME = re.compile(r"^(?!.*\b(and|with|or|your|share|also|plus)\b)[^.]{1,80}$")
+
+
+def sentence_ok(blocks) -> bool:
     """
-    The page text holds ALLOWED_SENTENCE, word for word after _norm, with
-    the app name (no sentence end in it, at most 80 characters) as the only
-    variable. The clause found is rebuilt with that name and must equal the
-    template exactly; page text can only fail this, never pass with other
-    wording.
+    One visible text block of the page IS ALLOWED_SENTENCE, word for word
+    after _norm, with the app name as the only variable (see _APP_NAME).
+    A block that holds more, a page that merely contains the sentence
+    somewhere, or any other wording fails.
     """
-    body = _norm(text)
+    if not isinstance(blocks, list):
+        return False
     before, after = (_norm(part) for part in ALLOWED_SENTENCE.split("<app>"))
-    if not body or not before:
-        return False
-    m = re.search(re.escape(before) + r"([^.]{1,80})" + re.escape(after), body)
-    if not m:
-        return False
-    app = m.group(1).strip()
-    return bool(app) and m.group(0) == before + m.group(1) + after
+    rx = re.compile(re.escape(before) + r" (.{1,80}?)" + re.escape(after) + r"$")
+    for block in blocks:
+        if not isinstance(block, str):
+            continue
+        m = rx.fullmatch(_norm(block))
+        if m and _APP_NAME.match(m.group(1)) and m.group(1).strip():
+            return True
+    return False
 
 
 def consent_ok(shape: dict) -> bool:
@@ -217,7 +232,7 @@ def consent_ok(shape: dict) -> bool:
     entries = shape.get("entries") or []
     if entries:
         return permissions_ok(entries)
-    return sentence_ok(shape.get("text"))
+    return sentence_ok(shape.get("blocks"))
 
 
 def _click_marked(page: "Page") -> bool:

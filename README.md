@@ -159,7 +159,8 @@ with Google" ahead of email and password. On Google's own site it only
 picks the account whose email is the profile email and presses Continue on
 a permission screen that asks for name, email address and profile picture
 and nothing else (Google's one-sentence form, which also names language
-preference, counts when it is the only thing on the screen). Google's sign-in page, a 2-step check, "this browser may
+preference, counts when the screen has no permission lines, no tick boxes,
+no text boxes and one Continue, and the sentence is a text block of its own). Google's sign-in page, a 2-step check, "this browser may
 not be secure" or any other permission wording pauses for you; the agent
 never types on a Google page.
 
