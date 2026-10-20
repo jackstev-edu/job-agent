@@ -4,7 +4,9 @@ accounts.py — sign-up, sign-in, forgot-password and verification pages.
 WHAT THIS DOES: On a page pages.page_kind calls an account, sign-in or
 verification page, does what the owner decisions allow: presses a "Sign in
 / Continue with Google" control first, if there is one, and lets google.py
-walk Google's pages (Jack, 2026-10-19); otherwise types the profile
+walk Google's pages (Jack, 2026-10-19); on Workday presses the Sign In /
+Create Account submits and links by their data-automation-id, through the
+click_filter overlay that covers them; otherwise types the profile
 email (and name) into a sign-up form, generates a password and types it
 into the new-password boxes, ticks a terms / privacy box under the consent
 policy, presses Create account; on a sign-in page types the email and
@@ -31,6 +33,19 @@ from . import browser as browser_mod, gate, google, pages, pause as pause_mod
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
+
+# Workday's account pages are keyed by data-automation-id, not visible text
+# (their ids regenerate; the automation ids don't), and Workday covers its
+# Sign In / Create Account button with a "click_filter" overlay that takes
+# the click. Only these two submits and the two links are ever pressed by
+# id, each on the page kind its step is for.
+WORKDAY_IDS = {
+    "email": "email", "password": "password", "verify": "verifyPassword",
+    "consent": "createAccountCheckbox", "create": "createAccountSubmitButton",
+    "sign_in": "signInSubmitButton", "create_link": "createAccountLink",
+    "sign_in_link": "signInLink", "forgot_link": "forgotPasswordLink", "overlay": "click_filter",
+}
+WORKDAY_PRESSABLE = {"create", "sign_in", "create_link", "sign_in_link", "forgot_link"}
 
 # Buttons each step may press, as whole normalised text. Never anything that
 # reads like Submit application: on these pages there is no application to
@@ -245,6 +260,77 @@ def _box(page: "Page", attr: str, key: str):
     return page.locator(f"[{attr}='{key}']").first
 
 
+# Which of the known Workday controls the page carries, visible ones only.
+# Only names from WORKDAY_IDS come back, never page text.
+_WORKDAY_IDS_JS = r"""
+(ids) => {
+  const visible = el => {
+    const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  return ids.filter(id => [...document.querySelectorAll('[data-automation-id="' + id + '"]')].some(visible));
+}
+"""
+
+# Marks the one visible control with this automation id and, if a
+# click_filter overlay covers it, that overlay too; returns where the
+# click should go ('overlay' or 'control') or null.
+_WORKDAY_MARK_JS = r"""
+([id, attr]) => {
+  const visible = el => {
+    const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
+  const hits = [...document.querySelectorAll('[data-automation-id="' + id + '"]')].filter(visible);
+  if (hits.length !== 1) return null;
+  const el = hits[0], b = el.getBoundingClientRect();
+  const cx = b.left + b.width / 2, cy = b.top + b.height / 2;
+  const covers = o => { const r = o.getBoundingClientRect();
+    return r.left <= cx && cx <= r.right && r.top <= cy && cy <= r.bottom; };
+  const overlay = [...document.querySelectorAll('[data-automation-id="click_filter"]')]
+    .filter(visible).find(covers);
+  if (overlay) { overlay.setAttribute(attr, '1'); return 'overlay'; }
+  el.setAttribute(attr, '1');
+  return 'control';
+}
+"""
+
+
+def workday_controls(page: "Page") -> set[str]:
+    """The WORKDAY_IDS keys whose control is visible on the page; empty off Workday."""
+    try:
+        got = page.evaluate(_WORKDAY_IDS_JS, list(WORKDAY_IDS.values()))
+    except Exception:
+        return set()
+    if not isinstance(got, list):
+        return set()
+    by_id = {v: k for k, v in WORKDAY_IDS.items()}
+    return {by_id[i] for i in got if i in by_id}
+
+
+def _press_workday(page: "Page", key: str, kind_now: str | None) -> bool:
+    """
+    Press one of Workday's own account controls by automation id, through
+    the click_filter overlay when it covers the control (Workday's own
+    click path), if the page is still of the kind this step is for.
+    """
+    if key not in WORKDAY_PRESSABLE or _on_google(page) or pages.page_kind(page) != kind_now:
+        return False
+    try:
+        where = page.evaluate(_WORKDAY_MARK_JS, [WORKDAY_IDS[key], _BTN_ATTR])
+    except Exception:
+        return False
+    if where not in ("overlay", "control"):
+        return False
+    try:
+        page.locator(f"[{_BTN_ATTR}='1']").first.click(timeout=4000)
+    except Exception:
+        return False
+    browser_mod.settle(page, 1500)
+    return True
+
+
 def _press(page: "Page", words: re.Pattern, kind_now: str | None, what: str) -> str | None:
     """
     Press the one visible control reading as `words`, if the page is still
@@ -431,7 +517,10 @@ def sign_up(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
         return Result(PARKED, "couldn't type into the new-password boxes", res.steps)
     res.steps.append(f"typed a generated password into {len(new_boxes)} box(es)")
     _tick_consent(page, res.steps)
-    pressed = _press(page, CREATE_WORDS, pages.ACCOUNT, "Create account")
+    if "create" in workday_controls(page):
+        pressed = "Create Account (Workday)" if _press_workday(page, "create", pages.ACCOUNT) else None
+    else:
+        pressed = _press(page, CREATE_WORDS, pages.ACCOUNT, "Create account")
     if pressed is None:
         return Result(PARKED, "no single Create account button to press", res.steps)
     res.steps.append(f"pressed '{pressed}'")
@@ -469,7 +558,10 @@ def forgot_password(page: "Page", prof, pauser: pause_mod.Pauser, res: Result) -
     Forgot password: the link, the email, Send; pause for the password Jack
     sets; back to the sign-in page; email and the password, once; Sign in.
     """
-    pressed = _press(page, FORGOT_WORDS, pages.SIGN_IN, "Forgot password")
+    if "forgot_link" in workday_controls(page):
+        pressed = "Forgot Password (Workday)" if _press_workday(page, "forgot_link", pages.SIGN_IN) else None
+    else:
+        pressed = _press(page, FORGOT_WORDS, pages.SIGN_IN, "Forgot password")
     if pressed is None:
         return Result(PARKED, "sign-in failed and there is no Forgot password link", res.steps,
                       res.events)
@@ -548,7 +640,10 @@ def _sign_in_with(page: "Page", prof, password: str | None, res: Result) -> bool
         if len(current) != 1 or not _type_secret(page, current[0]["key"], password):
             return False
         res.steps.append("typed the password you set, once")
-    pressed = _press(page, SIGN_IN_WORDS, pages.SIGN_IN, "Sign in")
+    if "sign_in" in workday_controls(page):
+        pressed = "Sign In (Workday)" if _press_workday(page, "sign_in", pages.SIGN_IN) else None
+    else:
+        pressed = _press(page, SIGN_IN_WORDS, pages.SIGN_IN, "Sign in")
     if pressed is None:
         return False
     res.steps.append(f"pressed '{pressed}'")
@@ -588,7 +683,10 @@ def sign_in(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     if _sign_in_with(page, prof, None, res):
         res.steps.append("signed in (a saved password)")
         return res
-    link = _press(page, CREATE_LINK_WORDS, pages.SIGN_IN, "Create account")
+    if "create_link" in workday_controls(page):
+        link = "Create Account (Workday)" if _press_workday(page, "create_link", pages.SIGN_IN) else None
+    else:
+        link = _press(page, CREATE_LINK_WORDS, pages.SIGN_IN, "Create account")
     if link is not None:
         res.steps.append(f"pressed '{link}'")
         if pages.page_kind(page) == pages.ACCOUNT:

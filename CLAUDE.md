@@ -57,7 +57,8 @@ run as `python apply.py <command>` (no make).
   MyGreenhouse job link is tried on the public Greenhouse boards first.
 - `agent/accounts.py` — sign-up, sign-in, forgot password and verification
   pages. The only module that types a password (generated or pasted), once,
-  reading nothing back.
+  reading nothing back. On Workday the Sign In / Create Account submits and
+  links are pressed by data-automation-id through the click_filter overlay.
 - `agent/wizard.py` — the unattended loop: CAPTCHA pauses, account pages to
   accounts.py, each page filled and gated, Next pressed, the final page to
   submit.py. Caps: 25 pages, 60 minutes.
