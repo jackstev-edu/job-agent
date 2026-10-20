@@ -5,7 +5,10 @@ WHAT THIS DOES: Opens the link, finds the posting's Apply control, clicks
 it (following a new tab or a redirect to the company's site) and says which
 portal the form is on. On LinkedIn or Handshake it follows only an Apply
 that leaves the site: Easy Apply and Handshake's own applications are
-refused and parked. Nothing here reads a field value or fills anything.
+refused and parked. A MyGreenhouse job link that lands on MyGreenhouse's
+sign-in page is tried on Greenhouse's public boards first (same slug and
+id); the sign-in page is the landing only when no board shows the job.
+Nothing here reads a field value or fills anything.
 WHY IT MATTERS: The agent acts only on links Jack gives it and never finds
 postings of its own, so this is the one place a navigation starts, and the
 one place Apply is clicked. Apply is the one control it clicks: a control
@@ -48,6 +51,69 @@ JOB_BOARDS = {"linkedin": ("linkedin.com", "linkedin.cn", "lnkd.in"),
               "handshake": ("joinhandshake.com", "handshake.com")}
 
 APPLY_ATTR = "data-ja-apply"
+
+# A MyGreenhouse job link (my.greenhouse.io/jobs/<slug>/<id>) redirects to
+# MyGreenhouse's sign-in page; the same job is usually public on the
+# company's Greenhouse board, which needs no account.
+MY_GREENHOUSE_HOST = "my.greenhouse.io"
+_MY_GREENHOUSE_JOB = re.compile(r"^/jobs/([A-Za-z0-9][A-Za-z0-9_-]*)/(\d+)/?$")
+PUBLIC_BOARDS = ("https://job-boards.greenhouse.io/{slug}/jobs/{id}",
+                 "https://boards.greenhouse.io/{slug}/jobs/{id}")
+
+
+def mygreenhouse_job(url: str) -> tuple[str, str] | None:
+    """(slug, id) for an https my.greenhouse.io/jobs/<slug>/<id> link, else None."""
+    try:
+        parts = urlparse(url or "")
+    except Exception:
+        return None
+    if parts.scheme != "https" or (parts.hostname or "").lower() != MY_GREENHOUSE_HOST:
+        return None
+    m = _MY_GREENHOUSE_JOB.match(parts.path or "")
+    return (m.group(1), m.group(2)) if m else None
+
+
+def _is_public_job(page: "Page", wanted: str, slug: str, job_id: str) -> bool:
+    """
+    The board shows this job: still on the board's host, the slug and id
+    still in the path, and a form with fields or an Apply control on the
+    page (a "job closed" page has neither).
+    """
+    try:
+        here, want = urlparse(page.url), urlparse(wanted)
+    except Exception:
+        return False
+    if here.scheme != "https" or (here.hostname or "").lower() != (want.hostname or "").lower():
+        return False
+    if f"/{slug}/jobs/{job_id}" not in (here.path or ""):
+        return False
+    return has_form_fields(page) or find_apply(page).get("found", 0) > 0
+
+
+def _public_board(page: "Page", original: str, slug: str, job_id: str, steps: list[str]) -> "Page":
+    """
+    Try each public board address in this tab; the first that loads (200)
+    and shows the job is the page from here on. Otherwise back to the
+    original: MyGreenhouse's sign-in page, for accounts.py (Google, or a
+    pause for the emailed code; never a password flow).
+    """
+    for tpl in PUBLIC_BOARDS:
+        cand = tpl.format(slug=slug, id=job_id)
+        try:
+            resp = page.goto(cand, wait_until="domcontentloaded", timeout=60_000)
+            browser_mod.settle(page)
+        except Exception:
+            continue
+        if resp is not None and resp.status == 200 and _is_public_job(page, cand, slug, job_id):
+            steps.append(f"used the public board {urlparse(cand).hostname} for this MyGreenhouse job")
+            return page
+    try:
+        page.goto(original, wait_until="domcontentloaded", timeout=60_000)
+        browser_mod.settle(page)
+    except Exception:
+        pass
+    steps.append("no public board shows this MyGreenhouse job; its sign-in page is next")
+    return page
 
 
 def job_board(url: str) -> str | None:
@@ -195,6 +261,10 @@ def open_link(ctx: "BrowserContext", url: str, max_clicks: int = 3,
         landing.parked = f"the link didn't open ({type(e).__name__})"
         return landing
     landing.page = page
+    mg = mygreenhouse_job(url)
+    if mg and pages.is_mygreenhouse_sign_in(page.url):
+        page = _public_board(page, url, mg[0], mg[1], landing.steps)
+        landing.page = page
     last_click: tuple[str, str] | None = None
     for _ in range(max_clicks):
         board = job_board(page.url)

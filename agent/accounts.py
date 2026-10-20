@@ -546,6 +546,20 @@ def sign_in(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     if g is not None and pages.page_kind(page) != pages.SIGN_IN:
         res.steps.append("the sign-in page went away after the Google button")
         return res
+    if pages.is_mygreenhouse_sign_in(page.url):
+        # MyGreenhouse signs in by Google or an emailed security code: no
+        # password, so no password flow is invented (docs/PLAN-gui.md item 5);
+        # its "Sign in" link leads to the employer's login and is never pressed.
+        _, how = pauser.wait("job-agent needs you",
+                             "MyGreenhouse wants you to sign in: use Continue with Google or the "
+                             "security code it emails you, in this tab, then press Enter.",
+                             prompt="Press Enter when you're signed in: ",
+                             until=lambda: pages.page_kind(page) != pages.SIGN_IN)
+        if pages.page_kind(page) == pages.SIGN_IN:
+            return Result(PARKED, f"MyGreenhouse's sign-in page is still showing ({how})",
+                          res.steps, res.events)
+        res.events.append({"kind": "login_wall", "detail": "finished by Jack", "handled": "jack"})
+        return res
     if _sign_in_with(page, prof, None, res):
         res.steps.append("signed in (a saved password)")
         return res

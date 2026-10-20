@@ -160,7 +160,13 @@ picks the account whose email is the profile email and presses Continue on
 a permission screen that asks for name, email address and profile picture
 and nothing else. Google's sign-in page, a 2-step check, "this browser may
 not be secure" or any other permission wording pauses for you; the agent
-never types on a Google page. The page talks only to that port, checks the
+never types on a Google page.
+
+A MyGreenhouse link (`my.greenhouse.io/jobs/<company>/<id>`) is looked up on
+the company's public Greenhouse board first, which needs no account. If no
+board shows the job, the agent uses Continue with Google on MyGreenhouse's
+sign-in page, or pauses for you to sign in with the security code it emails
+you. It never types your email there and never invents a password. The page talks only to that port, checks the
 Host and Origin of every request, needs a per-session token for every
 change, and renders everything from the job pages as plain text. A dry run
 (the toggle on the page, or `run --dry`) opens the link, clicks Apply,

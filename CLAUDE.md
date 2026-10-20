@@ -36,7 +36,8 @@ run as `python apply.py <command>` (no make).
 - `agent/ledger.py` — follow mode's never-overwrite ledger, activity guard
   and classification cache.
 - `agent/pages.py` — follow mode's credential / verification page and
-  host-family rules (fill nothing there).
+  host-family rules (fill nothing there); MyGreenhouse's sign-in page is a
+  sign-in page by its address (it has no password box).
 - `agent/shadow.py` — the record of one fill run for the submit gate, and
   its redacted form for `gate_runs` (no answer values).
 - `agent/gate.py` — the submit gate: a pure function of that record plus the
@@ -52,7 +53,8 @@ run as `python apply.py <command>` (no make).
   after upload, the fillable plan, the record for the gate).
 - `agent/intake.py` — from Jack's link to the form: finds and clicks the one
   Apply control, follows a new tab or a redirect, refuses LinkedIn Easy
-  Apply and Handshake's own applications, detects the portal.
+  Apply and Handshake's own applications, detects the portal. A
+  MyGreenhouse job link is tried on the public Greenhouse boards first.
 - `agent/accounts.py` — sign-up, sign-in, forgot password and verification
   pages. The only module that types a password (generated or pasted), once,
   reading nothing back.
@@ -258,6 +260,16 @@ How the code keeps them, and rules of its own:
   wizard checks the address before anything else.
   `google` alone left `accounts.NEVER_WORDS`; Microsoft, Apple, Facebook,
   LinkedIn and SSO controls are still never pressed.
+- MyGreenhouse (`my.greenhouse.io/jobs/<slug>/<id>`): when the link lands
+  on MyGreenhouse's sign-in page, intake tries
+  `job-boards.greenhouse.io/<slug>/jobs/<id>` then
+  `boards.greenhouse.io/<slug>/jobs/<id>` and uses the first that loads
+  (200), keeps the slug and id in its path and shows a form or an Apply
+  control. Otherwise the sign-in page is the landing: accounts.py presses
+  Continue with Google if offered, else pauses for Jack to sign in by the
+  emailed security code. Its email box is never typed into by the agent,
+  its "Sign in" link (the employer's login) is never pressed, and no
+  password flow runs there.
 - The outcome hook's read counts as submit-time ("exact") only for the
   form's submit event or a press on a control that reads as Submit; a press
   on Next, Continue, Sign in and the like is a polled read.

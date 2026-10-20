@@ -27,6 +27,20 @@ if TYPE_CHECKING:
 ACCOUNT, SIGN_IN, VERIFICATION = "account_page", "sign_in_page", "verification_page"
 OFF_HOST, LINKEDIN = "off_host", "linkedin_refused"
 
+
+def is_mygreenhouse_sign_in(url: str) -> bool:
+    """
+    MyGreenhouse's sign-in page, by exact https host and path: it has no
+    password box (Google, or an emailed security code), so structure alone
+    would call it an ordinary page and fill its email box.
+    """
+    try:
+        parts = urlparse(url or "")
+    except Exception:
+        return False
+    return (parts.scheme == "https" and (parts.hostname or "").lower() == "my.greenhouse.io"
+            and (parts.path or "").rstrip("/") == "/users/sign_in")
+
 # Counts only. A password box is any box an extract.py reader would refuse
 # as one: a type=password box, a password autocomplete hint (a
 # show-password toggle leaves type=text but keeps the hint), the sticky
@@ -68,6 +82,7 @@ def page_kind(page: "Page") -> str | None:
     """
     ACCOUNT, SIGN_IN, VERIFICATION, or None for any other page. A page that
     can't be read counts as an account page: the strictest, fills nothing.
+    MyGreenhouse's sign-in page (no password box) is SIGN_IN by its address.
     """
     try:
         k = page.evaluate(_KIND_JS)
@@ -85,6 +100,11 @@ def page_kind(page: "Page") -> str | None:
         return SIGN_IN
     if k.get("code"):
         return VERIFICATION
+    try:
+        if is_mygreenhouse_sign_in(page.url):
+            return SIGN_IN                 # the one host rule: see is_mygreenhouse_sign_in
+    except Exception:
+        pass
     return None
 
 
