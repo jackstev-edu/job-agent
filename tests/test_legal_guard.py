@@ -480,6 +480,17 @@ def test_a_security_clearance_question_is_answered_only_from_the_clearance_lines
     v = sensitive.decide({"label": "Do you currently hold a DoD security clearance?", "type": "radio",
                           "options": ["Yes", "No"]}, "personal_fact", both)
     check(v["action"] == "human" and "more than one kind" in v["reason"], f"a DoD clearance: two kinds, Jack's ({v.get('reason')})")
+    # BLOCK fix: willingness, ability, acceptance or ineligibility is not
+    # the eligibility line, even with it filled; each is Jack's.
+    for label in ("Are you willing to obtain a clearance?", "Are you able to obtain a clearance?",
+                  "This role requires you to obtain a clearance. Do you accept?",
+                  "Are you ineligible to obtain a clearance?", "Would you be willing to obtain a security clearance?",
+                  "Can you obtain a Secret clearance?"):
+        v = sensitive.decide({"label": label, "type": "radio", "options": ["Yes", "No"]}, "personal_fact", eligible)
+        check(v["action"] == "human" and v["value"] is None and "clearance_eligible" not in str(v.get("profile_path")),
+              f"{label!r} with the eligibility line filled: Jack's ({v['action']}, {v.get('reason')})")
+    # The page-side copy of the guard (extract.py's RAW_LEGAL) carries the kind too.
+    check(any("clearance" in pat for pat in sensitive.RAW_PATTERNS["legal"]), "the raw legal patterns carry the clearance kind")
     check.done()
 
 

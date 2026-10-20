@@ -1619,3 +1619,36 @@ test_resume.py; that run caught it); 250 tests carry the marker. CLAUDE.md's Wor
 (per commit: changed test files plus `-m "not browser"`; the full suite
 before each push) and the 30-minute threshold.
 \n
+Commit 658151c (item 4): VERDICT FLAG, 3 low FLAGs, logged: the one
+continue path left (a pause ending FINISHED because the sign-in page
+went away) has no test, since the test pauser answers only ANSWERED or
+TIMED_OUT (fix: a pauser variant returning FINISHED after moving the
+page to the form); the `until` lambda's second clause (`... is None and
+False`) is dead code; an empty line at the hidden prompt returns ("",
+ANSWERED), so an empty password is typed once and Sign in pressed,
+ending PARKED (fix: `if not password:`), pre-existing. Verified by the
+reviewer: safe direction only; no path gains a pass.
+
+Commit 46805f2 (item 3): VERDICT FLAG, 3 low FLAGs, logged: the
+user-agent-root check proves only that <progress> is on the page and
+the count is 0, not that CDP reported a user-agent root the code
+skipped (its evidence is the fails-on-b8c5bd3 run: the count was 1
+there); the threat-model line says the CDP read happens on the
+consent-screen check, but shadow_hosts runs inside classify, so it also
+happens on Google's account chooser (fix: say "the chooser / consent
+classification"); the shadowed-IDL-type check passes on b8c5bd3 (a
+guard, said so in the commit message). Verified by the reviewer: page
+script cannot make a root CDP reports as "user-agent"; unknown kinds,
+wrong shapes, a missing root and any exception still count as a host.
+
+Commit 33d6376 (item 5): VERDICT BLOCK (one HIGH), 2 low FLAGs. Fixed
+in the next commit: the new eligibility row's third alternative
+("obtain a clearance" with no eligibility word) let "Are you willing /
+able to obtain a clearance?" or "This role requires you to obtain a
+clearance. Do you accept?" be filled "Yes" from clearance_eligible; the
+alternative is gone and "eligible" must be a whole word (so
+"ineligible" is not it); negative tests with the line filled for each
+wording. Low, folded in the same fix: the raw legal patterns are
+asserted to carry the kind. Low, logged: no test drives extract.py's
+page-side raw_legal flag for a clearance label.
+

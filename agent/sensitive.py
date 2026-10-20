@@ -65,8 +65,11 @@ PROFILE_PATHS: list[tuple[str, str]] = [
     # clearance question to a strict fit from these two lines or sends it
     # to Jack (2026-10-20, second set). A question naming both ("eligible
     # to obtain a security clearance") matches both rows and is Jack's.
-    (r"eligib\w*\s+(to\s+(obtain|get|hold|receive|be\s+granted)|for)\s+(a|an)?\s*(\w+\s+)?clearance"
-     r"|clearance[\s-]+eligib\w*|obtain\w*\s+(a|an)\s+(\w+\s+)?clearance",
+    # The row needs the word "eligible" (whole, so "ineligible" is not
+    # it): willingness or ability to obtain one, or accepting that a role
+    # requires one, is not eligibility and has no line (BLOCK fix).
+    (r"\beligib\w*\s+(to\s+(obtain|get|hold|receive|be\s+granted)|for)\s+(a|an)?\s*(\w+\s+)?clearance"
+     r"|clearance[\s-]+eligib\w*",
      "eligibility.clearance_eligible"),
     (r"security\s+clearance|\bdod\b\s+clearance|(secret|ts/sci)\s+clearance",
      "eligibility.security_clearance"),
