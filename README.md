@@ -152,7 +152,15 @@ only from the page's Close button (it asks first if a job is waiting).
 Chrome profile at Google's sign-in page for you to sign in by hand. The
 agent types nothing there, reads nothing from it and presses nothing; the
 session Google leaves in the profile is what "Continue with Google"
-buttons on portals use afterwards. The page talks only to that port, checks the
+buttons on portals use afterwards.
+
+On a portal's sign-in or account page the agent presses "Sign in / Continue
+with Google" ahead of email and password. On Google's own site it only
+picks the account whose email is the profile email and presses Continue on
+a permission screen that asks for name, email address and profile picture
+and nothing else. Google's sign-in page, a 2-step check, "this browser may
+not be secure" or any other permission wording pauses for you; the agent
+never types on a Google page. The page talks only to that port, checks the
 Host and Origin of every request, needs a per-session token for every
 change, and renders everything from the job pages as plain text. A dry run
 (the toggle on the page, or `run --dry`) opens the link, clicks Apply,

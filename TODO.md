@@ -1215,3 +1215,14 @@ compare as ""). Logged, not folded (not safety-relevant, or Jack's call):
 - The reviewer did not run the new tests on fcd44d4 (it would alter the
   tree); the main session did, per test.
 
+Commit afbe337 (GUI item 3): VERDICT FLAG, 3 FLAGs. Folded into item 4's
+commit: the "evaluated nothing" test now patches every page-touching
+Playwright method (evaluate, fill, click, type, press, keyboard, mouse on
+Page, Frame, Locator, ElementHandle) at the class level around the whole
+command, so open_login_tab itself is covered; is_google gains the userinfo
+and trailing-dot negatives. Logged, not folded:
+- The GUI's Google button opens the tab on the queue loop's thread: goto
+  (60 s) plus settle (15 s networkidle) can hold resumes and the next job
+  for up to ~75 s if Google is slow. Fix: a 15 s timeout and no settle for
+  that tab.
+

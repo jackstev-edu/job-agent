@@ -65,9 +65,13 @@ run as `python apply.py <command>` (no make).
   Windows toast (fallback bell), a prompt (hidden via getpass for a
   password), a 15-minute wait that also ends when the page moves on
   (item 2 of `docs/PLAN-gui.md` replaces the wait with the GUI).
-- `agent/google.py` — Google's sign-in site by exact https hostname, and the
+- `agent/google.py` — Google's sign-in site by exact https hostname; the
   tab `apply.py google-login` (or the GUI's button) opens there for Jack's
-  hands only: nothing typed, read or pressed by the agent.
+  hands only; and, after a portal's "Continue with Google", the chooser
+  (the entry whose email equals the profile email) and the consent screen
+  (Continue only when every line equals an ALLOWED_PERMISSIONS entry) by
+  structure. Anything else on Google pauses with nothing typed. It never
+  types.
 - `agent/gui.py` — the one-page local GUI (`apply.py gui`): loopback only,
   Host and Origin checks, a per-session token on every change, a strict
   CSP, text-node rendering; the State the queue loop and the page share.
@@ -236,6 +240,21 @@ How the code keeps them, and rules of its own:
   tick a box or press a Google control, never answer a question). No answer value for a legal, eligibility,
   EEO or pay field is ever stored in `gate_runs`; in the edits diff a
   checkbox whose tick is such an answer records only that it changed.
+- Google sign-in (Jack, 2026-10-19): `accounts.py` presses a control whose
+  whole text reads "Sign in / Log in / Continue / Sign up / Register with
+  Google" ahead of email and password, on a sign-in or account page only,
+  and follows it into the same tab or a popup. `google.py` then acts only
+  on `https://accounts.google.com` (exact hostname): a chooser entry is
+  clicked only if its identifier equals the profile email after NFKC,
+  casefold and collapsed whitespace; Continue / Allow is pressed only
+  when the page has no box to type into, exactly one such button, and
+  every permission line (or every item of Google's "will share your ..."
+  sentence) equals an entry of `ALLOWED_PERMISSIONS` /
+  `ALLOWED_SHARE_ITEMS`, compared the same way. A sign-in box, a code box,
+  "this browser may not be secure", an empty or unreadable list or any
+  other line pauses for Jack; nothing is ever typed on a Google page.
+  `google` alone left `accounts.NEVER_WORDS`; Microsoft, Apple, Facebook,
+  LinkedIn and SSO controls are still never pressed.
 - The outcome hook's read counts as submit-time ("exact") only for the
   form's submit event or a press on a control that reads as Submit; a press
   on Next, Continue, Sign in and the like is a polled read.

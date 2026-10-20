@@ -2,7 +2,9 @@
 accounts.py — sign-up, sign-in, forgot-password and verification pages.
 
 WHAT THIS DOES: On a page pages.page_kind calls an account, sign-in or
-verification page, does what the owner decisions allow: types the profile
+verification page, does what the owner decisions allow: presses a "Sign in
+/ Continue with Google" control first, if there is one, and lets google.py
+walk Google's pages (Jack, 2026-10-19); otherwise types the profile
 email (and name) into a sign-up form, generates a password and types it
 into the new-password boxes, ticks a terms / privacy box under the consent
 policy, presses Create account; on a sign-in page types the email and
@@ -24,7 +26,7 @@ import string
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
-from . import browser as browser_mod, gate, pages, pause as pause_mod
+from . import browser as browser_mod, gate, google, pages, pause as pause_mod
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -52,8 +54,10 @@ VERIFY_WORDS = re.compile(r"^(verify|verify (code|email|now)|confirm|validate|co
                           re.I)
 # Never pressed by this module, whatever list matched: a bare Submit, Next
 # or Continue belongs to the wizard and to submit.py, behind the gate.
+# `google` left this list on 2026-10-19 (Jack: Sign in with Google is
+# preferred); the other identity providers stay refused.
 NEVER_WORDS = re.compile(r"^\s*(submit|continue|next|proceed|go|enter|done|finish)\s*$"
-                         r"|submit (my |your |the )?application|apply|withdraw|delete|google"
+                         r"|submit (my |your |the )?application|apply|withdraw|delete"
                          r"|microsoft|apple|facebook|linkedin|sso|single sign", re.I)
 
 EMAIL_BOX = re.compile(r"e-?mail|username|user name|user id|login id", re.I)
@@ -261,6 +265,51 @@ def _press(page: "Page", words: re.Pattern, kind_now: str | None, what: str) -> 
     return str(found.get("word") or what)
 
 
+def _google_first(page: "Page", prof, pauser: pause_mod.Pauser, res: Result,
+                  kind_now: str) -> str | None:
+    """
+    Press the one control reading as Google sign-in, ahead of email and
+    password (Jack, 2026-10-19), follow it into the same tab or a popup,
+    and let google.drive walk Google's pages by structure. None when there
+    is no such control (or it couldn't be pressed); else google.DONE or
+    google.STUCK. The caller re-reads the portal page's kind afterwards.
+    """
+    if pages.page_kind(page) != kind_now:
+        return None
+    try:
+        found = page.evaluate(_FIND_BUTTON_JS, [google.BUTTON_WORDS.pattern, NEVER_WORDS.pattern, _BTN_ATTR])
+    except Exception:
+        return None
+    if not isinstance(found, dict) or not found.get("chosen"):
+        return None
+    gpage, clicked = page, False
+    try:
+        with page.context.expect_page(timeout=3000) as opened:
+            page.locator(f"[{_BTN_ATTR}='1']").first.click(timeout=4000)
+            clicked = True
+        gpage = opened.value
+        gpage.wait_for_load_state("domcontentloaded", timeout=30_000)
+    except Exception:
+        if not clicked:
+            return None                    # the same tab, or a popup that didn't come
+    res.steps.append(f"pressed '{found.get('word')}'")
+    browser_mod.settle(gpage, 1000)
+    status = google.drive(gpage, prof, pauser, res.steps, res.events)
+    browser_mod.settle(page, 800)
+    return status
+
+
+GOOGLE_STUCK = "Google's page needs you, and the pause didn't get it done"
+
+
+def on_google(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
+    """The tab itself is on Google's site (a same-tab sign-in): walk it, or pause."""
+    res = Result(CONTINUE)
+    if google.drive(page, prof, pauser, res.steps, res.events) == google.STUCK:
+        return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)
+    return res
+
+
 def _type_secret(page: "Page", key: str, value: str) -> bool:
     """
     Type a password into one located password box. Nothing is read back,
@@ -329,6 +378,12 @@ def sign_up(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     res = Result(CONTINUE)
     if pages.page_kind(page) != pages.ACCOUNT:
         return res
+    g = _google_first(page, prof, pauser, res, pages.ACCOUNT)
+    if g == google.STUCK:
+        return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)
+    if g is not None and pages.page_kind(page) != pages.ACCOUNT:
+        res.steps.append("signed up with Google")
+        return _then_verify(page, prof, pauser, res)
     try:
         pw_boxes = page.evaluate(_PASSWORD_BOXES_JS, _PW_ATTR) or []
     except Exception:
@@ -364,7 +419,11 @@ def sign_up(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
             return Result(PARKED, f"the account page didn't accept the sign-up ({how})", res.steps,
                           res.events)
         res.events.append({"kind": "account_page", "detail": "finished by Jack", "handled": "jack"})
-    # A verification page usually follows a sign-up: handled in the same step.
+    return _then_verify(page, prof, pauser, res)
+
+
+def _then_verify(page: "Page", prof, pauser: pause_mod.Pauser, res: Result) -> Result:
+    """A verification page usually follows a sign-up: handled in the same step."""
     if pages.page_kind(page) == pages.VERIFICATION:
         verified = verify(page, prof, pauser)
         res.steps += verified.steps
@@ -467,13 +526,20 @@ def _sign_in_with(page: "Page", prof, password: str | None, res: Result) -> bool
 
 def sign_in(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     """
-    A sign-in page: the email, Sign in (a saved password may be filled);
-    then a Create account link if there is one; then Forgot password.
+    A sign-in page: Google first, if offered; else the email, Sign in (a
+    saved password may be filled); then a Create account link if there is
+    one; then Forgot password.
     """
     res = Result(CONTINUE)
     if pages.page_kind(page) != pages.SIGN_IN:
         return res
     res.events.append({"kind": "login_wall", "detail": "handled by the agent", "handled": "agent"})
+    g = _google_first(page, prof, pauser, res, pages.SIGN_IN)
+    if g == google.STUCK:
+        return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)
+    if g is not None and pages.page_kind(page) != pages.SIGN_IN:
+        res.steps.append("signed in with Google")
+        return res
     if _sign_in_with(page, prof, None, res):
         res.steps.append("signed in (a saved password)")
         return res

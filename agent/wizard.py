@@ -26,7 +26,7 @@ from collections import Counter
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
-from . import (accounts, browser as browser_mod, extract, follow, gate, gui as gui_mod, ledger,
+from . import (accounts, browser as browser_mod, extract, follow, gate, google, gui as gui_mod, ledger,
                pages, pause as pause_mod, pipeline, submit as submit_mod)
 
 if TYPE_CHECKING:
@@ -529,6 +529,16 @@ class Wizard:
             if not skip_fill:
                 self._captcha()
                 verdict = pages.fill_allowed(page, self.url, None)
+                if verdict == pages.OFF_HOST and google.is_google(page.url):
+                    # A same-tab Google sign-in: walked by structure, or a
+                    # pause; never filled, never typed into.
+                    res = accounts.on_google(page, self.prof, self.pauser)
+                    self.out.events += res.events
+                    self.out.log += res.steps
+                    if res.status == accounts.PARKED:
+                        raise _Parked(res.reason)
+                    browser_mod.settle(page, 800)
+                    continue
                 if verdict in (pages.LINKEDIN, pages.OFF_HOST):
                     raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
                 if verdict in (pages.ACCOUNT, pages.SIGN_IN, pages.VERIFICATION):
