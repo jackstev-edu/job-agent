@@ -16,6 +16,8 @@ documents/*
 *.db
 *.sqlite3
 reports/
+# Page structure dumps from `apply.py snapshot` (no values, but never shared).
+snapshots/
 
 # Environment and secrets.
 .env

@@ -354,6 +354,21 @@ today's count can't be read, the cap remaining shows as unknown.
 - `consent_allowlist`: checkbox labels copied exactly;
 - `per_company`: recorded for later; nothing fills from it yet.
 
+### A structure snapshot of a real page
+
+```powershell
+.venv\Scripts\python.exe apply.py snapshot --name workday-my-information
+```
+
+The agent's browser opens; bring up the page you want (sign in if you need
+to), press Enter in the terminal, and `snapshots/<name>-<host>.json` gets
+the page's structure: tag, type, role, aria-*, data-automation-id, name,
+id, label, required, visibility and the container chain of every control.
+No input value is read, nothing from the header / account area is kept,
+and any string holding a value from your profile is replaced by
+`[profile]` before the file is written. The folder is gitignored; the
+dumps are what the mock pages in the tests are built from.
+
 ### Saving a portal login once
 
 Some portals want an account per employer. Do this once for each (Workday

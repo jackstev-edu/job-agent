@@ -84,6 +84,12 @@ run as `python apply.py <command>` (no make).
   CSP, text-node rendering; the State the queue loop and the page share.
   A legal, EEO, pay, consent, per-company, checkbox or password field is
   never offered for approval and its value never reaches the page.
+- `agent/snapshot.py` — `apply.py snapshot`: a structure dump of the page
+  the agent's browser shows (tag, type, role, aria-*, data-automation-id,
+  name, id, label, required, visibility, container chain), no input
+  value, nothing from the header / account area, every string holding a
+  profile value replaced by "[profile]" (the profile is read at run time
+  by the loader only), written to the gitignored `snapshots/` folder.
 
 ## Owner decisions (Jack, 2026-10-18)
 
@@ -477,7 +483,7 @@ How the code keeps them, and rules of its own:
   Chromium `browser`); the full suite once before each push (Jack,
   2026-10-20, second set).
 - Before each commit, run git status and confirm nothing from
-  ~/.job-agent is staged.
+  ~/.job-agent and nothing from `snapshots/` is staged.
 - Run Python as .venv/Scripts/python.exe (use -m pip, never pip.exe).
 - Don't capture Jack's screen.
 - Rule-reviewer after each commit, output unedited; confirm the tree is

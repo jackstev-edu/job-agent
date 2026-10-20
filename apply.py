@@ -25,8 +25,8 @@ from pathlib import Path
 
 from agent import (accounts, adapters, browser as browser_mod, classify, config, extract,
                    filler, follow, gate, google, gui, intake, learn, ledger, letters, mapper,
-                   outcome, pages, pause, pipeline, report, score, sensitive, shadow, template,
-                   tracker, wizard)
+                   outcome, pages, pause, pipeline, report, score, sensitive, shadow, snapshot,
+                   template, tracker, wizard)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
@@ -1387,6 +1387,41 @@ def cmd_google_login(args) -> None:
     print(f"{GREEN}Done.{OFF} {DIM}Whatever Google saved in the profile stays on this machine.{OFF}")
 
 
+def cmd_snapshot(args) -> None:
+    """
+    A structure dump of the page the agent's browser shows, for building
+    mocks that match a real portal (Jack, 2026-10-20): the agent's own
+    Chrome profile opens, you bring up the page (signing in if you need
+    to), press Enter here, and the page's tag / type / role / aria-* /
+    data-automation-id / name / id / label / required / visibility and
+    container chain of every control go to snapshots/<name>-<host>.json
+    in the repo folder (gitignored). No input value is read, nothing from
+    the header / account area is kept, and every string holding a value
+    from your profile (loaded here, at run time) is replaced by "[profile]"
+    before anything is written.
+    """
+    prof = Profile.load(args.profile)
+    print(f"\n{BOLD}Page snapshot{OFF}")
+    print(f"{DIM}A browser window opens in the agent's own profile ({config.CHROME_PROFILE_DIR}). Bring up "
+          f"the page you want a snapshot of, in that window's last tab, then press Enter here. The dump "
+          f"holds structure only: no input values, nothing from the header, nothing equal to a profile "
+          f"value.{OFF}")
+    with browser_mod.browser() as ctx:
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        if args.url:
+            try:
+                page.goto(args.url, wait_until="domcontentloaded", timeout=60_000)
+            except Exception as e:
+                print(f"{RED}Couldn't open {args.url} ({type(e).__name__}); open the page yourself.{OFF}")
+        print("Press Enter here when the page you want is showing (or to give up).")
+        input()
+        target = ctx.pages[-1] if ctx.pages else page
+        snap = snapshot.dump(target, prof.data)
+        path = snapshot.write(snap, args.name)
+    print(f"{GREEN}Wrote {path}{OFF} {DIM}({len(snap['elements'])} elements of {snap['total_matched']} matched; "
+          f"profile values replaced by {snapshot.REDACTED}).{OFF}")
+
+
 def cmd_gui(args) -> None:
     import webbrowser
 
@@ -1540,6 +1575,12 @@ def main() -> None:
 
     sub.add_parser("google-login", help="open the agent's browser at Google's sign-in page "
                                         "for you to sign in by hand").set_defaults(fn=cmd_google_login)
+
+    p_snap = sub.add_parser("snapshot", help="dump the structure of the page the agent's browser is on "
+                                             "to snapshots/ (no values, no profile data)")
+    p_snap.add_argument("url", nargs="?", default=None, help="a page to open first (optional)")
+    p_snap.add_argument("--name", default=None, help="a name for the file (default: a timestamp)")
+    p_snap.set_defaults(fn=cmd_snapshot)
 
     sub.add_parser("applied", help="every link run has logged, with its status"
                    ).set_defaults(fn=cmd_applied)

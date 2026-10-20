@@ -1721,3 +1721,16 @@ redacted gate_runs field (fill_reason), the gate's "filling it failed
 (<reason>)" (so the GUI row shows it), the report and `fill`'s terminal
 line carry it.
 
+Item 1 (`apply.py snapshot`): agent/snapshot.py dumps the structure of
+the page the agent's browser shows (every control, label, legend,
+heading and data-automation-id element outside the header / account
+area: tag, type, role, aria-* except aria-valuenow / aria-valuetext,
+data-automation-id, name, id, label, text of labels / legends / buttons
+/ options, required, disabled, readonly, visibility, classes, container
+chain), reads no .value, and replaces every string that contains a
+profile value (normalised; numbers also by their digits, both ways) with
+"[profile]" before writing snapshots/<name>-<host>.json (gitignored).
+The test proves name, email, phone in any digit form, city, postal
+code, employer, a typed box value, a password box's value and the
+header's text are nowhere in the dump.
+
