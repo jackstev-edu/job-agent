@@ -255,9 +255,12 @@ How the code keeps them, and rules of its own:
   "will share your ..." form is not accepted: it names language
   preference). A sign-in box, a code box, "this browser may not be
   secure", no list, an unreadable list or any other line pauses for Jack;
-  nothing is ever typed on a Google page. `pages.fill_allowed` refuses
-  Google's site by address whatever host family the link is in, and the
-  wizard checks the address before anything else.
+  nothing is ever typed on a Google page. `pages.fill_allowed`, the
+  wizard (before anything else) and the one-page `fill` command refuse
+  Google's host on any scheme or spelling (`google.is_google_host`),
+  whatever host family the link is in; only the exact https address is
+  driven, anything else on that host is parked. A portal that bounces
+  straight back to Google after the button parks the job.
   `google` alone left `accounts.NEVER_WORDS`; Microsoft, Apple, Facebook,
   LinkedIn and SSO controls are still never pressed.
 - MyGreenhouse (`my.greenhouse.io/jobs/<slug>/<id>`): when the link lands

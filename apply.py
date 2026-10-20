@@ -301,6 +301,12 @@ def cmd_fill(args) -> None:
         # And once more just before the scan: a page can ask you to sign in late.
         if _get_past_login_wall(page):
             events.append({"kind": "login_wall", "detail": "step 1"})
+        if google.is_google_host(page.url):
+            # Google's own site is never filled (Jack, 2026-10-19): sign in
+            # there yourself, then run fill again on the application's page.
+            print(f"\n{RED}This is Google's own page; the agent fills nothing here.{OFF} Sign in "
+                  f"yourself, then run fill again on the application page.")
+            return
 
         fields = extract.extract_fields(page, guard)
         if not fields:

@@ -15,7 +15,11 @@ consent screen, and a chooser without the account (or with it twice)
 each pause with nothing typed and nothing clicked (in the terminal:
 parked; in GUI mode: a Deferred, and Continue resumes the job). The
 look-alike host is not Google and gets no click. A link in Google's own
-host family never makes Google's pages fillable. Only `google` left
+host family never makes Google's pages fillable, nor does Google's host
+on http or with a trailing dot (refused, never driven); a portal that
+bounces straight back to Google after the button parks with nothing
+typed; the one-page `fill` command fills nothing on Google's page. Only
+`google` left
 NEVER_WORDS; the other providers are still refused and no step list
 matches a "... with Google" text.
 WHY IT MATTERS: Jack's 2026-10-19 decisions let the agent press exactly
@@ -28,7 +32,7 @@ from contextlib import redirect_stdout
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
-from _fill_run import _headless, classify_by_label, map_from_profile
+from _fill_run import _headless, classify_by_label, map_from_profile, run_fill
 from _harness import Checks, run_as_script
 from agent import accounts, google, pages, pause, wizard
 from test_accounts import EMAIL, GENERATED, _Pauser, _Profile
@@ -38,6 +42,7 @@ PORTAL = "https://careers.example-co.com"
 GOOGLE = "https://accounts.google.com"
 LOOKALIKE = "https://accounts.google.com.example"
 GOOGLE_CAREERS = "https://careers.google.com"
+GOOGLE_HTTP = "http://accounts.google.com"
 
 CLICKS_JS = """<script>
   window.__clicks = [];
@@ -120,7 +125,10 @@ GOOGLE_PAGES = {
     "/consent-box": lambda q: _consent(OK_LINES, extra='<input type="text" aria-label="Note">'),
     "/consent-outside": lambda q: _consent(OK_LINES, outside=f"<footer><ul><li>{DRIVE}</li></ul></footer>"),
     "/share-ok": lambda q: _consent([], SHARE_OK), "/share-lang": lambda q: _consent([], SHARE_LANG),
-    "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE}
+    "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE,
+    # A consent whose Continue sends the portal a callback that bounces straight back to Google.
+    "/consent-bounce": lambda q: _consent(OK_LINES).replace(f"{PORTAL}/form?google=1", f"{PORTAL}/form?bounce=1")}
+BOUNCE = f"<!doctype html><html><body><script>location.replace('{GOOGLE}/login')</script></body></html>"
 
 
 def _routes():
@@ -138,16 +146,17 @@ def _routes():
             elif u.path == "/register":
                 body = _portal_register(target)
             elif u.path == "/form":
-                body = FORM
+                body = BOUNCE if q.get("bounce") else FORM
             else:
                 body = "<p>404</p>"
-        elif base in (GOOGLE, LOOKALIKE):
+        elif base in (GOOGLE, LOOKALIKE, GOOGLE_HTTP):
             maker = GOOGLE_PAGES.get(u.path)
             body = maker(u.query) if maker else "<p>404</p>"
         else:
             body = "<p>404</p>"
         route.fulfill(status=200, content_type="text/html", body=body)
-    return {f"{PORTAL}/**": handle, f"{GOOGLE}/**": handle, f"{LOOKALIKE}/**": handle, f"{GOOGLE_CAREERS}/**": handle}
+    return {f"{PORTAL}/**": handle, f"{GOOGLE}/**": handle, f"{LOOKALIKE}/**": handle,
+            f"{GOOGLE_CAREERS}/**": handle, f"{GOOGLE_HTTP}/**": handle}
 
 
 def _run(page, kind, pauser, prof=None):
@@ -394,6 +403,47 @@ def test_a_google_family_start_link_never_makes_googles_pages_fillable():
         check(out.status == "needs_you" and page.url == f"{GOOGLE}/login" and _clicks(page) == []
               and page.evaluate("document.getElementById('id').value") == "",
               f"from a careers.google.com sign-in page too ({out.status}, {out.reason}, {page.url})")
+    check.done()
+
+
+def test_a_bounce_back_to_google_after_the_button_parks_with_nothing_typed():
+    check = Checks()
+    with _headless(_routes()) as ctx:
+        page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g=consent-bounce")
+        pauser = _Pauser([None])
+        res, _ = _run(page, pages.SIGN_IN, pauser)
+        check(res.status == accounts.PARKED and res.reason == accounts.GOOGLE_STUCK,
+              f"parked, not typed into ({res.status}, {res.reason})")
+        check(page.url == f"{GOOGLE}/login" and _clicks(page) == []
+              and page.evaluate("document.getElementById('id').value") == "",
+              f"Google's sign-in box is empty and nothing was pressed there ({page.url}, {_clicks(page)})")
+        check("typed" not in " ".join(res.steps), f"no email typed anywhere ({res.steps})")
+    check.done()
+
+
+def test_googles_host_on_any_address_is_refused_and_never_driven():
+    check = Checks()
+    with _headless(_routes()) as ctx:
+        page = ctx.new_page(); page.goto(f"{GOOGLE_HTTP}/login")
+        check(pages.fill_allowed(page, f"{GOOGLE_CAREERS}/jobs/1") == pages.OFF_HOST,
+              "fill_allowed refuses the http address too")
+        w = _wizard(page, f"{GOOGLE_CAREERS}/jobs/1", _Pauser([None]))
+        with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                mock.patch("agent.mapper.map_fields", map_from_profile), redirect_stdout(io.StringIO()):
+            out = w.run()
+        check(out.status == "needs_you" and "won't drive" in out.reason and out.pages_filled == 0,
+              f"the wizard parks it, drives nothing and fills nothing ({out.status}, {out.reason})")
+        check(_clicks(page) == [] and page.evaluate("document.getElementById('id').value") == "",
+              "nothing touched on it")
+    check.done()
+
+
+def test_the_fill_command_fills_nothing_on_googles_page():
+    check = Checks()
+    printed, records, error = run_fill(None, dry_run=False, url=f"{GOOGLE}/login", routes=_routes())
+    check("Google's own page" in printed and "fills nothing here" in printed, f"fill says so ({printed[-200:]})")
+    check("field(s) on the page" not in printed and records == [] and error is None,
+          f"no scan, no record, no error ({records}, {error})")
     check.done()
 
 

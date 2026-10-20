@@ -385,8 +385,8 @@ def sign_up(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     if pages.page_kind(page) != pages.ACCOUNT:
         return res
     g = _google_first(page, prof, pauser, res, pages.ACCOUNT)
-    if g == google.STUCK:
-        return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)
+    if g == google.STUCK or (g is not None and google.is_google_host(page.url)):
+        return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)    # or bounced back to Google
     if g is not None and pages.page_kind(page) != pages.ACCOUNT:
         res.steps.append("the account page went away after the Google button")
         return _then_verify(page, prof, pauser, res)
@@ -541,8 +541,8 @@ def sign_in(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
         return res
     res.events.append({"kind": "login_wall", "detail": "handled by the agent", "handled": "agent"})
     g = _google_first(page, prof, pauser, res, pages.SIGN_IN)
-    if g == google.STUCK:
-        return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)
+    if g == google.STUCK or (g is not None and google.is_google_host(page.url)):
+        return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)    # or bounced back to Google
     if g is not None and pages.page_kind(page) != pages.SIGN_IN:
         res.steps.append("the sign-in page went away after the Google button")
         return res

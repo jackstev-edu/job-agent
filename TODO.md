@@ -1276,3 +1276,39 @@ checks the gate's own verdict ("filling it failed", "required, but
 empty"), and a new test covers the failed re-scan. Noted: the reviewer
 verified the fail-on-previous-commit claims by reading, not by running.
 
+Commit 8da70aa (fix of 2a36fc7's BLOCK): VERDICT FLAG (the BLOCK is
+closed on every path but one), 5 FLAGs and a note. Folded into the next
+commit (safety direction): the one-page `fill` command now fills nothing
+on Google's host; the refusal in fill_allowed, the wizard and `fill` is by
+host on any scheme with a trailing dot stripped (`is_google_host`), while
+only the exact https address is driven and anything else on the host is
+parked; a portal that bounces straight back to Google right after the
+Google button parks the job before any email could be typed. Logged,
+already in TODO: the popup re-press on GUI resume; the ALLOWED_PERMISSIONS
+wording (Jack's confirmation). Noted: the reviewer did not run the tests
+on d72fbb6 itself.
+
+Commit e4079b3 (fold of d72fbb6's FLAGs): VERDICT FLAG, 2 FLAGs, both
+diagnostic. Logged, not folded: a re-scan that raises leaves only the
+generic "0 of N fields matched" line in the run log (fix: append
+"re-scan failed (<type name>): every field unpaired", type name only);
+the failed-re-scan test could also seed the census, marked_before and
+approvals as the unpaired test does. The reviewer verified the
+exception path now matches the unpaired path line for line and that
+the marked_before change can only shrink what counts as touched.
+
+Commit da901af (GUI item 5): VERDICT FLAG, 4 FLAGs. Folded into the next
+commit: when neither public board shows the job and the way back to the
+MyGreenhouse link fails, intake parks with that reason instead of
+recording a false step and carrying on with whatever page is showing;
+`_is_public_job` compares the path exactly (/<slug>/jobs/<id>, a
+trailing slash allowed), not as a substring; the Google-route test reads
+the email box as the page leaves, not only the step strings. Decision
+for Jack (plan deviation): the public-board lookup trusts that the
+MyGreenhouse slug is the company's board token and that Greenhouse job
+ids are global; the real-page dry run of 2026-10-19 landed on
+job-boards.greenhouse.io/inversionspace/jobs/4744391005 with a 21-field
+form, consistent with that, but it is not verified in code. Option: show
+the board page's role and company in the dry-run report before a real
+run.
+

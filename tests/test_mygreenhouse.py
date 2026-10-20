@@ -151,8 +151,14 @@ def test_with_no_public_board_the_sign_in_page_is_the_landing_and_google_signs_i
               f"the step ({landing.steps})")
         check(pages.page_kind(page) == pages.SIGN_IN and pages.fill_allowed(page, landing.url) == pages.SIGN_IN,
               "it reads as a sign-in page by its address, so nothing is filled there")
+        # The email box is read just before the Google button takes the page away
+        # (kept in sessionStorage: the job page is on the same origin).
+        page.evaluate("window.addEventListener('pagehide', () => sessionStorage.setItem('ja_email_at_leave', "
+                      "'[' + document.getElementById('email-address').value + ']'))")
         pauser = _Pauser([])
         res = _handle(page, pauser)
+        left = page.evaluate("sessionStorage.getItem('ja_email_at_leave')")
+        check(left == "[]", f"the email box was empty when the page left ({left!r})")
         check(res.status == accounts.CONTINUE and page.url == f"{MG}/jobs/acme/123?signed=1",
               f"Continue with Google gets to the job ({res.status}, {res.reason}, {page.url})")
         check("the sign-in page went away after the Google button" in res.steps and not pauser.asked
@@ -187,6 +193,23 @@ def test_without_google_the_code_sign_in_is_left_to_jack():
             raised = e
         check(raised is not None and "security code" in raised.body and not raised.hidden,
               "GUI mode: a Deferred, no hidden prompt")
+    check.done()
+
+
+def test_a_board_page_that_only_shares_the_prefix_is_not_the_job():
+    check = Checks()
+    with _context() as ctx:
+        _serve(ctx, jb=JOB, boards=None)
+        page = ctx.new_page(); page.goto(f"{JB}/acme/jobs/123")
+        check(intake._is_public_job(page, f"{JB}/acme/jobs/123", "acme", "123") is True, "the job page itself")
+        # The same job page under other paths (a server-side redirect): only the exact path counts.
+        for path, want in (("/acme/jobs/123", True), ("/acme/jobs/123/", True), ("/acme/jobs/1234", False),
+                           ("/acme/jobs/123/x", False), ("/x/acme/jobs/123", False), ("/acme/jobs/12", False)):
+            page.evaluate(f"history.replaceState(null, '', '{path}')")
+            check(intake._is_public_job(page, f"{JB}/acme/jobs/123", "acme", "123") is want,
+                  f"path {path!r} -> {want}")
+        check(intake._is_public_job(page, f"{BOARDS}/acme/jobs/123", "acme", "123") is False,
+              "another board host than the one tried is not it")
     check.done()
 
 

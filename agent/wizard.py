@@ -539,11 +539,15 @@ class Wizard:
                 raise _Parked("the tab closed")
             if not skip_fill:
                 self._captcha()
-                if google.is_google(page.url):
+                if google.is_google_host(page.url):
                     # A same-tab Google sign-in: walked by structure, or a
                     # pause; never filled, never typed into. Checked by
                     # address before anything else: a link in Google's own
-                    # host family must not make this an ordinary page.
+                    # host family must not make this an ordinary page, and
+                    # an address the driving side won't take (http, a
+                    # trailing dot) is parked, not filled.
+                    if not google.is_google(page.url):
+                        raise _Parked("Google's site on an address the agent won't drive")
                     res = accounts.on_google(page, self.prof, self.pauser)
                     self.out.events += res.events
                     self.out.log += res.steps

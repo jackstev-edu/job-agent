@@ -9,7 +9,8 @@ the class level for the whole call: a tab opens on that exact address, the
 command waits for Enter, and none of those methods is called; the mock's
 own click and key counters stay at zero. Also pins is_google to an exact
 https host (a look-alike host, userinfo, a trailing dot and the words in a
-path are all refused).
+path are all refused), and is_google_host to the host on any scheme (the
+refusal side).
 WHY IT MATTERS: The agent never touches Google's own login page (Jack,
 2026-10-19); this is the one path that opens it.
 
@@ -148,6 +149,12 @@ def test_is_google_is_exact():
                       ("https://evil.example/accounts.google.com/", False),
                       ("https://www.google.com/", False), ("", False), (None, False)):
         check(google.is_google(url) is want, f"{url!r} -> {want}")
+    for url, want in (("https://accounts.google.com/", True), ("http://accounts.google.com/x", True),
+                      ("https://accounts.google.com./", True), ("HTTPS://ACCOUNTS.GOOGLE.COM./", True),
+                      ("https://accounts.google.com@evil.example/", False),
+                      ("https://accounts.google.com.example/", False), ("https://www.google.com/", False),
+                      ("", False), (None, False)):
+        check(google.is_google_host(url) is want, f"host {url!r} -> {want}")
     check.done()
 
 

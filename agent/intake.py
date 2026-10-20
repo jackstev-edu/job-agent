@@ -85,17 +85,20 @@ def _is_public_job(page: "Page", wanted: str, slug: str, job_id: str) -> bool:
         return False
     if here.scheme != "https" or (here.hostname or "").lower() != (want.hostname or "").lower():
         return False
-    if f"/{slug}/jobs/{job_id}" not in (here.path or ""):
-        return False
+    if (here.path or "").rstrip("/") != f"/{slug}/jobs/{job_id}":
+        return False                   # exactly this job, not /jobs/1234 or /jobs/123/x
     return has_form_fields(page) or find_apply(page).get("found", 0) > 0
 
 
-def _public_board(page: "Page", original: str, slug: str, job_id: str, steps: list[str]) -> "Page":
+def _public_board(page: "Page", original: str, slug: str, job_id: str,
+                  steps: list[str]) -> "Page | None":
     """
     Try each public board address in this tab; the first that loads (200)
     and shows the job is the page from here on. Otherwise back to the
     original: MyGreenhouse's sign-in page, for accounts.py (Google, or a
-    pause for the emailed code; never a password flow).
+    pause for the emailed code; never a password flow). None if the way
+    back failed: the caller parks, rather than treating whatever is
+    showing as the landing.
     """
     for tpl in PUBLIC_BOARDS:
         cand = tpl.format(slug=slug, id=job_id)
@@ -111,7 +114,7 @@ def _public_board(page: "Page", original: str, slug: str, job_id: str, steps: li
         page.goto(original, wait_until="domcontentloaded", timeout=60_000)
         browser_mod.settle(page)
     except Exception:
-        pass
+        return None
     steps.append("no public board shows this MyGreenhouse job; its sign-in page is next")
     return page
 
@@ -263,8 +266,11 @@ def open_link(ctx: "BrowserContext", url: str, max_clicks: int = 3,
     landing.page = page
     mg = mygreenhouse_job(url)
     if mg and pages.is_mygreenhouse_sign_in(page.url):
-        page = _public_board(page, url, mg[0], mg[1], landing.steps)
-        landing.page = page
+        back = _public_board(page, url, mg[0], mg[1], landing.steps)
+        if back is None:
+            landing.parked = "couldn't get back to the MyGreenhouse link after trying the public boards"
+            return landing
+        page = landing.page = back
     last_click: tuple[str, str] | None = None
     for _ in range(max_clicks):
         board = job_board(page.url)

@@ -156,7 +156,7 @@ def fill_allowed(page: "Page", start_url: str, seen: dict | None = None) -> str 
             return LINKEDIN
         # Google's own site is never filled, whatever host family the link
         # is in (a careers.google.com link shares Google's family).
-        if google.is_google(url):
+        if google.is_google_host(url):
             return OFF_HOST
         # No host on either side (a missing start, about:blank, a local
         # file) is never "the same site".

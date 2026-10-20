@@ -60,8 +60,25 @@ STEP_CAP = 4
 _ATTR = "data-ja-google"
 
 
+def is_google_host(url: str) -> bool:
+    """
+    The host is accounts.google.com on any scheme, a trailing dot stripped:
+    the refusal side (never filled), wider than the driving side below.
+    """
+    try:
+        parts = urlparse(url or "")
+    except Exception:
+        return False
+    return (parts.hostname or "").lower().rstrip(".") == HOST
+
+
 def is_google(url: str) -> bool:
-    """Exactly accounts.google.com over https: not a look-alike host or a path holding the words."""
+    """
+    Exactly accounts.google.com over https, as written: the driving side
+    (a chooser entry or Continue may be pressed). Not a look-alike host,
+    not userinfo, not a path holding the words, not http, not a trailing
+    dot; those are refused by is_google_host and never driven.
+    """
     try:
         parts = urlparse(url or "")
     except Exception:
