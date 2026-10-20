@@ -1439,6 +1439,9 @@ def cmd_snapshot(args) -> None:
         print("Press Enter here when the page you want is showing (or to give up).")
         input()
         target = ctx.pages[-1] if ctx.pages else page
+        if google.is_google_host(target.url):
+            print(f"{RED}That tab is on Google's site: nothing there is dumped.{OFF}")
+            return
         snap = snapshot.dump(target, prof.data)
         path = snapshot.write(snap, args.name)
     print(f"{GREEN}Wrote {path}{OFF} {DIM}({len(snap['elements'])} elements of {snap['total_matched']} matched; "

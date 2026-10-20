@@ -1766,3 +1766,23 @@ record, never in gate_runs; the new guarantee is for reason); a
 dropdown whose committed display wasn't found reads as
 read_back_mismatch, the text-box category (a "display_unconfirmed"
 category would be truer).
+
+Commit dd3fe3a (item 1, the snapshot): VERDICT FLAG, 1 high, 1 medium,
+5 low. Folded in the next commit (the item says EVERY input value is
+removed): a dropdown button's own text and aria-label show its committed
+choice (a chosen gender, country, state), so an element with
+aria-haspopup, a combobox / listbox / option / textbox role, or a button
+inside a Workday formField container now dumps no text and no
+aria-label (its label, shape and other aria attributes stay); a label's
+text is taken from a clone with every value-holding descendant (inputs,
+editors, dropdown buttons) removed, so a label wrapping an editor keeps
+its own words only; `apply.py snapshot` refuses a tab on Google's host;
+the unused _VALUE_ATTRS constant is gone; the time stamp is added after
+the strip (a bare year in the profile redacted it); frame and
+shadow-host counts are recorded so a thin dump is explained; the
+"no value key" and password checks are real now, with fixtures for the
+chosen-gender button and the editor. Logged, accepted (over-redaction,
+safe direction): a 3+ character profile value such as "None" or a title
+redacts every string containing it; values under 3 characters are never
+stripped.
+

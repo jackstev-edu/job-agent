@@ -53,6 +53,9 @@ PAGE.write_text("""<!doctype html><html><head><meta charset="utf-8"><title>My In
   <div data-automation-id="countryPhoneCode"><input id="cc" data-automation-id="searchBox" placeholder="Search" aria-valuetext="+1"></div>
   <label for="ph">Phone Number</label><input id="ph" data-automation-id="phone-number" value="(555) 824-9000">
 </div>
+<div data-automation-id="formField-gender"><label for="gd">Gender</label>
+  <button id="gd" data-automation-id="gender" aria-haspopup="listbox" aria-label="Gender CHOSEN-GENDER-SENTINEL">CHOSEN-GENDER-SENTINEL</button></div>
+<label for="cl">Cover letter <div id="cl" contenteditable="true">TYPED-EDITOR-SENTINEL</div></label>
 <label for="st">State</label><select id="st" name="state"><option>Select One</option><option>Springfield</option><option>Ohio</option></select>
 <label for="em">Email Address for test.person@example.invalid</label><input id="em" type="email" value="test.person@example.invalid">
 <label for="hp" style="display:none">Enter website. This input is for robots only, do not enter if you're human.</label>
@@ -87,7 +90,7 @@ def test_a_dump_holds_structure_and_no_value_from_the_profile_the_boxes_or_the_h
         check(path.parent == TEST_HOME / "snapshots" and path.name.startswith("test-page-"), f"written under snapshots/ ({path})")
         banned = ["Testfirst", "Testlast", "test.person", "example.invalid", "5558249000", "555) 824", "824-9000",
                   "Springfield", "43210", "Example Lane", "Example Widgets", VALUE_IN_BOX, "hunter2", "Account Settings",
-                  "userName"]
+                  "userName", "CHOSEN-GENDER-SENTINEL", "TYPED-EDITOR-SENTINEL", "Mobile"]
         for b in banned:
             check(b.lower() not in text.lower(), f"{b!r} is nowhere in the dump")
         ids = [e.get("automation_id") for e in d["elements"]]
@@ -99,10 +102,19 @@ def test_a_dump_holds_structure_and_no_value_from_the_profile_the_boxes_or_the_h
               f"required, visible, aria kept ({first['required']}, {first['visible']}, {first['aria']})")
         check(any("legalNameSection" in c for c in first["chain"]) and any(c.startswith("main") for c in first["chain"]),
               f"the container chain, with automation ids ({first['chain'][:4]})")
-        check("value" not in first and "value" not in json.dumps(d["elements"]).replace('"aria-valuetext"', ""),
-              "no value key anywhere")
+        check(not any("value" in e for e in d["elements"]), "no element has a value key")
         dev = next(e for e in d["elements"] if e.get("automation_id") == "phone-device-type")
-        check(dev["aria"].get("aria-haspopup") == "listbox" and dev["text"] == "Mobile", f"a button-dropdown's shape ({dev['aria']}, {dev['text']})")
+        check(dev["aria"].get("aria-haspopup") == "listbox" and dev["text"] == "" and "aria-label" not in dev["aria"]
+              and dev["chooser"] is True and dev["label"] == "Phone Device Type",
+              f"a button-dropdown keeps its shape and label, not its choice or aria-label ({dev['aria']}, {dev['text']!r}, {dev['label']!r})")
+        gd = next(e for e in d["elements"] if e.get("automation_id") == "gender")
+        check(gd["text"] == "" and "aria-label" not in gd["aria"] and gd["label"] == "Gender",
+              f"a chosen EEO value on a dropdown button is nowhere ({gd})")
+        cl = next(e for e in d["elements"] if e.get("id") == "cl")
+        check(cl["label"] == "Cover letter" and cl["text"] == "", f"a label wrapping an editor keeps its own words only ({cl['label']!r}, {cl['text']!r})")
+        nxt = next(e for e in d["elements"] if e.get("automation_id") == "bottom-navigation-next-button")
+        check(nxt["text"] == "Save and Continue" and nxt["chooser"] is False, f"a plain button keeps its wording ({nxt['text']!r})")
+        check(d["frames"] == 0 and d["shadow_hosts"] == 0 and "taken" in d, "frame and shadow-host counts, and the time, are recorded")
         cc = next(e for e in d["elements"] if e.get("automation_id") == "searchBox")
         check("aria-valuetext" not in cc["aria"], "aria-valuetext is never dumped")
         state = next(e for e in d["elements"] if e.get("name") == "state")

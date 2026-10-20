@@ -4,7 +4,9 @@ snapshot.py — a structure dump of the page the agent's browser is on, with no 
 WHAT THIS DOES: Reads the structure of a page (tag, type, role, aria-*,
 data-automation-id, name, id, label text, required, visibility, the
 container chain) for every control, label and automation-id element,
-skipping the header / account area, reading no input value, and then
+skipping the header / account area, reading no input value (a dropdown
+button's own text and aria-label, which show its choice, and anything a
+label wraps that holds a value, are left out too), and then
 strips from the whole dump every string that equals or contains a value
 from the profile (which `apply.py snapshot` loads at run time; the dump is
 written to the repo's gitignored snapshots/ folder). WHY IT MATTERS:
@@ -32,9 +34,6 @@ SNAPSHOTS_DIR = config.ROOT / "snapshots"
 REDACTED = "[profile]"
 MIN_VALUE_CHARS = 3            # shorter profile values ("CA", "US") would blank every page
 MIN_VALUE_DIGITS = 7           # a phone or postal number, read through its digits
-# Attributes that carry a value rather than structure: never dumped.
-_VALUE_ATTRS = ("value", "aria-valuenow", "aria-valuetext", "placeholder-value", "defaultvalue")
-
 # Every control, label and Workday-tagged element, outside the header /
 # account area; each as structure only. No .value, no option values, no
 # text of anything but labels, legends, buttons and options (page
@@ -63,19 +62,38 @@ _DUMP_JS = r"""
     return out.slice(0, limits.chain);
   };
   const byId = id => document.getElementById(id);
+  // Anything that holds what was typed or chosen: never part of a label's
+  // text, never dumped as text itself.
+  const HOLDS_VALUE = 'input, textarea, select, button, [contenteditable], [role=combobox], [role=textbox],'
+                    + ' [role=listbox], [role=option], [aria-haspopup]';
+  const holdsValue = el => el.matches(HOLDS_VALUE);
+  // A label's own words: a clone with every value-holding descendant removed.
+  const cleanText = node => {
+    if (!node) return '';
+    const c = node.cloneNode(true);
+    c.querySelectorAll(HOLDS_VALUE).forEach(e => e.remove());
+    return norm(c.textContent);
+  };
   const labelOf = el => {
-    const al = el.getAttribute('aria-label'); if (al) return norm(al);
+    const al = el.getAttribute('aria-label'); if (al && !holdsValue(el)) return norm(al);
     const lb = el.getAttribute('aria-labelledby');
-    if (lb) { const t = norm(lb.split(/\s+/).map(i => byId(i)?.innerText || '').join(' ')); if (t) return t; }
-    if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) return norm(l.innerText); }
-    const w = el.closest('label'); if (w) return norm(w.innerText);
+    if (lb) { const t = norm(lb.split(/\s+/).map(i => cleanText(byId(i))).join(' ')); if (t) return t; }
+    if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) return cleanText(l); }
+    const w = el.closest('label'); if (w) return cleanText(w);
     let p = el.parentElement;
     for (let i = 0; i < 4 && p; i++, p = p.parentElement) {
-      const n = p.querySelector(':scope > legend, :scope > label, :scope > .label'); if (n) return norm(n.innerText);
+      const n = p.querySelector(':scope > legend, :scope > label, :scope > .label'); if (n) return cleanText(n);
     }
     return '';
   };
-  const TEXTUAL = new Set(['label', 'legend', 'button', 'a', 'option', 'h1', 'h2', 'h3', 'h4', 'summary', 'th']);
+  // Elements whose text is page wording, not a value. A button that is a
+  // dropdown (aria-haspopup, role=combobox) shows its committed choice as
+  // its text and often in aria-label: neither is dumped (a chosen gender,
+  // country or state is a value).
+  const TEXTUAL = new Set(['label', 'legend', 'a', 'option', 'h1', 'h2', 'h3', 'h4', 'summary', 'th']);
+  const isChooser = el => el.hasAttribute('aria-haspopup') || ['combobox', 'listbox', 'option', 'textbox'].includes(el.getAttribute('role') || '')
+                      || (el.tagName === 'BUTTON' && !!el.closest('[data-automation-id^="formField"]'));
+  const plainButton = el => el.tagName === 'BUTTON' && !isChooser(el);
   const sel = 'input, select, textarea, button, [role], [data-automation-id], label, legend, fieldset, a[href],'
             + ' [aria-haspopup], [contenteditable], h1, h2, h3, h4';
   const out = [];
@@ -83,17 +101,21 @@ _DUMP_JS = r"""
   for (let i = 0; i < els.length && out.length < limits.elements; i++) {
     const el = els[i];
     if (el.closest(SKIP)) continue;
+    const tag = el.tagName.toLowerCase();
+    const chooser = isChooser(el);
     const aria = {};
     for (const a of el.attributes) {
-      if (a.name.startsWith('aria-') && !['aria-valuenow', 'aria-valuetext'].includes(a.name)) aria[a.name] = norm(a.value);
+      if (!a.name.startsWith('aria-') || ['aria-valuenow', 'aria-valuetext'].includes(a.name)) continue;
+      if (a.name === 'aria-label' && (chooser || holdsValue(el))) continue;   // may carry the choice or the value
+      aria[a.name] = norm(a.value);
     }
-    const tag = el.tagName.toLowerCase();
     const entry = {
       i: out.length, tag, type: el.getAttribute('type') || null, role: el.getAttribute('role') || null,
       automation_id: el.getAttribute('data-automation-id') || null,
       name: el.getAttribute('name') || null, id: el.id || null,
-      label: ['input', 'select', 'textarea'].includes(tag) || el.getAttribute('role') ? labelOf(el) : '',
-      text: TEXTUAL.has(tag) ? norm(el.innerText) : '',
+      label: ['input', 'select', 'textarea'].includes(tag) || el.getAttribute('role') || chooser || el.hasAttribute('contenteditable') ? labelOf(el) : '',
+      text: TEXTUAL.has(tag) ? cleanText(el) : plainButton(el) ? cleanText(el) : '',
+      chooser,
       required: el.required === true || el.getAttribute('aria-required') === 'true' || el.hasAttribute('required'),
       disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
       readonly: el.readOnly === true || el.getAttribute('readonly') !== null,
@@ -104,7 +126,9 @@ _DUMP_JS = r"""
     if (tag === 'input' && (el.getAttribute('type') || '').toLowerCase() === 'file') entry.accept = el.getAttribute('accept') || null;
     out.push(entry);
   }
-  return {title: norm(document.title), elements: out, total: els.length};
+  return {title: norm(document.title), elements: out, total: els.length,
+          frames: document.querySelectorAll('iframe, frame').length,
+          shadow_hosts: [...document.querySelectorAll('*')].filter(e => e.shadowRoot).length};
 }
 """
 
@@ -173,14 +197,17 @@ def dump(page: "Page", profile_data: Any) -> dict:
         got = {"title": "", "elements": [], "total": 0}
     parts = urlsplit(page.url)
     out = {
-        "taken": datetime.now().isoformat(timespec="seconds"),
         "url": f"{parts.scheme}://{parts.hostname or ''}{parts.path}",   # no query, no fragment
         "title": got.get("title", ""),
         "total_matched": got.get("total", 0),
+        "frames": got.get("frames", 0),               # not dumped: the main frame's light DOM only
+        "shadow_hosts": got.get("shadow_hosts", 0),   # open roots not dumped either
         "elements": got.get("elements") or [],
     }
     texts, digits = profile_values(profile_data)
-    return strip_values(out, texts, digits)
+    out = strip_values(out, texts, digits)
+    out["taken"] = datetime.now().isoformat(timespec="seconds")   # after the strip: a year is often a profile value
+    return out
 
 
 def write(snapshot: dict, name: str | None = None, folder: Path | None = None) -> Path:
