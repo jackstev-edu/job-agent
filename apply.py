@@ -1085,7 +1085,7 @@ def dry_report(landing: "intake.Landing", ats: str) -> tuple[str, bool, int]:
 
 
 def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
-            new_tab: bool = False, report_to=None) -> tuple[str, str]:
+            new_tab: bool = False, report_to=None, on_pause=None, on_wait=None) -> tuple[str, str]:
     """
     One link, end to end: open it, click Apply, follow to the form, detect
     the portal, then the wizard (accounts, every page, the gate, Submit).
@@ -1094,6 +1094,9 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
     filled, signed in to, or submitted, and the tracker isn't written.
     `report_to(dict)`, if given, is told the landing (company, role,
     portal, final URL, and for a dry run whether a form was found).
+    `on_pause(info)` and `on_wait(wizard, finish)` serve GUI mode: a
+    deferred pause tells the page what to show, and the waiting Wizard is
+    kept to be resumed when Jack presses Continue.
     """
     pauser = pauser or pause.Pauser()
     landing = intake.open_link(ctx, url, new_tab=new_tab)
@@ -1128,14 +1131,34 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
         submitted_today = tracker.agent_submissions_today()
     except Exception:
         submitted_today = None
+    finish = {"url": url, "company": company, "role": role, "ats": ats,
+              "portal": landing.portal, "portal_method": landing.portal_method,
+              "resume": str(prof.resume_path(args.resume) or "")}
     out = wizard.run_application(
         page, prof, url=url, portal=landing.portal, portal_method=landing.portal_method,
         company=company, role=role, resume=prof.resume_path(args.resume),
         posting_text=posting_text, pauser=pauser, echo=print,
         agent_submissions_today=submitted_today,
-        reload_profile=lambda: Profile.load(args.profile))
+        reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause)
+    return finish_outcome(out, finish, on_wait=on_wait)
+
+
+def finish_outcome(out, finish: dict, *, on_wait=None) -> tuple[str, str]:
+    """
+    What happens once the wizard returns: a waiting job (GUI mode) is
+    logged as needs-you with its reason and handed to `on_wait` with its
+    Wizard, to be resumed later; anything else gets the review sheet, the
+    tracker row, the gate-run row and the evidence.
+    """
+    url, company, role, ats = finish["url"], finish["company"], finish["role"], finish["ats"]
     for line in out.log:
         print(f"{DIM}  {line}{OFF}")
+    if out.status == wizard.WAITING:
+        tracker.record(url, company=company, role=role, ats=ats, resume_used=finish["resume"],
+                       answers=out.rows, flags=out.flags, status=NEEDS_YOU, notes=out.reason)
+        if on_wait is not None and out.wizard is not None:
+            on_wait(out.wizard, finish)
+        return NEEDS_YOU, out.reason
     _print_summary(out.rows, out.flags)
     sheet = None
     try:
@@ -1145,12 +1168,12 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
         print(f"{DIM}  couldn't write the review sheet ({type(e).__name__}){OFF}")
     status = out.status if out.status in ("submitted", NEEDS_YOU, FAILED) else NEEDS_YOU
     tracker.record(url, company=company, role=role, ats=ats,
-                   resume_used=str(prof.resume_path(args.resume) or ""), answers=out.rows,
+                   resume_used=finish["resume"], answers=out.rows,
                    flags=out.flags, report_path=str(sheet or ""), status=status, notes=out.reason)
     if out.record is not None and out.gate_result is not None:
         try:
             run_id = tracker.record_gate_run(
-                url, portal=landing.portal, portal_method=landing.portal_method,
+                url, portal=finish["portal"], portal_method=finish["portal_method"],
                 result=out.gate_result, record_json=shadow.redacted(out.record, out.gate_result),
                 agent_submitted=(status == "submitted"))
             if status == "submitted":
@@ -1218,8 +1241,12 @@ def cmd_run(args) -> None:
         pass
 
 
-def _ready_to_fill(prof, force: bool) -> bool:
-    """The profile and the API key, checked once before anything is filled."""
+def _ready_to_fill(prof, force: bool, *, exit_on_key: bool = True) -> bool:
+    """
+    The profile and the API key, checked once before anything is filled.
+    `run` exits on a bad key; the GUI (`exit_on_key=False`) keeps its
+    browser and page up and fails the job instead.
+    """
     blocking = prof.audit()["required"]
     if blocking and not force:
         print(f"{RED}{len(blocking)} required profile field(s) are blank.{OFF} "
@@ -1229,7 +1256,9 @@ def _ready_to_fill(prof, force: bool) -> bool:
     if status in ("rejected", "missing"):
         print(f"{RED}Anthropic API key {'rejected' if status == 'rejected' else 'not found'}"
               f"{OFF} ({detail}). Set a new ANTHROPIC_API_KEY and try again.")
-        sys.exit(1)
+        if exit_on_key:
+            sys.exit(1)
+        return False
     return True
 
 
@@ -1240,16 +1269,18 @@ GUI_POLL_S = 0.5
 
 
 def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=time.monotonic,
-             idle_limit_s: float | None = None) -> None:
+             idle_limit_s: float | None = None, waiting: dict | None = None) -> None:
     """
     The queue loop behind `apply.py gui`, on the main thread (Playwright's):
-    take queued jobs from the GUI one at a time, each in its own tab, and
-    report where each one got to. Ends when the page asks to close the
-    browser, or after `idle_limit_s` with nothing queued (tests). Item 2
-    makes pauses non-blocking; until then a job that needs Jack pauses in
-    the terminal, as `run` does.
+    take queued jobs from the GUI one at a time, each in its own tab; a job
+    that needs Jack is deferred (its Wizard kept in `waiting`, its tab left
+    open and filled) and resumed, in that tab, when Jack presses Continue
+    in the GUI; the queue carries on meanwhile. No timeout. Ends when the
+    page asks to close the browser, or after `idle_limit_s` with nothing
+    queued or resumable (tests).
     """
     run = run or run_one
+    waiting = {} if waiting is None else waiting
     last_busy = clock()
     while True:
         if state.close_browser:
@@ -1257,6 +1288,22 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
         if state.google_login:
             state.google_login = False
             state.notice = "Google login arrives with item 3 of docs/PLAN-gui.md"
+        for job_id in state.resumable():
+            info = state.take_resume(job_id)
+            kept = waiting.pop(job_id, None)
+            if kept is None:
+                state.update(job_id, status=FAILED, reason="nothing to resume for this job")
+                continue
+            wiz, finish = kept
+            try:
+                status, reason = finish_outcome(
+                    wiz.continue_from(info), finish,
+                    on_wait=lambda w, f, j=job_id: waiting.__setitem__(j, (w, f)))
+            except Exception as e:
+                status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
+                _park(finish["url"], reason, status=FAILED)
+            state.update(job_id, status=status, reason=reason)
+            last_busy = clock()
         job = state.next_queued()
         if job is None:
             if idle_limit_s is not None and clock() - last_busy > idle_limit_s:
@@ -1264,16 +1311,32 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
             time.sleep(GUI_POLL_S)
             continue
         last_busy = clock()
+        existing = tracker.find(job.url)
+        if (existing and not job.dry and not getattr(args, "force", False)
+                and existing["status"] not in (NEEDS_YOU, "draft")):
+            # As `run` does: a link already sent isn't applied to twice.
+            state.update(job.id, status="skipped",
+                         reason=f"already logged: {existing['status']} on "
+                                f"{(existing['created_at'] or '')[:10]}; use --force to redo")
+            continue
         job_args = Namespace(profile=args.profile, resume=getattr(args, "resume", None),
-                             force=True, dry=job.dry or bool(getattr(args, "dry", False)))
+                             force=bool(getattr(args, "force", False)),
+                             dry=job.dry or bool(getattr(args, "dry", False)))
+        job_pauser = pauser if job.dry else pause.GuiPauser(notify_fn=getattr(pauser, "notify_fn", None))
         try:
-            status, reason = run(ctx, job.url, prof, job_args, pauser, new_tab=True,
-                                 report_to=lambda facts, j=job: state.update(j.id, **facts))
+            status, reason = run(
+                ctx, job.url, prof, job_args, job_pauser, new_tab=True,
+                report_to=lambda facts, j=job: state.update(j.id, **facts),
+                on_pause=lambda info, j=job: state.set_pause(
+                    j.id, info.get("kind", ""), info.get("message", ""), info.get("fields") or [],
+                    wants_code=bool(info.get("wants_code"))),
+                on_wait=lambda w, f, j=job: waiting.__setitem__(j.id, (w, f)))
         except Exception as e:
             status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
             if not job.dry:
                 _park(job.url, reason, status=FAILED)
-        state.update(job.id, status=status, reason=reason)
+        if job.id not in waiting:
+            state.update(job.id, status=status, reason=reason)
         last_busy = clock()
 
 
@@ -1284,7 +1347,8 @@ def cmd_gui(args) -> None:
     state = gui.State()
     server = gui.Server(state).start()
     print(f"\n{BOLD}GUI:{OFF} {server.url}")
-    print(f"{DIM}Paste links there. Dry run fills nothing. Close the browser from the page.{OFF}")
+    print(f"{DIM}Paste links there. A job that needs you waits in its tab until you press "
+          f"Continue; close the browser from the page.{OFF}")
     try:
         webbrowser.open(server.url)
     except Exception:
@@ -1300,7 +1364,7 @@ def cmd_gui(args) -> None:
 
             def run_checked(ctx, url, prof, job_args, pauser, **kw):
                 if not job_args.dry and checked["ok"] is None:
-                    checked["ok"] = _ready_to_fill(prof, True)
+                    checked["ok"] = _ready_to_fill(prof, bool(args.force), exit_on_key=False)
                 if not job_args.dry and not checked["ok"]:
                     return FAILED, "the profile isn't ready (see the terminal)"
                 return run_one(ctx, url, prof, job_args, pauser, **kw)
@@ -1423,6 +1487,8 @@ def main() -> None:
     p_gui = sub.add_parser("gui", help="a local page to paste links into and watch each one")
     p_gui.add_argument("--resume", default=None, help="variant key from profile.yaml")
     p_gui.add_argument("--dry", action="store_true", help="every job a dry run")
+    p_gui.add_argument("--force", action="store_true",
+                       help="redo links already logged; ignore profile warnings")
     p_gui.set_defaults(fn=cmd_gui)
 
     sub.add_parser("applied", help="every link run has logged, with its status"

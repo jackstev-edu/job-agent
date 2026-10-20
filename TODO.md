@@ -1172,3 +1172,14 @@ into the items as they land: the CSP gains style-src (item 1); only
 and tested (item 4); the threat-model line will say no sync upload is
 possible and the session cookies go only to Google hosts (item 3); the
 two Enter / terminal sentences are rewritten in item 2.
+
+Commit fcd44d4 (GUI item 1): VERDICT FLAG, 8 FLAGs. Folded into item 2's
+commit (safety-relevant): the GUI skips a link already logged past draft
+unless --force (no duplicate application); `gui` takes --force and the
+profile audit honours it; a bad API key fails the job instead of exiting
+the GUI; State judges approvability itself from the gate's own inputs
+(raw field, category, decision, result), never from a caller's flag; the
+dry-run test's model stand-ins now raise. Also folded: wait_for removed,
+a negative Content-Length clamped, the token compared in constant time.
+Noted: the server-only tests pass on the previous commit only with gui.py
+carried along; the apply-dependent ones fail there.

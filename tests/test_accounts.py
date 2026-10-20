@@ -163,7 +163,7 @@ class _Pauser(pause.Pauser):
         self.answers = list(answers)
         self.asked: list[tuple[str, bool]] = []
 
-    def wait(self, title, body, *, prompt, hidden=False, until=None):
+    def wait(self, title, body, *, prompt, hidden=False, until=None, wants_code=False):
         self.asked.append((body, hidden))
         if not self.answers:
             return None, pause.TIMED_OUT

@@ -498,7 +498,35 @@ def sign_in(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
         if pages.page_kind(page) != pages.SIGN_IN:
             return Result(PARKED, "the account page didn't lead anywhere the agent can sign in",
                           res.steps, res.events)
+    if getattr(pauser, "deferring", False):
+        # GUI mode: no password passes through the GUI, so no reset is
+        # requested; Jack signs in in this tab himself (Jack, 2026-10-19).
+        pauser.wait("job-agent needs you",
+                    "This portal wants a sign-in the agent can't do here. Sign in yourself in "
+                    "this tab, then press Continue.", prompt="", hidden=True)
+        return res
     return forgot_password(page, prof, pauser, res)
+
+
+def enter_code(page: "Page", code: str, steps: list[str]) -> bool:
+    """
+    Type a verification code Jack gave into the one one-time-code box and
+    press Verify. The code is typed, never logged; True if it was typed.
+    """
+    code = str(code or "").strip()
+    if not code or pages.page_kind(page) != pages.VERIFICATION:
+        return False
+    try:
+        n = page.evaluate(_CODE_BOX_JS, _CODE_ATTR)
+    except Exception:
+        n = 0
+    if n != 1 or not _fill_text(page, _CODE_ATTR, "1", code):
+        return False
+    steps.append("typed the code you gave")
+    pressed = _press(page, VERIFY_WORDS, pages.VERIFICATION, "Verify")
+    if pressed is not None:
+        steps.append(f"pressed '{pressed}'")
+    return True
 
 
 def verify(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
@@ -509,20 +537,12 @@ def verify(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     res.events.append({"kind": "verification", "detail": "paused for Jack", "handled": "jack"})
     code, how = pauser.wait(
         "job-agent needs you",
-        f"A verification code or link was sent to {_email(prof)}. Paste the code in the "
-        f"terminal, or finish the step in the browser.",
-        prompt="Verification code: ",
+        f"A verification code or link was sent to {_email(prof)}. Paste the code, or finish "
+        f"the step in the browser.",
+        prompt="Verification code: ", wants_code=True,
         until=lambda: pages.page_kind(page) != pages.VERIFICATION)
     if code is not None and code.strip():
-        try:
-            n = page.evaluate(_CODE_BOX_JS, _CODE_ATTR)
-        except Exception:
-            n = 0
-        if n == 1 and _fill_text(page, _CODE_ATTR, "1", code.strip()):
-            res.steps.append("typed the code you pasted")
-            pressed = _press(page, VERIFY_WORDS, pages.VERIFICATION, "Verify")
-            if pressed is not None:
-                res.steps.append(f"pressed '{pressed}'")
+        enter_code(page, code, res.steps)
     if pages.page_kind(page) == pages.VERIFICATION:
         return Result(PARKED, f"verification: still waiting ({how})", res.steps, res.events)
     return res

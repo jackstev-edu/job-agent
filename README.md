@@ -136,7 +136,16 @@ python apply.py needs-you                      # the parked ones, and why
 
 `gui` serves one page on 127.0.0.1 (a random port, printed) and opens it
 in your browser: paste links, press Start, and each row shows the company,
-role, portal and live status. The page talks only to that port, checks the
+role, portal and live status. A job that needs you turns amber and chimes;
+its tab stays open with everything filled, with no time limit, while the
+queue carries on in other tabs. The row says why, lists each stopped field
+with its reason and, for an ordinary field the agent filled, the value the
+page holds with an approve tick (never a legal, EEO, pay, consent,
+per-company, checkbox or password field); a verification pause shows a
+box for the code. Continue resumes that tab from where it stopped: a field
+you typed into there, or ticked in the GUI while the page still holds that
+value, counts as yours; Continue alone approves nothing. The browser closes
+only from the page's Close button (it asks first if a job is waiting). The page talks only to that port, checks the
 Host and Origin of every request, needs a per-session token for every
 change, and renders everything from the job pages as plain text. A dry run
 (the toggle on the page, or `run --dry`) opens the link, clicks Apply,
@@ -156,12 +165,12 @@ and presses Submit. Then it records the confirmation.
 
 It pauses, with a Windows notification and a prompt, for: verification
 codes or links, CAPTCHAs, legal / EEO / pay questions your profile can't
-answer, a forgot-password reset, and anything else the gate stops on. You
-have fifteen minutes to paste the code or password, or finish the step in
-the browser and press Enter. After a pause, a field you typed into counts
-as your answer; one the page filled in by itself does not. On timeout the
-link is parked as `needs_you` with the reason and `run` moves to the next
-link. LinkedIn Easy Apply and Handshake's own applications are refused and
+answer, a forgot-password reset, and anything else the gate stops on. In
+the terminal (`run`) you paste the code or password, or finish the step in
+the browser and press Enter; there is no time limit. After a pause, a
+field you typed into counts as your answer; one the page filled in by
+itself does not. In the GUI the pause is a row state, and nothing waits
+in the terminal. LinkedIn Easy Apply and Handshake's own applications are refused and
 parked; an Apply that leaves those sites is followed.
 
 Never ticked: marketing, newsletter, SMS or talent-community boxes. A

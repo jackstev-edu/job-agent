@@ -109,7 +109,7 @@ class _Jack(pause.Pauser):
         super().__init__(notify_fn=lambda t, b, echo=print: None, echo=lambda *a, **k: None)
         self.page, self.act, self.bodies, self.how = page, act, [], how
 
-    def wait(self, title, body, *, prompt, hidden=False, until=None):
+    def wait(self, title, body, *, prompt, hidden=False, until=None, wants_code=False):
         self.bodies.append(body)
         if self.act is None:
             return None, self.how
@@ -247,7 +247,7 @@ def test_a_field_the_filler_filled_is_not_reviewed_at_a_pause():
           f"the filler's own untouched answer keeps its stop ({out.status}, {out.reason})")
     check(clicks == [] and url.endswith("/apply"), f"Next never pressed on page one ({clicks}, {url})")
     pauses = [e for e in out.events if e["kind"] == "gate_pause"]
-    check(pauses and all(e.get("handled") == "jack" and e.get("detail") == "0 field(s) touched by Jack"
+    check(pauses and all(e.get("handled") == "jack" and str(e.get("detail", "")).startswith("0 field(s) touched by Jack")
                          for e in pauses),
           f"the pause was Jack's, but it reviewed nothing ({pauses})")
     check.done()
@@ -308,7 +308,7 @@ def test_a_field_the_filler_typed_and_the_page_changed_is_not_jacks():
     check(em2 and em2[0] not in reviewed,
           f"the email the filler typed and the page rewrote is not his ({em2}, {reviewed})")
     detail = next(e["detail"] for e in out.events if e["kind"] == "gate_pause")
-    check(detail == "1 field(s) touched by Jack", f"one touch counted, the filler's not ({detail})")
+    check(detail.startswith("1 field(s) touched by Jack"), f"one touch counted, the filler's not ({detail})")
     check.done()
 
 
@@ -342,13 +342,27 @@ def test_the_final_pause_and_the_record_merge_on_their_own():
                               portal_method="default", company="", role="", resume=None,
                               posting_text="", pauser=_Jack(page, None, pause.NO_TERMINAL),
                               echo=lambda *a, **k: None, reload_profile=lambda: (_ for _ in ()).throw(AssertionError("reloaded")))
-            w._final_pause(type("S", (), {"reason": "the gate stopped: x"})())
-            check(w.out.events[-1]["kind"] == "gate_pause" and w.out.events[-1]["handled"] is None,
-                  "a no_terminal final pause is logged unhandled (so the gate stops) and reloads nothing")
+            # The final pause lives in _submit: a stand-in submit step says the
+            # gate stopped; a no_terminal pause is logged unhandled and the
+            # second attempt still stops; an answered one is Jack's.
+            from agent import submit as submit_mod
+            calls = {"n": 0}
+
+            def fake_submit(page_, record, prof, **kw):
+                calls["n"] += 1
+                return submit_mod.Submission("needs_you", "the gate stopped: x", {"content_reasons": []})
+            w.reload_profile = None
+            with mock.patch.object(submit_mod, "submit_application", fake_submit):
+                out = w._submit(None)
+            pauses = [e for e in w.out.events if e["kind"] == "gate_pause"]
+            check(out.status == "needs_you" and calls["n"] == 2 and pauses
+                  and pauses[-1]["handled"] is None,
+                  f"a no_terminal final pause is logged unhandled and nothing is submitted ({pauses})")
             w.pauser = _Jack(page, lambda pg, body: None)      # Jack answers this time
-            w.reload_profile = lambda: _profile()
-            w._final_pause(type("S", (), {"reason": "the gate stopped: x"})())
-            check(w.out.events[-1]["handled"] == "jack", "an answered final pause is Jack's")
+            with mock.patch.object(submit_mod, "submit_application", fake_submit):
+                w._submit(None)
+            check([e for e in w.out.events if e["kind"] == "gate_pause"][-1]["handled"] == "jack",
+                  "an answered final pause is Jack's")
             # The merge: an Ashby pair on an earlier page, answered Yes: its
             # hidden box read unticked before the fill and ticked after. With
             # both states in the final record the gate's pair exemption holds;
@@ -402,11 +416,11 @@ def test_the_final_pause_and_the_record_merge_on_their_own():
                 calls["n"] += 1
                 return None if calls["n"] == 1 else real(refs)
             w2._marked = flaky
-            w2._gate_pause(fill, {"content_reasons": ["'A': left blank"]})
+            w2._pause_and_review(fill, {"content_reasons": ["'A': left blank"]})
             check(page.evaluate(f"document.getElementById('a').hasAttribute('{ledger.TOUCH_ATTR}')"),
                   "the mark is on the field (so the next check means something)")
             check(fields[0]["ref"] not in w2.human_reviewed
-                  and w2.out.events[-1]["detail"] == "0 field(s) touched by Jack",
+                  and str(w2.out.events[-1]["detail"]).startswith("0 field(s) touched by Jack"),
                   f"with the before-read failed, no mark counts as new ({w2.out.events[-1]})")
             # A failed read-back after the pause: only a touch of Jack's counts.
             page.set_content("<form><label for='a'>A</label><input id='a' name='a'>"
@@ -421,7 +435,7 @@ def test_the_final_pause_and_the_record_merge_on_their_own():
             fill.snapshot = {fields[0]["ref"]: "", fields[1]["ref"]: ""}
             fill.step = {"results": {}}
             with mock.patch.object(extract, "snapshot", side_effect=RuntimeError("mid-navigation")):
-                w3._gate_pause(fill, {"content_reasons": ["'A': left blank"]})
+                w3._pause_and_review(fill, {"content_reasons": ["'A': left blank"]})
             check(w3.human_reviewed == [] and fill.snapshot == {fields[0]["ref"]: "", fields[1]["ref"]: ""},
                   f"an unreadable read-back reviews nothing and keeps the old snapshot ({w3.human_reviewed})")
         finally:

@@ -157,13 +157,18 @@ def test_only_ordinary_filled_fields_get_an_approve_tick():
     # And through the State: a non-approvable field's value never appears in /state.
     state = gui.State()
     [job_id] = state.start(["https://a.example/2"], dry=False)
+    raw_ok = {"field": plain, "category": "personal_fact", "decision": decision, "result": filled}
+    raw_eeo = {"field": {"ref": "f3", "type": "select", "label": "Veteran status"},
+               "category": "personal_fact", "decision": decision, "result": filled}
     state.set_pause(job_id, "gate", "needs you", fields=[
-        {"ref": "f1", "label": "City", "reason": "left blank", "approvable": True, "value": "Springfield"},
-        {"ref": "f3", "label": "Veteran status", "reason": "not traced", "approvable": False,
-         "value": "SENTINEL-EEO-VALUE"}])
+        {"ref": "f1", "label": "City", "reason": "left blank", "value": "Springfield", "raw": raw_ok},
+        {"ref": "f3", "label": "Veteran status", "reason": "not traced", "approvable": True,
+         "value": "SENTINEL-EEO-VALUE", "raw": raw_eeo},
+        {"ref": "f4", "label": "No raw", "reason": "x", "approvable": True, "value": "SENTINEL-NORAW"}])
     text = json.dumps(state.snapshot())
-    check("Springfield" in text and "SENTINEL-EEO-VALUE" not in text,
-          "the ordinary value is shown, the sensitive one never is")
+    check("Springfield" in text and "SENTINEL-EEO-VALUE" not in text and "SENTINEL-NORAW" not in text,
+          "State judges approvability itself: the ordinary value is shown, the EEO one and a "
+          "field with no raw inputs never are, whatever flag the caller passed")
     check(state.approve(job_id, "f3", True) is False and state.approve(job_id, "f1", True) is True,
           "only an approvable field can be ticked")
     state.request_continue(job_id)
@@ -179,8 +184,10 @@ def test_markup_in_a_label_is_rendered_as_text():
     try:
         [job_id] = state.start(["https://a.example/3"], dry=False)
         evil = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>Bold <b>label</b>'
+        raw = {"field": {"ref": "f1", "type": "text", "label": evil}, "category": "personal_fact",
+               "decision": {"value": evil, "source": "model"}, "result": {"filled": True}}
         state.set_pause(job_id, "gate", "needs you: " + evil, fields=[
-            {"ref": "f1", "label": evil, "reason": "left blank", "approvable": True, "value": evil}])
+            {"ref": "f1", "label": evil, "reason": "left blank", "value": evil, "raw": raw}])
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             try:
@@ -239,8 +246,10 @@ def test_run_dry_reports_the_landing_and_fills_nothing():
         for target, name, value in ((apply.browser_mod, "browser", lambda: _headless(_routes())),
                                     (apply, "dry_report", spy),
                                     (apply.config, "check_api_key", lambda: ("missing", "no key")),
-                                    (apply.classify, "classify_fields", classify_by_label),
-                                    (apply.mapper, "map_fields", map_from_profile)):
+                                    (apply.classify, "classify_fields",
+                                     mock.Mock(side_effect=AssertionError("a dry run must not classify"))),
+                                    (apply.mapper, "map_fields",
+                                     mock.Mock(side_effect=AssertionError("a dry run must not map")))):
             stack.enter_context(mock.patch.object(target, name, value))
         with redirect_stdout(out):
             apply.cmd_run(args)

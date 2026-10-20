@@ -180,16 +180,21 @@ How the code keeps them, and rules of its own:
   In `run`: accounts.py signs in or creates the account; wizard.py presses
   Next after the page's gate says would_submit (or after a pause Jack
   ended); submit.py presses Submit after the gate says would_submit on the
-  full record. After a pause Jack ends with Enter (never a timeout or a
-  busy terminal), a field counts as reviewed by him only if it carries a
-  touch mark that is new since before the pause and is not the filler's
-  own input (the filler works under the activity listener's agent flag,
-  and only the field's own element counts); the gate skips field-level
-  stops for those, never the required-but-empty check. Every other field
-  keeps the normal checks: a pause proves he was present, not that he
-  checked every field (Jack, 2026-10-19). A field that was empty before
-  the pause and holds a value after it with no new touch mark is never
-  counted as his. `filler.py` never presses Enter and never types a line break
+  full record. A pause blocks in the terminal (`run`) or is deferred in
+  the GUI (`gui`): the wizard keeps its place, the tab stays open and
+  filled, the queue goes on, and Continue in the GUI resumes it; there is
+  no timeout. After a pause Jack ends (Enter in the terminal, Continue in
+  the GUI; never a timeout or a busy terminal), a field counts as reviewed
+  by him only if it carries a touch mark that is new since before the
+  pause and is not the filler's own input (the filler works under the
+  activity listener's agent flag, and only the field's own element
+  counts), or if he ticked it in the GUI and the page still holds exactly
+  the value he was shown; the gate skips field-level stops for those,
+  never the required-but-empty check. Every other field keeps the normal
+  checks: a pause proves he was present, not that he checked every field;
+  Continue alone approves nothing (Jack, 2026-10-19). A field that was
+  empty before the pause and holds a value after it with no new touch mark
+  is never counted as his. `filler.py` never presses Enter and never types a line break
   outside a textarea. At click time it checks again, on the element and on
   the button or input around it, that a dropdown, a dropdown row (or a
   button or input inside the row) and a text box can't submit the form; a
@@ -237,9 +242,13 @@ How the code keeps them, and rules of its own:
 
 - The Chrome profile may hold a Google web session that Jack placed by
   signing in by hand (a site session in cookies, not a Chrome browser
-  sign-in: Playwright's bundled Chromium carries no API keys, so sync can't
-  be enabled and nothing in the profile leaves the machine). The agent
-  never reads cookies and never automates accounts.google.com's login.
+  sign-in: Playwright's bundled Chromium carries no API keys, so no Chrome
+  sync upload is possible; the session cookies go only to Google hosts, as
+  any signed-in browser's would). The agent never reads cookies and never
+  automates accounts.google.com's login.
+- Accepted, local only: the GUI page (127.0.0.1) shows the page's read-back
+  value of an ordinary, agent-filled field beside its approve tick. It is
+  shown only to Jack's own browser, never stored, logged or sent anywhere.
 - Defended: benign page behaviour (show-password toggles, re-renders,
   framework node reuse, password boxes appearing after a scan, stale refs)
   must never get a password value into Python. No field value read from the
@@ -266,7 +275,8 @@ How the code keeps them, and rules of its own:
   on a newly loaded page. This exception covers no other route: a field
   I have typed in, pasted into or changed never reaches the model, even
   after I clear it. I also accept a change I make with the mouse only while the
-  terminal shows 'hands off — filling'. This is listed under MUST FIX
+  terminal shows 'hands off — filling' (in the GUI, while a row says
+  working). This is listed under MUST FIX
   BEFORE AUTO-SUBMIT.
 - The reviewer treats accepted routes as FLAG, never BLOCK. Any route that
   sends a page value to the model or the network is a BLOCK.

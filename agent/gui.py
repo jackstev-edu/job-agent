@@ -182,18 +182,28 @@ class State:
                   wants_code: bool = False) -> None:
         """
         A job needs Jack. `fields` is the stopped fields in the GUI's shape:
-        {"ref", "label", "reason", "approvable", "value"}; the value is kept
-        only for approvable fields (callers pass the page's read-back).
+        {"ref", "label", "reason", "value", "raw"}; `raw` carries the gate's
+        own field, category, decision and result, and State decides
+        approvability from it with `approvable` here, never from a flag the
+        caller passes. A field without `raw` is never approvable, and a
+        value is kept only for an approvable field.
         """
         with self.lock:
             job = self._job(job_id)
             if job is None:
                 return
+            shaped = []
+            for f in fields or []:
+                raw = f.get("raw") if isinstance(f.get("raw"), dict) else None
+                ok = bool(raw) and approvable(raw.get("field") or {}, raw.get("category"),
+                                              raw.get("decision"), raw.get("result"))
+                shaped.append({"ref": f.get("ref"), "label": f.get("label", ""),
+                               "reason": f.get("reason", ""), "approvable": ok,
+                               "value": f.get("value") if ok else None})
             job.status = NEEDS_YOU
             job.reason = message
             job.pause = {"kind": kind, "message": message, "wants_code": wants_code,
-                         "fields": [{**f, "value": f.get("value") if f.get("approvable") else None}
-                                    for f in (fields or [])]}
+                         "fields": shaped}
             job.approved = set()
             job.code = None
             job.continue_requested = False
@@ -210,6 +220,11 @@ class State:
             job.continue_requested, job.code, job.approved = False, None, set()
             job.pause, job.status = None, WORKING
             return out
+
+    def resumable(self) -> list[str]:
+        """Jobs Jack pressed Continue on, in order."""
+        with self.lock:
+            return [j.id for j in self.jobs if j.status == NEEDS_YOU and j.continue_requested]
 
     def waiting_for_jack(self) -> list[str]:
         with self.lock:
@@ -352,7 +367,8 @@ class Server:
                 origin = self.headers.get("Origin")
                 if origin is not None and origin not in server.origins:
                     self._deny(HTTPStatus.FORBIDDEN, "bad origin"); return False
-                if needs_token and self.headers.get("X-Token", "") != server.token:
+                if needs_token and not secrets.compare_digest(
+                        self.headers.get("X-Token", ""), server.token):
                     self._deny(HTTPStatus.FORBIDDEN, "bad token"); return False
                 return True
 
@@ -402,8 +418,8 @@ class Server:
                 if not self._allowed(True):
                     return
                 try:
-                    length = int(self.headers.get("Content-Length") or 0)
-                    body = json.loads(self.rfile.read(min(length, 1_000_000)) or b"{}")
+                    length = max(0, min(int(self.headers.get("Content-Length") or 0), 1_000_000))
+                    body = json.loads(self.rfile.read(length) or b"{}")
                     if not isinstance(body, dict):
                         raise ValueError
                 except Exception:
@@ -450,16 +466,3 @@ class Server:
             self.httpd.server_close()
         except Exception:
             pass
-
-
-def wait_for(predicate, timeout_s: float | None, step_s: float = 0.5, tick=None) -> bool:
-    """Poll `predicate` until true (True) or `timeout_s` passes (False); `tick` runs each step."""
-    start = time.monotonic()
-    while True:
-        if predicate():
-            return True
-        if timeout_s is not None and time.monotonic() - start >= timeout_s:
-            return False
-        if tick is not None:
-            tick()
-        time.sleep(step_s)
