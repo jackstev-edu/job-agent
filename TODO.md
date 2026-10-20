@@ -1446,3 +1446,19 @@ press times out and parks (safe; to confirm on a real-page run); the
 "overlay elsewhere", "Example_University", Forgot-link and Google-host
 cases are guards that pass on the previous commit.
 
+Commit d5bf066 (fold of the block rule): VERDICT FLAG, 5 FLAGs and two
+notes. Folded into the next commit: a shadow host anywhere on the
+screen, open or closed (browser.py installs a script before any page
+script runs that marks a host as attachShadow is called), a custom
+element or a slot makes the screen pause, as a frame does, so a hidden
+box, tick box, Continue or line can't sit where querySelectorAll never
+looks; fencedframe counts as a frame; the frames and opaque counts and
+the insecure flag get the default-deny type check; fixtures for an open
+root on a plain element, a closed root, a slot and a closed-root host
+away from the sentence. The slowest Google test now judges most refused
+screens by the shape read itself (three stay end to end), which keeps
+the full run under the 20-minute line. Noted: a frame on Google's
+account chooser pauses too (safe direction); if Google's own consent
+page uses custom elements, every consent screen will pause, which is
+Jack's call.
+

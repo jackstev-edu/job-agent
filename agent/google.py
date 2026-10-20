@@ -62,6 +62,21 @@ ALLOWED_SENTENCE = ("To continue, Google will share your name, email address, la
 
 OK_WORDS = re.compile(r"^(continue|allow)$", re.I)
 
+# Installed in every page before its own scripts run: a closed shadow root
+# leaves no trace (shadowRoot is null), so its host is marked as it is
+# attached. The shape read then counts every host, open or closed.
+SHADOW_INIT_SCRIPT = r"""
+(() => {
+  const attach = Element.prototype.attachShadow;
+  if (!attach || Element.prototype.__jaShadowWrapped) return;
+  Element.prototype.__jaShadowWrapped = true;
+  Element.prototype.attachShadow = function (init) {
+    try { this.setAttribute('data-ja-shadow-host', '1'); } catch (e) {}
+    return attach.call(this, init);
+  };
+})();
+"""
+
 CHOOSER, CONSENT, OTHER = "chooser", "consent", "other"
 DONE, STUCK = "done", "stuck"
 STEP_CAP = 4
@@ -140,16 +155,17 @@ _SHAPE_JS = r"""
   // -webkit-inline-* forms), ruby, contents, none, and table parts (cells
   // sit side by side on one line).
   const inline = el => /^(inline|-webkit-inline|ruby|table-)|^(contents|none)$/.test(getComputedStyle(el).display);
-  // A candidate whose subtree holds a shadow root, a custom element or a
-  // slot could show Jack text its innerText doesn't carry: not a block.
-  const opaque = el => [el, ...el.querySelectorAll('*')].some(e => e.shadowRoot || e.tagName.includes('-') || e.tagName === 'SLOT');
+  // Anything the top document can't see into. A shadow host (open, or
+  // closed and marked by SHADOW_INIT_SCRIPT), a custom element or a slot
+  // anywhere could hold a box, a tick box, a second Continue or more
+  // wording that querySelectorAll never sees; a frame likewise.
+  const hidden = e => e.shadowRoot || e.hasAttribute('data-ja-shadow-host') || e.tagName.includes('-') || e.tagName === 'SLOT';
+  const opaque = [...document.querySelectorAll('*')].filter(hidden).length;
+  const frames = [...document.querySelectorAll('iframe, frame, fencedframe, object, embed')].filter(visible).length;
   const blocks = [...document.querySelectorAll('p, div, li, h1, h2, h3, h4, h5, h6, section, article, main, dd, dt')]
-    .filter(visible).filter(el => !inline(el)).filter(el => [...el.children].every(inline)).filter(el => !opaque(el))
+    .filter(visible).filter(el => !inline(el)).filter(el => [...el.children].every(inline))
     .map(el => norm(el.innerText)).filter(t => t && t.length <= 400).slice(0, 400);
-  // Anything the top document can't see into: a frame could hold a box, a
-  // second Continue or more wording.
-  const frames = [...document.querySelectorAll('iframe, frame, object, embed')].filter(visible).length;
-  return {boxes, ticks, ids, entries, ok, insecure, blocks, frames};
+  return {boxes, ticks, ids, entries, ok, insecure, blocks, frames, opaque};
 }
 """
 
@@ -185,8 +201,8 @@ def classify(page: "Page") -> tuple[str, dict]:
     CHOOSER (account entries, no box to type into), CONSENT (permission
     lines, or the one approved sentence with no lines at all, with one
     Continue / Allow, no box, no tick box), or OTHER: a sign-in box, a
-    code box, a "not secure" notice, or anything the script can't
-    describe. Default deny.
+    code box, a "not secure" notice, a frame or a shadow host anywhere,
+    or anything the script can't describe. Default deny.
     """
     try:
         shape = page.evaluate(_SHAPE_JS, OK_WORDS.pattern)
@@ -194,9 +210,11 @@ def classify(page: "Page") -> tuple[str, dict]:
         return OTHER, {}
     if (not isinstance(shape, dict) or not isinstance(shape.get("boxes"), int)
             or not isinstance(shape.get("ticks"), int) or not isinstance(shape.get("ids"), list)
-            or not isinstance(shape.get("entries"), list) or not isinstance(shape.get("ok"), int)):
+            or not isinstance(shape.get("entries"), list) or not isinstance(shape.get("ok"), int)
+            or not isinstance(shape.get("frames"), int) or not isinstance(shape.get("opaque"), int)
+            or not isinstance(shape.get("insecure"), bool)):
         return OTHER, {}
-    if shape["boxes"] > 0 or shape.get("insecure") or shape.get("frames"):
+    if shape["boxes"] > 0 or shape["insecure"] or shape["frames"] > 0 or shape["opaque"] > 0:
         return OTHER, shape
     if shape["ids"]:
         return CHOOSER, shape

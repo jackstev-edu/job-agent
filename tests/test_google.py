@@ -36,6 +36,8 @@ from contextlib import redirect_stdout
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
+from contextlib import contextmanager
+
 from _fill_run import _headless, classify_by_label, map_from_profile, run_fill
 from _harness import Checks, run_as_script
 from agent import accounts, google, pages, pause, wizard
@@ -161,6 +163,12 @@ GOOGLE_PAGES = {
     "/share-shadow": lambda q: _consent([], "").replace("<p></p>", "<p>" + SHARE_LANG + " <x-note></x-note></p><script>customElements.define('x-note', class extends HTMLElement {"
                                "connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = 'Google will also share your contacts with Example Co.'; } });</script>"),
     "/share-frame": lambda q: _consent([], SHARE_LANG, extra='<iframe srcdoc="<p>Google will also share your contacts with Example Co.</p>" style="width:300px;height:60px"></iframe>'),
+    "/share-openroot": lambda q: _consent([], "").replace("<p></p>", "<p>" + SHARE_LANG + " <span id=\"n\"></span></p><script>"
+                                 "document.getElementById('n').attachShadow({mode: 'open'}).innerHTML = 'Google will also share your contacts with Example Co.';</script>"),
+    "/share-closedroot": lambda q: _consent([], "").replace("<p></p>", "<p>" + SHARE_LANG + " <span id=\"n\"></span></p><script>"
+                                   "document.getElementById('n').attachShadow({mode: 'closed'}).innerHTML = 'Google will also share your contacts with Example Co.';</script>"),
+    "/share-slot": lambda q: _consent([], "").replace("<p></p>", "<p>" + SHARE_LANG + " <slot></slot></p>"),
+    "/share-hostaway": lambda q: _consent([], SHARE_LANG, extra='<div id="h"></div><script>document.getElementById(\'h\').attachShadow({mode: \'closed\'}).innerHTML = \'<input type="text" aria-label="Note">\';</script>'),
     "/insecure-late-control": lambda q: _consent([], SHARE_LANG).replace("<p>" + SHARE_LANG + "</p>",
                                         "<p>" + ("filler " * 3000) + "</p><p>" + SHARE_LANG + "</p>"),
     "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE,
@@ -208,6 +216,14 @@ def _routes():
         route.fulfill(status=200, content_type="text/html", body=body)
     return {f"{PORTAL}/**": handle, f"{GOOGLE}/**": handle, f"{LOOKALIKE}/**": handle,
             f"{GOOGLE_CAREERS}/**": handle, f"{GOOGLE_HTTP}/**": handle}
+
+
+@contextmanager
+def _headless_marked(routes):
+    """A headless context with the shadow-host marker browser.py installs."""
+    with _headless(routes) as ctx:
+        ctx.add_init_script(google.SHADOW_INIT_SCRIPT)
+        yield ctx
 
 
 def _run(page, kind, pauser, prof=None):
@@ -311,20 +327,26 @@ def test_a_two_step_check_and_a_not_secure_notice_pause():
     check.done()
 
 
+# Every consent-shaped screen that must not get Continue, and why: "list"
+# means the permission list rule stopped it, "other" that the screen read
+# as OTHER (nothing to press on). Judged by the same shape read drive uses.
+REFUSED_SCREENS = (("share-ok", "other"), ("share-more", "other"), ("share-lang-tick", "other"),
+                   ("share-lang-two", "other"), ("share-lang-list", "list"), ("share-lang-box", "other"),
+                   ("share-wrapped", "other"), ("share-span", "other"), ("share-divspan", "other"),
+                   ("share-inlineflex", "other"), ("share-cells", "other"), ("share-cellsdiv", "other"),
+                   ("share-ruby", "other"), ("share-inlinegrid", "other"), ("share-shadow", "other"),
+                   ("share-frame", "other"), ("share-openroot", "other"), ("share-closedroot", "other"),
+                   ("share-slot", "other"), ("share-hostaway", "other"), ("insecure-late", "other"),
+                   ("consent-broad", "list"), ("consent-outside", "list"), ("consent-two", "other"),
+                   ("consent-box", "other"))
+
+
 def test_any_other_permission_screen_pauses_without_a_click():
     check = Checks()
-    with _headless(_routes()) as ctx:
+    with _headless_marked(_routes()) as ctx:
+        # Three end to end: a broader list, the old sentence, two Continues.
         for g, why in (("consent-broad", "more than name"), ("share-ok", "never touches"),
-                       ("share-more", "never touches"), ("share-lang-tick", "never touches"),
-                       ("share-lang-two", "never touches"), ("share-lang-list", "more than name"),
-                       ("share-lang-box", "never touches"), ("share-wrapped", "never touches"),
-                       ("share-span", "never touches"), ("share-divspan", "never touches"),
-                       ("share-inlineflex", "never touches"), ("share-cells", "never touches"),
-                       ("share-cellsdiv", "never touches"), ("share-ruby", "never touches"),
-                       ("share-inlinegrid", "never touches"), ("share-shadow", "never touches"),
-                       ("share-frame", "never touches"), ("insecure-late", "never touches"),
-                       ("consent-outside", "more than name"),
-                       ("consent-two", "never touches"), ("consent-box", "never touches")):
+                       ("consent-two", "never touches")):
             page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g={g}")
             pauser = _Pauser([None])
             res, _ = _run(page, pages.SIGN_IN, pauser)
@@ -332,6 +354,19 @@ def test_any_other_permission_screen_pauses_without_a_click():
                   f"{g}: parked, Continue not pressed ({res.status}, {page.url}, {_clicks(page)})")
             check(pauser.asked and why in pauser.asked[0][0], f"{g}: the pause says why ({pauser.asked[0][0][:60]})")
             page.close()
+        # Every refused screen, by the shape read itself.
+        page = ctx.new_page()
+        for g, how in REFUSED_SCREENS:
+            page.goto(f"{GOOGLE}/{g}")
+            kind, shape = google.classify(page)
+            if how == "list":
+                check(kind == google.CONSENT and not google.consent_ok(shape),
+                      f"{g}: a consent screen the list rule refuses ({kind}, {shape.get('entries')})")
+            else:
+                check(kind == google.OTHER, f"{g}: nothing to press on ({kind})")
+        page.goto(f"{GOOGLE}/share-lang")
+        kind, shape = google.classify(page)
+        check(kind == google.CONSENT and google.consent_ok(shape), "the approved sentence alone is the control")
     for entries, want in (([], False), (OK_LINES, True), (BROAD_LINES, False),
                           (["See your primary Google Account email address", ""], False),
                           (["See your primary Google Account email address", 3], False),
@@ -377,7 +412,7 @@ def test_googles_one_sentence_consent_is_accepted_on_its_own():
     # no tick box, no text box and exactly one Continue (the negatives are
     # in the test above).
     check = Checks()
-    with _headless(_routes()) as ctx:
+    with _headless_marked(_routes()) as ctx:
         page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g=share-lang")
         pauser = _Pauser([])
         res, _ = _run(page, pages.SIGN_IN, pauser)
