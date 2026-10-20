@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 
 from _harness import TEST_HOME, Checks, run_as_script
-from agent import sensitive
+from agent import sensitive, template
 
 FORM = """<!doctype html><html><body><form>
   <label for="fn">First Name</label><input id="fn" name="first_name">
@@ -374,60 +374,48 @@ def test_an_identifier_naming_a_sibling_line_does_not_make_the_question_ambiguou
     check.done()
 
 
-def test_a_department_of_defense_question_is_answered_only_from_its_own_line():
+def test_every_department_of_defense_question_is_jacks():
+    # Jack, 2026-10-20 (second set): the DoD employment line is gone from
+    # PROFILE_PATHS and the template; the "dod" guard kind stays and
+    # names no line, so every DoD question is his, with any lines filled.
     check = Checks()
-    dod = {"label": "Have you been employed by the U.S. Department of Defense (civilian or military) in the past two years?",
-           "type": "radio", "options": ["Yes", "No"]}
-    check(sensitive.legal_guard_kinds(dod) == ["dod"] and sensitive.profile_lines(sensitive._question_text(dod))
-          == ["eligibility.dod_employment_past_two_years"], "the guard and the line both see it")
-    v = sensitive.decide(dod, "personal_fact", _Profile({"eligibility.dod_employment_past_two_years": False}))
-    check(v["action"] == "fill" and v["value"] == "No" and v["fit"] == "bool", f"a real false is 'No' ({v})")
-    v = sensitive.decide(dod, "personal_fact", _Profile({}))
-    check(v["action"] == "human" and "`eligibility.dod_employment_past_two_years` is blank" in v["reason"],
-          "blank: yours, and the line is named")
-    v = sensitive.decide({**dod, "options": ["Yes", "No"], "type": "text"}, "personal_fact",
-                         _Profile({"eligibility.dod_employment_past_two_years": True}))
-    check(v["action"] == "fill" and v["value"] == "Yes", "with options the fit is bool")
-    v = sensitive.decide({**dod, "options": [], "type": "text"}, "personal_fact",
-                         _Profile({"eligibility.dod_employment_past_two_years": True}))
-    check(v["action"] == "human" and "box to type in" in v["reason"], "a typed box: yours")
-    short = {"label": "Employed by DoD in the last 2 years?", "type": "radio", "options": ["Yes", "No"]}
-    check(sensitive.decide(short, "personal_fact", _Profile({"eligibility.dod_employment_past_two_years": True}))["value"] == "Yes",
-          "the short form too")
-    current = {"label": "Are you currently employed by the Department of Defense?", "type": "radio", "options": ["Yes", "No"]}
-    v = sensitive.decide(current, "personal_fact", _Profile({"eligibility.dod_employment_past_two_years": False}))
-    check(v["action"] == "human" and "specific company" in v["reason"],
-          f"'currently employed by' is a per-company stop before any line is read ({v['action']}, {v.get('reason')})")
-    # BLOCK fix: any other DoD question has no line and is Jack's (through
-    # the guard, or earlier through a HARD_STOPS per-company stop): a
-    # facility, a contract, an interest, a contractor, "currently", or the
-    # phrase in another sentence of the help text.
-    prof = _Profile({"eligibility.dod_employment_past_two_years": False, "eligibility.security_clearance": "None"})
-    for field in ({"label": "Are you willing to work at a Department of Defense facility?"},
-                  {"label": "Have you ever worked for the DoD?"}, {"label": "Have you worked on DoD contracts?"},
-                  {"label": "Are you a current DoD contractor?"},
-                  {"label": "Are you interested in working for the Department of Defense?"},
-                  {"label": "Were you employed by the DoD at any time?"},
-                  {"label": "Have you been employed by a DoD contractor in the past two years?"},
-                  {"label": "Have you been employed by the Department of Defense (civilian) subcontractor in the past two years?"},
-                  {"label": "Are you currently a DoD employee?"},
-                  {"label": "Are you currently employed as a contractor supporting the Department of Defense?"},
-                  {"label": "Are you willing to work at a Department of Defense facility?",
-                   "help_text": "Employees currently assigned to these sites receive a stipend. Staff employed by the DoD in the past two years must say so."}):
-        v = sensitive.decide({**field, "type": "radio", "options": ["Yes", "No"]}, "personal_fact", prof)
-        check(v["action"] == "human",
-              f"{field['label']!r}: no line claims it, so it is Jack's ({v['action']}, {v.get('reason')})")
-    # The phrase itself, in one sentence, either order.
-    for label in ("Have you been employed by the U.S. Department of Defense (civilian or military) in the past two years?",
-                  "Employed by DoD in the last 2 years?",
-                  "Within the past two years, were you employed with the Department of Defense?"):
-        v = sensitive.decide({"label": label, "type": "radio", "options": ["Yes", "No"]}, "personal_fact", prof)
-        check(v["action"] == "fill" and v["value"] == "No", f"{label!r}: the line's own question fills ({v['action']}, {v.get('reason')})")
-    clearance = {"label": "Do you currently hold a DoD security clearance?", "type": "radio", "options": ["Yes", "No"]}
-    v = sensitive.decide(clearance, "personal_fact", _Profile({"eligibility.dod_employment_past_two_years": True,
-                                                               "eligibility.security_clearance": "None"}))
-    check(v["action"] == "human" and "closest profile line is `eligibility.security_clearance`" in v["reason"],
-          f"a DoD clearance question is not an employment one: the clearance line is named, and it is yours ({v.get('reason')})")
+    check("eligibility.dod_employment_past_two_years" not in {path for _, path in sensitive.PROFILE_PATHS}
+          and "dod_employment" not in template.BLANK_PROFILE,
+          "the DoD row is in neither PROFILE_PATHS nor the template")
+    check("dod" in {kind for _, kind in sensitive.LEGAL_GUARD} and sensitive.LEGAL_AREAS["dod"] == frozenset(),
+          f"the dod guard kind stays and answers from no line ({sensitive.LEGAL_AREAS.get('dod')})")
+    prof = _Profile({"eligibility.dod_employment_past_two_years": False, "eligibility.security_clearance": "None",
+                     "eligibility.export_control_us_person": True})
+    labels = (
+        # The line's own question, in the wordings the row used to answer.
+        "Have you been employed by the U.S. Department of Defense (civilian or military) in the past two years?",
+        "Employed by DoD in the last 2 years?",
+        "Within the past two years, were you employed with the Department of Defense?",
+        # And every other DoD question.
+        "Are you willing to work at a Department of Defense facility?", "Have you ever worked for the DoD?",
+        "Have you worked on DoD contracts?", "Are you a current DoD contractor?",
+        "Are you interested in working for the Department of Defense?", "Were you employed by the DoD at any time?",
+        "Have you been employed by a DoD contractor in the past two years?",
+        "Are you currently a DoD employee?", "Do you currently hold a DoD security clearance?",
+        "Are you a U.S. person under DoD export rules?")
+    for label in labels:
+        for extra in ({"type": "radio", "options": ["Yes", "No"]}, {"type": "text", "options": []},
+                      {"type": "checkbox", "options": []}):
+            field = {"label": label, **extra}
+            check("dod" in sensitive.legal_guard_kinds(field), f"{label!r}: the guard sees it")
+            for category in ("personal_fact", "work_authorization", "free_text", "per_company"):
+                v = sensitive.decide(field, category, prof)
+                check(v["action"] == "human" and v["value"] is None,
+                      f"{label!r} as {category} ({extra['type']}): Jack's ({v['action']}, {v.get('reason')})")
+    # Help text naming the DoD beside another question is Jack's too.
+    v = sensitive.decide({"label": "Which site would you work at?", "type": "radio", "options": ["Yes", "No"],
+                          "help_text": "Staff employed by the DoD in the past two years must say so."},
+                         "personal_fact", prof)
+    check(v["action"] == "human", f"DoD in the help text: Jack's ({v['action']}, {v.get('reason')})")
+    v = sensitive.decide({"label": "Do you currently hold a DoD security clearance?", "type": "radio",
+                          "options": ["Yes", "No"]}, "personal_fact", prof)
+    check("closest profile line is `eligibility.security_clearance`" in v["reason"],
+          f"a DoD clearance question names the clearance line and stays Jack's ({v.get('reason')})")
     check.done()
 
 

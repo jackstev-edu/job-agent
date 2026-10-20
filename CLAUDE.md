@@ -166,6 +166,27 @@ Added by Jack on 2026-10-20 (after his first GUI run):
   read-back value; the Google session line) are confirmed as written.
 - MyGreenhouse email code: leave the pause as it is.
 
+Added by Jack on 2026-10-20 (second set):
+
+- Department of Defense: the `eligibility.dod_employment_past_two_years`
+  row leaves `PROFILE_PATHS` and the template; the `dod` LEGAL_GUARD kind
+  stays, so every DoD question is Jack's.
+- The "two profile lines" trace resolution (the question's own line
+  answers; the field's identifier can only block) is confirmed as Jack's
+  decision.
+- Google consent screen: no sibling-prose check. Google's own host is not
+  treated as hostile; the consent-screen parser is not hardened further.
+  Further reviewer FLAGs about hostile markup on accounts.google.com are
+  logged in TODO, never folded.
+- Shadow-root count: only author roots (shadowRootType "open" or
+  "closed") count, not user-agent roots.
+- The CDP local-only threat-model line is confirmed.
+- Decline wordings: keep as they are.
+- Test runs: per commit, run the new / changed test files plus the
+  non-browser tests; run the full suite once before each push. Browser
+  tests are split off by a single marker. The "stop and report" threshold
+  for the full suite is 30 minutes.
+
 ## Design rules — do not relax these
 
 - The model never answers legal questions. Eligibility, EEO and compensation
@@ -198,12 +219,11 @@ How the code keeps them, and rules of its own:
   reading (2026-10-20): when the question as asked (label, help,
   placeholder) names exactly one line and only the field's own identifier
   names another in the same area (Greenhouse's `hispanic_ethnicity`), the
-  question's line answers it. A Department of Defense employment question
-  has its own guard kind and line (`eligibility.dod_employment_past_two_years`),
-  claimed only by the one phrase in one sentence ("employed by / with the
-  DoD", not a contractor, with the past-two-years scope) and only when
-  the label itself asks it (`LABEL_ONLY_LINES`); every other DoD question
-  is Jack's.
+  question's line answers it (confirmed by Jack, 2026-10-20, second
+  set). A Department of Defense question has its own guard kind (`dod`)
+  and no profile line: every one is Jack's, whatever other line its words
+  match (Jack, 2026-10-20, second set). `LABEL_ONLY_LINES` (a line whose
+  question must be the label itself) is kept and empty.
 - The browser's password manager lives in the agent's Chrome profile
   (`~/.job-agent/chrome-profile`; since 2026-10-19 it may be signed in to
   Jack's Google account, by his hand only).

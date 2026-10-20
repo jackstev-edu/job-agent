@@ -56,21 +56,10 @@ PROFILE_PATHS: list[tuple[str, str]] = [
      "eligibility.work_authorization_type"),
     (r"u\.?\s?s\.?\s+person|export\s+control|\bitar\b|\bear\b\s+regulation|deemed\s+export",
      "eligibility.export_control_us_person"),
-    # Employment by the Department of Defense in the past two years (a
-    # post-government-employment question), above the clearance row so a
-    # "DoD" employment question isn't read as a clearance one. The row
-    # claims only the question it was written for, as one phrase in one
-    # sentence: "employed by / with (the) (U.S.) Department of Defense /
-    # DoD", not a contractor, with the past-two-years scope within 80
-    # characters either side. "Currently", a contractor, a facility, a
-    # contract or an interest has no line and is Jack's through the guard.
-    (r"\bemploy\w*\s+(by|with)\s+(the\s+)?(u\.?\s?s\.?\s+)?(department\s+of\s+defen[cs]e|dod)\b"
-     r"(?!\s*(\((civilian|military)[^)]*\)\s*)?(sub)?contractor)[^.?!\n]{0,80}"
-     r"(past|last|previous|within(\s+the)?|preceding|prior)\s+(two|2)\s+years?"
-     r"|(past|last|previous|within(\s+the)?|preceding|prior)\s+(two|2)\s+years?[^.?!\n]{0,80}"
-     r"\bemploy\w*\s+(by|with)\s+(the\s+)?(u\.?\s?s\.?\s+)?(department\s+of\s+defen[cs]e|dod)\b"
-     r"(?!\s*(\((civilian|military)[^)]*\)\s*)?(sub)?contractor)",
-     "eligibility.dod_employment_past_two_years"),
+    # A Department of Defense question has no profile line at all (Jack,
+    # 2026-10-20, second set): the "dod" guard kind below sends every one
+    # to Jack. The row that answered "employed by the DoD in the past two
+    # years" was removed that day.
     (r"security\s+clearance|\bdod\b\s+clearance|(secret|ts/sci)\s+clearance",
      "eligibility.security_clearance"),
 
@@ -196,8 +185,8 @@ LEGAL_GUARD: list[tuple[str, str]] = [
      r"|\b(expected|desired)\s+(rate|pay|salary|wage|compensation|earnings|income)\b"
      r"|\bhourly\s+rate\b|\bote\b|\bctc\b",
      "compensation"),
-    # Added 2026-10-20 (Jack): a Department of Defense question is answered
-    # only from its own named line, with a strict fit, or by you.
+    # Added 2026-10-20 (Jack): a Department of Defense question is yours,
+    # every one; no profile line answers this kind (second set, same day).
     (r"\bdepartment\s+of\s+defen[cs]e\b|\bdod\b", "dod"),
 ]
 
@@ -220,13 +209,16 @@ LEGAL_AREAS = {
     }),
     "eeo": "eeo.",
     "compensation": "compensation.",
-    "dod": frozenset({"eligibility.dod_employment_past_two_years"}),
+    # No line: a DoD question matching a profile line elsewhere (a clearance
+    # row) is still Jack's, and one matching none names no line.
+    "dod": frozenset(),
 }
 
 
 # Lines whose question must be asked by the label itself, not by help text
-# beside another question. Only lines added on or after 2026-10-20.
-LABEL_ONLY_LINES = frozenset({"eligibility.dod_employment_past_two_years"})
+# beside another question. Only lines added on or after 2026-10-20; none
+# at present (the Department of Defense line left the same day).
+LABEL_ONLY_LINES: frozenset[str] = frozenset()
 
 
 def in_legal_area(path: str | None, kinds) -> bool:

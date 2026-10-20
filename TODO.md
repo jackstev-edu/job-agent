@@ -1511,3 +1511,14 @@ as "Prefer not to respond" or "I'd rather not say" are not whole-value
 declines and come to Jack (safe; the template says to use "Prefer not
 to say").
 
+
+## Round of 2026-10-20 (second set of decisions): reviewer FLAGs logged
+
+Item 1 (the Department of Defense row): the
+`eligibility.dod_employment_past_two_years` row left `PROFILE_PATHS`,
+`LEGAL_AREAS["dod"]` and the template (Jack, 2026-10-20, second set);
+the `dod` guard kind stays, so every DoD question is Jack's.
+`LABEL_ONLY_LINES` is kept and empty. The DoD test became "every DoD
+question is Jack's": the three wordings the row answered, nine others,
+help text, and a DoD clearance question, each as radio, text and
+checkbox and under four classifier categories.
