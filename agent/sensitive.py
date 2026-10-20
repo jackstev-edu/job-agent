@@ -56,6 +56,12 @@ PROFILE_PATHS: list[tuple[str, str]] = [
      "eligibility.work_authorization_type"),
     (r"u\.?\s?s\.?\s+person|export\s+control|\bitar\b|\bear\b\s+regulation|deemed\s+export",
      "eligibility.export_control_us_person"),
+    # Employment by the Department of Defense in the past two years (a
+    # post-government-employment question), above the clearance row so a
+    # "DoD" employment question isn't read as a clearance one.
+    (r"(department\s+of\s+defen[cs]e|\bdod\b).{0,80}\b(employ\w*|work\w*|contract\w*)"
+     r"|\b(employ\w*|work\w*|contract\w*).{0,80}(department\s+of\s+defen[cs]e|\bdod\b)",
+     "eligibility.dod_employment_past_two_years"),
     (r"security\s+clearance|\bdod\b\s+clearance|(secret|ts/sci)\s+clearance",
      "eligibility.security_clearance"),
 
@@ -169,6 +175,9 @@ LEGAL_GUARD: list[tuple[str, str]] = [
      r"|\b(expected|desired)\s+(rate|pay|salary|wage|compensation|earnings|income)\b"
      r"|\bhourly\s+rate\b|\bote\b|\bctc\b",
      "compensation"),
+    # Added 2026-10-20 (Jack): a Department of Defense question is answered
+    # only from its own named line, with a strict fit, or by you.
+    (r"\bdepartment\s+of\s+defen[cs]e\b|\bdod\b", "dod"),
 ]
 
 # The fits a legal answer may take: the profile value as one of the form's
@@ -190,6 +199,7 @@ LEGAL_AREAS = {
     }),
     "eeo": "eeo.",
     "compensation": "compensation.",
+    "dod": frozenset({"eligibility.dod_employment_past_two_years"}),
 }
 
 
@@ -454,6 +464,18 @@ def decide(field: dict, category: str, profile) -> dict:
         only = sponsorship_line(text, every | set(lines))
         if only is not None:
             lines, every = [only], {only}
+        if len(every) > 1 and len(lines) == 1:
+            # The question as asked (label, help, placeholder) names one line
+            # and only the field's own identifier names another, in the same
+            # area (Greenhouse calls its "Are you Hispanic/Latino?" select
+            # hispanic_ethnicity): the question's line answers it. An
+            # identifier from another area, or a question naming two lines
+            # itself, is still yours (Jack, 2026-10-20).
+            asked = all_profile_lines(" ".join(str(field.get(k) or "")
+                                               for k in ("label", "help_text", "placeholder")))
+            area = lines[0].split(".")[0]
+            if asked == {lines[0]} and all(line.split(".")[0] == area for line in every):
+                every = {lines[0]}
         if len(lines) > 1 or len(every) > 1:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This could be answered by more than one profile line "
@@ -535,13 +557,16 @@ def fit_with_kind(raw: Any, field: dict) -> tuple[Any, str | None]:
     for opt in options:
         if opt.strip().lower() == target:
             return opt, "exact"
-    for opt in options:
-        low = opt.strip().lower()
-        if target and (target in low or low in target):
-            return opt, "substring"
-
+    # A value that is itself a decline ("Prefer not to say") takes the form's
+    # decline option before any substring guess: "No" sits inside "not", and
+    # the substring step used to take it, turning every EEO default into a
+    # loose fit the gate refuses (found on Greenhouse's EEO selects, 2026-10-20).
     if _DECLINE.search(target):
         for opt in options:
             if _DECLINE.search(opt.lower()):
                 return opt, "decline"
+    for opt in options:
+        low = opt.strip().lower()
+        if target and (target in low or low in target):
+            return opt, "substring"
     return None, None

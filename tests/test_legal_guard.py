@@ -316,6 +316,85 @@ def test_a_typed_box_or_a_two_area_box_comes_to_you():
     check.done()
 
 
+def test_an_identifier_naming_a_sibling_line_does_not_make_the_question_ambiguous():
+    # Greenhouse's EEO select, as its board page serves it (scanned 2026-10-20):
+    # the label names the Hispanic/Latino line, the field name adds the
+    # race/ethnicity one. The question's line answers it.
+    check = Checks()
+    gh = {"label": "Are you Hispanic/Latino?", "help_text": "Select...", "name": "hispanic_ethnicity",
+          "type": "combobox", "options": ["Yes", "No", "Decline To Self Identify"]}
+    check(sorted(sensitive.all_profile_lines(sensitive._question_text(gh))) == ["eeo.hispanic_latino", "eeo.race_ethnicity"],
+          "the name adds the race/ethnicity line (so the next checks mean something)")
+    v = sensitive.decide(gh, "eeo", _Profile({"eeo.hispanic_latino": "Prefer not to say"}))
+    check(v["action"] == "fill" and v["value"] == "Decline To Self Identify" and v["fit"] == "decline"
+          and v["profile_path"] == "eeo.hispanic_latino",
+          f"answered from the Hispanic/Latino line with the decline fit ({v['action']}, {v.get('value')}, {v.get('reason')})")
+    v = sensitive.decide(gh, "personal_fact", _Profile({"eeo.hispanic_latino": "No"}))
+    check(v["action"] == "fill" and v["value"] == "No" and v["fit"] == "exact",
+          f"whatever the classifier said, and an exact fit ({v['action']}, {v.get('value')})")
+    v = sensitive.decide(gh, "eeo", _Profile({}))
+    check(v["action"] == "human" and "blank in profile.yaml" in v["reason"], "blank line: still yours")
+    both = {**gh, "label": "Race / Ethnicity: are you Hispanic or Latino?"}
+    v = sensitive.decide(both, "eeo", _Profile({"eeo.hispanic_latino": "No"}))
+    check(v["action"] == "human" and "more than one profile line" in v["reason"],
+          f"a question naming two lines itself is still yours ({v['action']})")
+    other_area = {**gh, "name": "salary_hispanic"}
+    v = sensitive.decide(other_area, "eeo", _Profile({"eeo.hispanic_latino": "No"}))
+    check(v["action"] == "human" and "more than one" in v["reason"],
+          f"an identifier from another area keeps it yours ({v['action']}, {v.get('reason')})")
+    itar = {**gh, "name": "itar-hispanic"}      # another area's line (export control), no second guard kind
+    check(sorted(sensitive.all_profile_lines(sensitive._question_text(itar)))
+          == ["eeo.hispanic_latino", "eligibility.export_control_us_person"], "the identifier adds an eligibility line")
+    v = sensitive.decide(itar, "eeo", _Profile({"eeo.hispanic_latino": "No"}))
+    check(v["action"] == "human" and "more than one profile line" in v["reason"],
+          f"an identifier naming a line from another area keeps it yours ({v['action']}, {v.get('reason')})")
+    # The fit itself: a decline value takes the decline option, never "No" through "not".
+    check(sensitive.fit_with_kind("Prefer not to say", gh) == ("Decline To Self Identify", "decline")
+          and sensitive.fit_with_kind("I don't wish to answer", gh) == ("Decline To Self Identify", "decline")
+          and sensitive.fit_with_kind("No", gh) == ("No", "exact"),
+          f"a decline value fits the decline option ({sensitive.fit_with_kind('Prefer not to say', gh)})")
+    export = {"label": "To conform to U.S. Government space technology export regulations, including the "
+                       "International Traffic in Arms Regulations (ITAR) you must be a U.S. citizen, lawful "
+                       "permanent resident of the U.S., protected individual as defined by 8 U.S.C. 1324b(a)(3), "
+                       "or eligible to obtain the required authorizations from the U.S. Department of State. Do you meet this requirement?",
+              "help_text": "Select...", "name": "question_9175759005", "type": "combobox", "options": ["Yes", "No"]}
+    v = sensitive.decide(export, "work_authorization", _Profile({"eligibility.export_control_us_person": True}))
+    check(v["action"] == "fill" and v["value"] == "Yes" and v["profile_path"] == "eligibility.export_control_us_person",
+          f"the export-control question is answered from its line once it is filled ({v['action']}, {v.get('reason')})")
+    v = sensitive.decide(export, "work_authorization", _Profile({}))
+    check(v["action"] == "human" and "`eligibility.export_control_us_person` is blank" in v["reason"],
+          f"blank, it names the line to fill ({v.get('reason')})")
+    check.done()
+
+
+def test_a_department_of_defense_question_is_answered_only_from_its_own_line():
+    check = Checks()
+    dod = {"label": "Have you been employed by the U.S. Department of Defense (civilian or military) in the past two years?",
+           "type": "radio", "options": ["Yes", "No"]}
+    check(sensitive.legal_guard_kinds(dod) == ["dod"] and sensitive.profile_lines(sensitive._question_text(dod))
+          == ["eligibility.dod_employment_past_two_years"], "the guard and the line both see it")
+    v = sensitive.decide(dod, "personal_fact", _Profile({"eligibility.dod_employment_past_two_years": False}))
+    check(v["action"] == "fill" and v["value"] == "No" and v["fit"] == "bool", f"a real false is 'No' ({v})")
+    v = sensitive.decide(dod, "personal_fact", _Profile({}))
+    check(v["action"] == "human" and "`eligibility.dod_employment_past_two_years` is blank" in v["reason"],
+          "blank: yours, and the line is named")
+    v = sensitive.decide({**dod, "options": ["Yes", "No"], "type": "text"}, "personal_fact",
+                         _Profile({"eligibility.dod_employment_past_two_years": True}))
+    check(v["action"] == "fill" and v["value"] == "Yes", "with options the fit is bool")
+    v = sensitive.decide({**dod, "options": [], "type": "text"}, "personal_fact",
+                         _Profile({"eligibility.dod_employment_past_two_years": True}))
+    check(v["action"] == "human" and "box to type in" in v["reason"], "a typed box: yours")
+    short = {"label": "Worked for DoD in the last 2 years?", "type": "radio", "options": ["Yes", "No"]}
+    check(sensitive.decide(short, "personal_fact", _Profile({"eligibility.dod_employment_past_two_years": True}))["value"] == "Yes",
+          "the short form too")
+    clearance = {"label": "Do you currently hold a DoD security clearance?", "type": "radio", "options": ["Yes", "No"]}
+    v = sensitive.decide(clearance, "personal_fact", _Profile({"eligibility.dod_employment_past_two_years": True,
+                                                               "eligibility.security_clearance": "None"}))
+    check(v["action"] == "human" and "closest profile line is `eligibility.security_clearance`" in v["reason"],
+          f"a DoD clearance question is not an employment one: the clearance line is named, and it is yours ({v.get('reason')})")
+    check.done()
+
+
 def _gate_record(label, category, plan):
     import test_gate as tg
 

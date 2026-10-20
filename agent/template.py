@@ -90,6 +90,9 @@ eligibility:
   export_control_us_person:    # true / false
   security_clearance:          # e.g. None / Secret / TS-SCI
   clearance_eligible:          # true / false
+  # "Have you been employed by the U.S. Department of Defense (civilian or
+  # military) in the past two years?" — asked by defense contractors.
+  dod_employment_past_two_years:   # true / false
 
   willing_to_relocate:         # true / false
   relocation_preferences:

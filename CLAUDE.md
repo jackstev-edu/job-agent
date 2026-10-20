@@ -194,6 +194,12 @@ Added by Jack on 2026-10-20 (after his first GUI run):
 How the code keeps them, and rules of its own:
 
 - The model may CLASSIFY a question, never answer a legal one.
+- A legal question that matches two profile lines is Jack's, with one
+  reading (2026-10-20): when the question as asked (label, help,
+  placeholder) names exactly one line and only the field's own identifier
+  names another in the same area (Greenhouse's `hispanic_ethnicity`), the
+  question's line answers it. A Department of Defense employment question
+  has its own guard kind and line (`eligibility.dod_employment_past_two_years`).
 - The browser's password manager lives in the agent's Chrome profile
   (`~/.job-agent/chrome-profile`; since 2026-10-19 it may be signed in to
   Jack's Google account, by his hand only).
