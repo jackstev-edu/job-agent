@@ -1696,3 +1696,13 @@ marker's coverage (a one-line regression test on test_captcha.py's
 items would). Verified by the reviewer in the main checkout: 250 of 343
 marked, 4 of 4 in test_captcha.py, 93 pass with no Chromium.
 
+Commit 1e48f24 (fold of bdacacb's FLAG): VERDICT FLAG, 2 low FLAGs,
+both folded in the next commit (the same legal-answer class): the
+obtain check read only the label, help and placeholder, so a level
+select named clearance_willing_to_obtain or with an option "Willing to
+obtain Secret" still filled from the level held; it now reads the split
+name and the option texts too; and the vocabulary is wider (grant,
+pursue, seek, qualify, apply, receive, would, could, can), with a
+negative per word. Verified by the reviewer: the change adds only a
+human return before any fill; nothing narrowed.
+

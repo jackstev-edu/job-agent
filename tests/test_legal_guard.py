@@ -501,6 +501,18 @@ def test_a_security_clearance_question_is_answered_only_from_the_clearance_lines
               f"{label!r} as a level select with the level filled: Jack's ({v['action']}, {v.get('reason')})")
     v = sensitive.decide(level, "personal_fact", both)
     check(v["action"] == "fill" and v["value"] == "Secret", "the plain level question still fills from the level held")
+    # The name and the options say it too, and the wider vocabulary.
+    for field in ({"label": "Security clearance", "name": "clearance_willing_to_obtain"},
+                  {"label": "Security clearance", "name": "clearanceWillingToObtain"},
+                  {"label": "Security clearance", "options": ["None", "Willing to obtain Secret", "Top Secret"]},
+                  {"label": "Which security clearance could you be granted?"},
+                  {"label": "What level of security clearance would you pursue?"},
+                  {"label": "Which security clearance do you qualify for?"},
+                  {"label": "What security clearance can you receive?"},
+                  {"label": "Security clearance level", "help_text": "Tell us what you could seek or apply for."}):
+        v = sensitive.decide({"type": "select", "options": ["None", "Secret", "Top Secret"], **field}, "personal_fact", both)
+        check(v["action"] == "human" and v["value"] is None and "obtaining a clearance" in v["reason"],
+              f"{field!r}: asks about obtaining one, Jack's ({v['action']}, {v.get('reason')})")
     # The page-side copy of the guard (extract.py's RAW_LEGAL) carries the kind too.
     check(any("clearance" in pat for pat in sensitive.RAW_PATTERNS["legal"]), "the raw legal patterns carry the clearance kind")
     check.done()

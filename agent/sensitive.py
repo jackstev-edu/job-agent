@@ -415,13 +415,19 @@ def _identifier_words(name: str) -> str:
 
 
 # A clearance question about getting one rather than holding one, on any
-# reading of the question as asked.
-_ASKS_TO_OBTAIN = re.compile(r"\b(willing\w*|able|unable|obtain\w*|accept\w*|get|acquir\w*)\b", re.I)
+# reading of everything the field says: label, help, placeholder, the
+# name split into words, and the option texts.
+_ASKS_TO_OBTAIN = re.compile(
+    r"\b(willing\w*|able|unable|obtain\w*|accept\w*|get|acquir\w*|grant\w*|pursu\w*|seek\w*"
+    r"|qualif\w*|apply|receiv\w*|would|could|can)\b", re.I)
 
 
 def asked_text(field: dict) -> str:
-    """The question as asked (label, help, placeholder), every reading joined."""
-    return " ".join(text_variants(" ".join(str(field.get(k) or "") for k in ("label", "help_text", "placeholder"))))
+    """Everything the field says (label, help, placeholder, split name, options), every reading joined."""
+    text = " ".join([str(field.get(k) or "") for k in ("label", "help_text", "placeholder")]
+                    + [_identifier_words(str(field.get("name") or ""))]
+                    + [str(o) for o in field.get("options") or []])
+    return " ".join(text_variants(text))
 
 
 def legal_guard_kinds(field: dict) -> list[str]:
