@@ -489,6 +489,18 @@ def test_a_security_clearance_question_is_answered_only_from_the_clearance_lines
         v = sensitive.decide({"label": label, "type": "radio", "options": ["Yes", "No"]}, "personal_fact", eligible)
         check(v["action"] == "human" and v["value"] is None and "clearance_eligible" not in str(v.get("profile_path")),
               f"{label!r} with the eligibility line filled: Jack's ({v['action']}, {v.get('reason')})")
+    # FLAG fold: a level select under a "willing / able to obtain" wording is
+    # not the level held, even with it filled; the plain level question still is.
+    for label in ("What level of security clearance are you willing to obtain?",
+                  "Would you be willing to obtain a security clearance?",
+                  "Which security clearance are you able to obtain?",
+                  "This role requires a security clearance. Which can you get?"):
+        v = sensitive.decide({"label": label, "type": "select", "options": ["None", "Secret", "Top Secret"]},
+                             "personal_fact", both)
+        check(v["action"] == "human" and v["value"] is None and "obtaining a clearance" in v["reason"],
+              f"{label!r} as a level select with the level filled: Jack's ({v['action']}, {v.get('reason')})")
+    v = sensitive.decide(level, "personal_fact", both)
+    check(v["action"] == "fill" and v["value"] == "Secret", "the plain level question still fills from the level held")
     # The page-side copy of the guard (extract.py's RAW_LEGAL) carries the kind too.
     check(any("clearance" in pat for pat in sensitive.RAW_PATTERNS["legal"]), "the raw legal patterns carry the clearance kind")
     check.done()

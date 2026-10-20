@@ -414,6 +414,16 @@ def _identifier_words(name: str) -> str:
     return re.sub(r"[_\-.\[\]]+", " ", name)
 
 
+# A clearance question about getting one rather than holding one, on any
+# reading of the question as asked.
+_ASKS_TO_OBTAIN = re.compile(r"\b(willing\w*|able|unable|obtain\w*|accept\w*|get|acquir\w*)\b", re.I)
+
+
+def asked_text(field: dict) -> str:
+    """The question as asked (label, help, placeholder), every reading joined."""
+    return " ".join(text_variants(" ".join(str(field.get(k) or "") for k in ("label", "help_text", "placeholder"))))
+
+
 def legal_guard_kinds(field: dict) -> list[str]:
     """
     Every LEGAL_GUARD kind a field matches ("work_authorization", "eeo",
@@ -524,6 +534,12 @@ def decide(field: dict, category: str, profile) -> dict:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This reads as a {kind} question, but the closest "
                               f"profile line is `{path}`. Answer it yourself."}
+        if path == "eligibility.security_clearance" and _ASKS_TO_OBTAIN.search(asked_text(field)):
+            # The level held answers "what level do you hold", never
+            # "what level are you willing / able to obtain" (2026-10-20).
+            return {**base, "action": "human", "value": None, "source": "human",
+                    "reason": "This asks about obtaining a clearance, not the level held. "
+                              "Answer it yourself."}
         if path in LABEL_ONLY_LINES and path not in profile_lines(str(field.get("label") or "")):
             # A line whose question must be the label itself: help text that
             # mentions the same thing beside another question doesn't make

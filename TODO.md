@@ -1668,3 +1668,31 @@ a repo-root pytest.ini makes node ids `tests/test_x.py::...`, so saved
 deselect lists with bare ids no longer match; the item 6 TODO entry
 ended in a literal backslash-n with no newline (fixed).
 
+Commit bdacacb (fix of item 5's BLOCK): VERDICT FLAG, 3 low FLAGs.
+Folded in the next commit (a legal-answer risk): a level select (None /
+Secret / Top Secret) under "What level of security clearance are you
+willing to obtain?" was filled with the level HELD once the line was
+filled (on 33d6376 those wordings hit both rows and were Jack's; after
+the fix only the level row); a clearance question whose text asks about
+obtaining one (willing, able, obtain, accept, get, acquire) is now Jack's
+when its line is the level held. Logged under MUST FIX BEFORE
+AUTO-SUBMIT (the accepted invisible-character route): "in​eligible
+to obtain a clearance" reads as "in eligible ..." on the variant with
+invisible characters turned to spaces and routes to clearance_eligible;
+fill rows are matched on every reading, which only adds matches (safe
+for stops, unsafe for fill rows). Noted: two of the six negatives
+("willing to obtain a security clearance", "obtain a Secret clearance")
+were already Jack's on 33d6376 (both rows), so four of six fail there.
+
+Commit 73b8c24 (fix of item 6's FLAG): VERDICT FLAG, 4 low FLAGs,
+logged: the same-module branch recurses with the word, not the callee's
+own name, and a callee with no readable source counts as no (an alias
+or a module-level lambda that launches a browser would be missed; none
+exists; fix: use callee_name in both branches); decorator arguments are
+no longer scanned (none carries a token); modname comes from the
+module's __name__, which equals the file stem only while tests/ has no
+__init__.py (fix: derive it from the file path); no test pins the
+marker's coverage (a one-line regression test on test_captcha.py's
+items would). Verified by the reviewer in the main checkout: 250 of 343
+marked, 4 of 4 in test_captcha.py, 93 pass with no Chromium.
+
