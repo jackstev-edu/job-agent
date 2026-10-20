@@ -99,6 +99,18 @@ def detect_captcha(page: "Page") -> str | None:
     return None
 
 
+def page_readable(page: "Page") -> bool:
+    """
+    Can the page be read right now? detect_captcha answers "none" on a
+    page it can't read (every read is suppressed to False), so a caller
+    that must not mistake unreadable for clear checks this first.
+    """
+    try:
+        return not page.is_closed() and page.evaluate("1 + 1") == 2
+    except Exception:
+        return False
+
+
 def _any_visible(page: "Page", selector: str) -> bool:
     # Every match, not .first: a hidden first match (a response textarea, a
     # pre-rendered container) used to hide a visible challenge behind it.

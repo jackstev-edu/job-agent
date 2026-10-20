@@ -1357,3 +1357,9 @@ report's role / company line also drops Unicode format characters.
 Noted: the app-name slot is the one variable Jack allowed, bounded as
 above; an app name with a comma ("Acme, Inc") is still accepted.
 
+Commit 764da6d (item 1): VERDICT FLAG, 1 FLAG and a note. Folded into the
+next commit: the CAPTCHA resume marks the event as Jack's only when the
+page can be read at that instant (detect_captcha answers "none" on an
+unreadable page); the terminal path checks the same, for parity. Noted:
+the reviewer verified the fail-on-previous claims by reading.
+

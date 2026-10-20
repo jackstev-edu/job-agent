@@ -235,9 +235,10 @@ class Wizard:
         self.out.events.append(ev)
         self._pause("captcha", f"{found} on the page. Solve it in the browser.",
                     prompt="Press Enter when it's solved: ",
-                    until=lambda: not browser_mod.detect_captcha(self.page))
-        if browser_mod.detect_captcha(self.page):
-            raise _Parked("a CAPTCHA wasn't solved")
+                    until=lambda: browser_mod.page_readable(self.page)
+                    and not browser_mod.detect_captcha(self.page))
+        if not browser_mod.page_readable(self.page) or browser_mod.detect_captcha(self.page):
+            raise _Parked("a CAPTCHA wasn't solved (or the page couldn't be read)")
         ev["handled"] = "jack"
 
     def _marked(self, refs: list[str]) -> set[str] | None:
@@ -549,9 +550,11 @@ class Wizard:
                     self._handled_by_jack("gate_pause", "final page")
                 skip_fill = True
             elif kind == "captcha":
-                # Only once the page shows no CAPTCHA; otherwise the top of
-                # the loop pauses again and the event stays unhandled.
-                if not browser_mod.detect_captcha(page):
+                # Only once the page can be read and shows no CAPTCHA;
+                # otherwise the top of the loop pauses again and the event
+                # stays unhandled (an unreadable page reads as "none" to
+                # detect_captcha, so readability is checked first).
+                if browser_mod.page_readable(page) and not browser_mod.detect_captcha(page):
                     self._handled_by_jack("captcha", None)
         while True:
             if self._over_time():

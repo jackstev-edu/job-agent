@@ -65,6 +65,31 @@ def test_continue_with_the_captcha_still_there_waits_again_and_submits_nothing()
     check.done()
 
 
+def test_a_page_unreadable_at_continue_does_not_make_the_captcha_jacks():
+    # detect_captcha answers "none" on a page it can't read; the resume
+    # must not take that for solved.
+    from agent import browser as browser_mod
+    check = Checks()
+    unreadable = {"on": False}
+    real = browser_mod.page_readable
+
+    def flaky(page):
+        return False if unreadable["on"] else real(page)
+
+    def jack_solves_it_but_the_page_cannot_be_read(page, state, job_id):
+        page.evaluate("document.querySelector('.captcha-box').remove()")
+        unreadable["on"] = True
+    with mock.patch.object(browser_mod, "page_readable", flaky):
+        out, pauses, url, clicks, w = _drive(_site_with_captcha(), "/captcha",
+                                             [jack_solves_it_but_the_page_cannot_be_read], max_pauses=2)
+    captcha_events = [e for e in w.out.events if e["kind"] == "captcha"]
+    check(captcha_events and captcha_events[0]["handled"] is None,
+          f"the CAPTCHA event stays unhandled when the page couldn't be read at Continue ({captcha_events})")
+    check(out.status == wizard.WAITING and "Submit application" not in clicks and not url.endswith("/thanks"),
+          f"the job waits again, nothing submitted ({out.status}, {out.reason[:80]}, {clicks})")
+    check.done()
+
+
 def _run_level_stop(stop):
     """
     A stand-in for a stop only the full record shows: the first call of
