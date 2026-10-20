@@ -571,10 +571,11 @@ def sign_up(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     res.steps.append(f"pressed '{pressed}'")
     res.events.append({"kind": "account_created", "detail": "by the agent", "handled": "agent"})
     kind = pages.page_kind(page)
-    if kind != pages.ACCOUNT:
-        # The press went through: this is the account's password. (When the
-        # page stays and Jack finishes by hand, nothing is stored: the
-        # password in use is not known.)
+    if kind not in (pages.ACCOUNT, pages.SIGN_IN):
+        # The press went through to a verification or a form page: this is
+        # the account's password. When the page stays (Jack finishes by
+        # hand) or bounces to the sign-in page (the account already exists,
+        # with a password this one is not), nothing is stored.
         _remember(host, password, res.steps)
     del password
     if kind == pages.ACCOUNT:

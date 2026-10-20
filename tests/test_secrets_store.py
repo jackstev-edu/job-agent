@@ -21,6 +21,8 @@ import json
 from argparse import Namespace
 from contextlib import redirect_stdout
 
+from unittest import mock
+
 import keyring
 
 from _harness import FAKE_KEYRING, Checks, mock_page, run_as_script
@@ -158,6 +160,30 @@ def test_nothing_is_stored_when_jack_finishes_the_sign_up_by_hand_or_on_googles_
 def _test_nothing_is_stored_when_jack_finishes_the_sign_up_by_hand_or_on_googles_host():
     check = Checks()
     secrets_store.forget_all()
+    # The account exists: the portal bounces the sign-up to its sign-in page.
+    # The generated password opened nothing and must not replace the stored one.
+    secrets_store.save(PORTAL_HOST, PASTED)
+    with mock_page(BLANK, _routes(_site(exists=True))) as page:
+        page.goto(f"{HOST}/register")
+        page.evaluate(f"sessionStorage.setItem('email', '{EMAIL}'); sessionStorage.setItem('exists', '1')")
+        res, printed = _run(page, pages.ACCOUNT, _Profile(), _Pauser([]))
+        check(page.url.endswith("/apply") and pages.page_kind(page) == pages.SIGN_IN,
+              f"the sign-up bounced to the sign-in page ({page.url}, {res.status}, {res.reason})")
+        check(secrets_store.get(PORTAL_HOST) == PASTED and GENERATED not in _vault_values(),
+              "the stored password is untouched; the generated one was not stored")
+        _nowhere(check, "bounced sign-up", printed, json.dumps(res.__dict__, default=str))
+    secrets_store.forget_all()
+    # Jack finishes the sign-up by hand: the press leaves the page an account
+    # page, the pause is answered, and the password in use is not known.
+    with mock_page(BLANK, _routes(_site())) as page:
+        page.goto(f"{HOST}/register")
+        with mock.patch.object(accounts, "_press", lambda page_, words, kind, what: "Create Account"):
+            res, printed = _run(page, pages.ACCOUNT, _Profile(), _Pauser([""]))
+        check(pages.page_kind(page) == pages.ACCOUNT and page.evaluate("window.__clicks") == [],
+              f"nothing was pressed and the page stayed an account page ({page.url})")
+        check(secrets_store.hosts() == [] and GENERATED not in _vault_values(),
+              f"nothing stored when the agent's press didn't move the page ({res.status}, {res.reason})")
+        _nowhere(check, "hand-finished sign-up", printed, json.dumps(res.__dict__, default=str))
     check(accounts._host(type("P", (), {"url": "https://accounts.google.com/signin"})()) is None
           and accounts._host(type("P", (), {"url": "https://Tenant.MyWorkdayJobs.com/en-US/x"})()) == "tenant.myworkdayjobs.com",
           "no key on Google's host; the tenant host otherwise")

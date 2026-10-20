@@ -1793,3 +1793,23 @@ disclosures / self-id, Save and Continue + Review + Submit, past
 employers, Divergent's Greenhouse submit control). Stopped there for
 Jack's go. Jack's snapshot commands are in the round's report.
 
+Commit 5be683b (the password store): VERDICT FLAG, 1 medium, 5 low.
+Folded in the next commit (password handling): sign_up stored the
+generated password whenever the Create press left the account page,
+including a bounce to the sign-in page because the account already
+exists, which would overwrite a correct stored password; it now stores
+only when the page left both the account and sign-in kinds, with tests
+for the bounce (the stored one untouched) and for a sign-up Jack
+finishes by hand (nothing stored). Logged: after a stored password
+fails, the browser-saved attempt is skipped (the box still holds the
+wrong value), so a correct password in Chrome's manager is not tried
+while a stale stored one exists (decision for Jack; alternative: clear
+the box and run the saved attempt once); save() writes the entry before
+the index, so an index write that fails (Credential Manager's 2560-byte
+blob limit, roughly 40 hosts) leaves a stored password `hosts()` can't
+see (fix: index first, or one credential per host); `apply.py passwords
+--forget` with a non-bare value raises ValueError as a traceback (fix:
+catch and print the message); a stored password is forgotten on any
+single failed press, a CAPTCHA or a slow page included (safe direction;
+Jack goes through a reset he may not have needed).
+
