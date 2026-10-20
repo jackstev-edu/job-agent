@@ -141,6 +141,10 @@ GOOGLE_PAGES = {
     "/share-more": lambda q: _consent([], SHARE_LANG.replace("and profile picture", "profile picture, and contacts")),
     "/share-wrapped": lambda q: _consent([], "If you do not want this, press Cancel. " + SHARE_LANG + " Google will also share your contacts with Example Co."),
     "/share-bold": lambda q: _consent([], SHARE_LANG.replace("Example Co", "<b>Example Co</b>")),
+    "/share-span": lambda q: _consent([], "If you do not want this, press Cancel. <span>" + SHARE_LANG
+                                      + "</span> <span>Google will also share your contacts with Example Co.</span>"),
+    "/share-divspan": lambda q: _consent([], "").replace("<p></p>", "<div><span>" + SHARE_LANG + "</span> <span>Google will also share your contacts with Example Co.</span></div>"),
+    "/insecure-late": lambda q: INSECURE.replace("<h1>Couldn't sign you in</h1>", "<p>" + ("filler " * 3000) + "</p><h1>Couldn't sign you in</h1>"),
     "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE,
     # A consent whose Continue sends the portal a callback that bounces straight back to Google.
     "/consent-bounce": lambda q: _consent(OK_LINES).replace(f"{PORTAL}/form?google=1", f"{PORTAL}/form?bounce=1"),
@@ -296,6 +300,8 @@ def test_any_other_permission_screen_pauses_without_a_click():
                        ("share-more", "never touches"), ("share-lang-tick", "never touches"),
                        ("share-lang-two", "never touches"), ("share-lang-list", "more than name"),
                        ("share-lang-box", "never touches"), ("share-wrapped", "never touches"),
+                       ("share-span", "never touches"), ("share-divspan", "never touches"),
+                       ("insecure-late", "never touches"),
                        ("consent-outside", "more than name"),
                        ("consent-two", "never touches"), ("consent-box", "never touches")):
             page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g={g}")
@@ -312,7 +318,11 @@ def test_any_other_permission_screen_pauses_without_a_click():
                           (["See  your primary Google Account email address "], True)):
         check(google.permissions_ok(entries) is want, f"permissions_ok({entries}) -> {want}")
     for blocks, want in (([SHARE_LANG], True), (["Sign in to Example Co", SHARE_LANG, "See Example Co's privacy policy."], True),
-                         ([SHARE_LANG.replace("Example Co", "Acme, Inc")], True),
+                         ([SHARE_LANG.replace("Example Co", "Acme, Inc")], False),
+                         ([SHARE_LANG.replace("Example Co", "Example Co & anyone")], False),
+                         ([SHARE_LANG.replace("Example Co", "Example Co, its partners, advertisers")], False),
+                         ([SHARE_LANG.replace("Example Co", "Example Co/partners")], False),
+                         ([SHARE_LANG.replace("Example Co", "Acme Inc")], True),
                          ([SHARE_LANG.upper()], True), (["  " + SHARE_LANG.replace(" ", "  ") + " "], True),
                          ([SHARE_OK], False),
                          ([SHARE_LANG.replace("and profile picture", "profile picture, and contacts")], False),

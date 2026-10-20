@@ -1363,3 +1363,18 @@ page can be read at that instant (detect_captcha answers "none" on an
 unreadable page); the terminal path checks the same, for parity. Noted:
 the reviewer verified the fail-on-previous claims by reading.
 
+Commit 5188ce6 (the sentence fold): VERDICT BLOCK, 1 BLOCK and 6 FLAGs.
+Fixed in the next commit: a text block must itself be block-level (a
+<span> with no children passed vacuously, so the sentence in a span inside
+prose would have pressed Continue); the app name may hold no list
+punctuation (, & / ; :), so extra recipients can't ride in the slot ("Acme,
+Inc" now pauses); the module docstring and CLAUDE.md say what the code
+does, and the bound is marked as the implementation's, not Jack's; tests
+for the span-in-prose and div-of-spans cases and for a "not secure"
+notice past 20,000 characters. Decision for Jack: sibling prose. A page
+whose one block is the sentence passes even when another block says
+more ("Google will also share your contacts with X"); the stricter
+reading would pause when any other visible block names sharing or
+access. Logged under the accepted page-structure items: CSS generated
+content (::after) is shown to Jack but not read by the check.
+
