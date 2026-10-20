@@ -85,7 +85,7 @@ CREATE_SUBMIT_TEXT = CREATE.replace('>Create Account</button>', '>Submit applica
 CREATE_WIDE = CREATE.replace('<div class="wrap"><button type="button" data-automation-id="createAccountSubmitButton" onclick="return false">Create Account</button>\n<div data-automation-id="click_filter" onclick="create()"></div></div>',
                              '<div class="wrap" style="display:block"><button type="button" data-automation-id="deleteAccountButton" onclick="return false" style="display:block;width:200px;height:120px">Delete account</button>'
                              '<button type="button" data-automation-id="createAccountSubmitButton" onclick="return false" style="display:block;width:200px;height:40px">Create Account</button>'
-                             '<div data-automation-id="click_filter" onclick="wide(event)"></div></div>'
+                             '<div data-automation-id="click_filter" style="border:10px solid transparent" onclick="wide(event)"></div></div>'
                              '<script>function wide(e) { const under = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.tagName === \'BUTTON\');'
                              ' sessionStorage.setItem(\'under\', under ? under.getAttribute(\'data-automation-id\') : \'none\');'
                              ' if (under && under.getAttribute(\'data-automation-id\') === \'createAccountSubmitButton\') create(); }</script>')

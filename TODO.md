@@ -1462,3 +1462,21 @@ account chooser pauses too (safe direction); if Google's own consent
 page uses custom elements, every consent screen will pause, which is
 Jack's call.
 
+Commit 8792bb7 (fold of the shadow-host rule): VERDICT FLAG, 3 FLAGs and
+two notes. Folded into the next commit: declarative shadow DOM
+(<template shadowrootmode="closed">) attaches a closed root at parse
+time without calling attachShadow, so the marker missed it; shadow
+roots are now counted through the browser's own DOM tree (CDP
+DOM.getDocument, pierced), which reports closed roots, scripted or
+declarative, and the page-side marker script is gone (so no portal page
+sees a wrapped attachShadow); a failed CDP read counts as a host
+(pause). Noted: share-openroot and share-slot were guards on the
+previous commit; the two closed-root cases were the new failures.
+
+Commit f7de8cd (fix of the Workday BLOCK): VERDICT FLAG (the BLOCK is
+closed), 3 FLAGs. Folded into the next commit: the input-kind check
+reads the type attribute as well as the IDL property; the form-wide
+overlay fixture carries a border so the padding-box offset is
+exercised. Noted: the full run sits within a minute of the 20-minute
+line; the slimmed Google test brought it to 18 minutes.
+

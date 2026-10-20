@@ -36,8 +36,6 @@ from contextlib import redirect_stdout
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
-from contextlib import contextmanager
-
 from _fill_run import _headless, classify_by_label, map_from_profile, run_fill
 from _harness import Checks, run_as_script
 from agent import accounts, google, pages, pause, wizard
@@ -168,6 +166,8 @@ GOOGLE_PAGES = {
     "/share-closedroot": lambda q: _consent([], "").replace("<p></p>", "<p>" + SHARE_LANG + " <span id=\"n\"></span></p><script>"
                                    "document.getElementById('n').attachShadow({mode: 'closed'}).innerHTML = 'Google will also share your contacts with Example Co.';</script>"),
     "/share-slot": lambda q: _consent([], "").replace("<p></p>", "<p>" + SHARE_LANG + " <slot></slot></p>"),
+    "/share-declclosed": lambda q: _consent([], "").replace("<p></p>", "<p>" + SHARE_LANG + " <span><template shadowrootmode=\"closed\">"
+                                   "Google will also share your contacts with Example Co.</template></span></p>"),
     "/share-hostaway": lambda q: _consent([], SHARE_LANG, extra='<div id="h"></div><script>document.getElementById(\'h\').attachShadow({mode: \'closed\'}).innerHTML = \'<input type="text" aria-label="Note">\';</script>'),
     "/insecure-late-control": lambda q: _consent([], SHARE_LANG).replace("<p>" + SHARE_LANG + "</p>",
                                         "<p>" + ("filler " * 3000) + "</p><p>" + SHARE_LANG + "</p>"),
@@ -216,14 +216,6 @@ def _routes():
         route.fulfill(status=200, content_type="text/html", body=body)
     return {f"{PORTAL}/**": handle, f"{GOOGLE}/**": handle, f"{LOOKALIKE}/**": handle,
             f"{GOOGLE_CAREERS}/**": handle, f"{GOOGLE_HTTP}/**": handle}
-
-
-@contextmanager
-def _headless_marked(routes):
-    """A headless context with the shadow-host marker browser.py installs."""
-    with _headless(routes) as ctx:
-        ctx.add_init_script(google.SHADOW_INIT_SCRIPT)
-        yield ctx
 
 
 def _run(page, kind, pauser, prof=None):
@@ -336,14 +328,15 @@ REFUSED_SCREENS = (("share-ok", "other"), ("share-more", "other"), ("share-lang-
                    ("share-inlineflex", "other"), ("share-cells", "other"), ("share-cellsdiv", "other"),
                    ("share-ruby", "other"), ("share-inlinegrid", "other"), ("share-shadow", "other"),
                    ("share-frame", "other"), ("share-openroot", "other"), ("share-closedroot", "other"),
-                   ("share-slot", "other"), ("share-hostaway", "other"), ("insecure-late", "other"),
+                   ("share-slot", "other"), ("share-hostaway", "other"), ("share-declclosed", "other"),
+                   ("insecure-late", "other"),
                    ("consent-broad", "list"), ("consent-outside", "list"), ("consent-two", "other"),
                    ("consent-box", "other"))
 
 
 def test_any_other_permission_screen_pauses_without_a_click():
     check = Checks()
-    with _headless_marked(_routes()) as ctx:
+    with _headless(_routes()) as ctx:
         # Three end to end: a broader list, the old sentence, two Continues.
         for g, why in (("consent-broad", "more than name"), ("share-ok", "never touches"),
                        ("consent-two", "never touches")):
@@ -367,6 +360,11 @@ def test_any_other_permission_screen_pauses_without_a_click():
         page.goto(f"{GOOGLE}/share-lang")
         kind, shape = google.classify(page)
         check(kind == google.CONSENT and google.consent_ok(shape), "the approved sentence alone is the control")
+        check(google.shadow_hosts(page) == 0, "the control page has no shadow root")
+        page.goto(f"{GOOGLE}/share-declclosed")
+        check(google.shadow_hosts(page) == 1, "a declarative closed root is counted through the browser's DOM tree")
+        page.goto(f"{GOOGLE}/share-closedroot")
+        check(google.shadow_hosts(page) == 1, "a script-attached closed root too")
     for entries, want in (([], False), (OK_LINES, True), (BROAD_LINES, False),
                           (["See your primary Google Account email address", ""], False),
                           (["See your primary Google Account email address", 3], False),
@@ -412,7 +410,7 @@ def test_googles_one_sentence_consent_is_accepted_on_its_own():
     # no tick box, no text box and exactly one Continue (the negatives are
     # in the test above).
     check = Checks()
-    with _headless_marked(_routes()) as ctx:
+    with _headless(_routes()) as ctx:
         page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g=share-lang")
         pauser = _Pauser([])
         res, _ = _run(page, pages.SIGN_IN, pauser)

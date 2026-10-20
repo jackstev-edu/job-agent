@@ -286,9 +286,10 @@ How the code keeps them, and rules of its own:
   (Jack, 2026-10-20). A block is a block-level element (not inline,
   inline-block, any -webkit-inline-* form, inline-flex, inline-grid,
   inline-table, ruby, contents or a table part) with no block-level
-  child; a visible frame, or a shadow host (open, or closed and marked
-  by the script browser.py installs before any page script runs), a
-  custom element or a slot anywhere on the screen makes it pause. The bound on that variable is the
+  child; a visible frame, or a shadow host (open ones through the page,
+  closed ones, scripted or declarative, through the browser's own DOM
+  tree over CDP), a custom element or a slot anywhere on the screen
+  makes it pause. The bound on that variable is the
   implementation's: 1-80 characters, no sentence end, no list or joining
   punctuation, no joining word such as "and", "with" or "or". A sign-in box, a code box,
   "this browser may not be secure", no list and no sentence, an

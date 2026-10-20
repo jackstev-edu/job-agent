@@ -62,21 +62,6 @@ ALLOWED_SENTENCE = ("To continue, Google will share your name, email address, la
 
 OK_WORDS = re.compile(r"^(continue|allow)$", re.I)
 
-# Installed in every page before its own scripts run: a closed shadow root
-# leaves no trace (shadowRoot is null), so its host is marked as it is
-# attached. The shape read then counts every host, open or closed.
-SHADOW_INIT_SCRIPT = r"""
-(() => {
-  const attach = Element.prototype.attachShadow;
-  if (!attach || Element.prototype.__jaShadowWrapped) return;
-  Element.prototype.__jaShadowWrapped = true;
-  Element.prototype.attachShadow = function (init) {
-    try { this.setAttribute('data-ja-shadow-host', '1'); } catch (e) {}
-    return attach.call(this, init);
-  };
-})();
-"""
-
 CHOOSER, CONSENT, OTHER = "chooser", "consent", "other"
 DONE, STUCK = "done", "stuck"
 STEP_CAP = 4
@@ -155,11 +140,13 @@ _SHAPE_JS = r"""
   // -webkit-inline-* forms), ruby, contents, none, and table parts (cells
   // sit side by side on one line).
   const inline = el => /^(inline|-webkit-inline|ruby|table-)|^(contents|none)$/.test(getComputedStyle(el).display);
-  // Anything the top document can't see into. A shadow host (open, or
-  // closed and marked by SHADOW_INIT_SCRIPT), a custom element or a slot
-  // anywhere could hold a box, a tick box, a second Continue or more
-  // wording that querySelectorAll never sees; a frame likewise.
-  const hidden = e => e.shadowRoot || e.hasAttribute('data-ja-shadow-host') || e.tagName.includes('-') || e.tagName === 'SLOT';
+  // Anything the top document can't see into. An open shadow host, a
+  // custom element or a slot anywhere could hold a box, a tick box, a
+  // second Continue or more wording that querySelectorAll never sees; a
+  // frame likewise. Closed roots (attached by script or declared in the
+  // markup) are counted by shadow_hosts() through the browser's own DOM
+  // tree, which this script cannot see.
+  const hidden = e => e.shadowRoot || e.tagName.includes('-') || e.tagName === 'SLOT';
   const opaque = [...document.querySelectorAll('*')].filter(hidden).length;
   const frames = [...document.querySelectorAll('iframe, frame, fencedframe, object, embed')].filter(visible).length;
   const blocks = [...document.querySelectorAll('p, div, li, h1, h2, h3, h4, h5, h6, section, article, main, dd, dt')]
@@ -196,6 +183,44 @@ _MARK_JS = r"""
 """
 
 
+def shadow_hosts(page: "Page") -> int:
+    """
+    How many elements of the page carry a shadow root, open or closed,
+    attached by script or declared in the markup: read through the
+    browser's own DOM tree (CDP DOM.getDocument, pierced), not the page's
+    JavaScript, which can't see a closed root. Any failure counts as one:
+    a page that can't be read this way is not driven.
+    """
+    try:
+        cdp = page.context.new_cdp_session(page)
+    except Exception:
+        return 1
+    try:
+        doc = cdp.send("DOM.getDocument", {"depth": -1, "pierce": True})
+        count = 0
+        stack = [doc.get("root") or {}]
+        while stack:
+            node = stack.pop()
+            if not isinstance(node, dict):
+                continue
+            if node.get("shadowRoots"):
+                count += 1
+            for key in ("children", "shadowRoots", "contentDocument", "templateContent", "pseudoElements"):
+                val = node.get(key)
+                if isinstance(val, list):
+                    stack.extend(val)
+                elif isinstance(val, dict):
+                    stack.append(val)
+        return count
+    except Exception:
+        return 1
+    finally:
+        try:
+            cdp.detach()
+        except Exception:
+            pass
+
+
 def classify(page: "Page") -> tuple[str, dict]:
     """
     CHOOSER (account entries, no box to type into), CONSENT (permission
@@ -215,6 +240,9 @@ def classify(page: "Page") -> tuple[str, dict]:
             or not isinstance(shape.get("insecure"), bool)):
         return OTHER, {}
     if shape["boxes"] > 0 or shape["insecure"] or shape["frames"] > 0 or shape["opaque"] > 0:
+        return OTHER, shape
+    if shadow_hosts(page) > 0:
+        shape = {**shape, "opaque": 1}
         return OTHER, shape
     if shape["ids"]:
         return CHOOSER, shape

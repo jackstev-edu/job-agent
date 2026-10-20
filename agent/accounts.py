@@ -294,7 +294,9 @@ _WORKDAY_MARK_JS = r"""
   // An <input> is pressable only as a submit / button input; its value is
   // read for the wording check only then. Any other input with the id
   // (a text or password box) is never read and never pressed.
-  const isBtnInput = el.tagName === 'INPUT' && ['submit', 'button'].includes((el.type || '').toLowerCase());
+  const kinds = ['submit', 'button'];
+  const isBtnInput = el.tagName === 'INPUT' && kinds.includes((el.type || '').toLowerCase())
+    && kinds.includes((el.getAttribute('type') || '').toLowerCase());
   if (el.tagName === 'INPUT' && !isBtnInput) return null;
   const texts = [el.innerText, isBtnInput ? el.value : '', el.getAttribute('aria-label'),
                  el.getAttribute('title')].map(norm).filter(Boolean);

@@ -47,10 +47,6 @@ def browser():
             # detection, and if a site blocks us we stop.
             args=["--disable-blink-features=AutomationControlled"],
         )
-        # google.py's shape read must see a closed shadow root's host: the
-        # marker runs in every page before its own scripts.
-        from . import google as _google
-        ctx.add_init_script(_google.SHADOW_INIT_SCRIPT)
         try:
             yield ctx
         finally:
