@@ -1312,3 +1312,21 @@ form, consistent with that, but it is not verified in code. Option: show
 the board page's role and company in the dry-run report before a real
 run.
 
+Commit f9392f6 (fold of 8da70aa's and da901af's FLAGs): VERDICT FLAG,
+3 FLAGs and a note. Folded into the next commit: every typing, ticking
+and pressing helper in accounts.py (_fill_identity, _fill_text,
+_type_secret, _tick_consent, enter_code, _press) now does nothing on
+Google's host, so a Forgot link or a code page that lands on Google
+types nothing there (previously _is_reset_page was satisfied by Google's
+"Email or phone" page and the profile email was typed into it); the
+bounce test delays the bounce and asserts no pause, so it pins the
+bounce check; the failed way back to a MyGreenhouse link is tested with
+an aborted request. The reviewer confirmed every fill path refuses the
+host before any fill and that the http / trailing-dot address is never
+driven.
+Found while testing: forgot_password reads a page of no kind after a
+timed-out pause as "signed in by Jack" (a handled: jack event with
+nothing done), pre-existing; on Google it now parks first. Jack to
+decide whether a None-kind page after an unanswered pause should park
+instead (recommended).
+

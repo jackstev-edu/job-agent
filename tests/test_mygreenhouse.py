@@ -68,13 +68,21 @@ CONSENT = _doc("Sign in to MyGreenhouse", f"""<div role="main"><ul><li>See your 
 <button type="button">Cancel</button><button type="button" onclick="location.href='{MG}/jobs/acme/123?signed=1'">Continue</button></div>""")
 
 
-def _serve(ctx, jb, boards, google=True):
-    """jb / boards: the html each public host serves for /acme/jobs/123, or None for a 404."""
+def _serve(ctx, jb, boards, google=True, abort_second_job_request=False):
+    """
+    jb / boards: the html each public host serves for /acme/jobs/123, or None
+    for a 404. `abort_second_job_request`: the way back to the job link fails.
+    """
+    seen = {"job": 0}
+
     def handler(route):
         u = urlparse(route.request.url)
         base = f"{u.scheme}://{u.hostname}"
         q = parse_qs(u.query)
         if base == MG and u.path == "/jobs/acme/123":
+            seen["job"] += 1
+            if abort_second_job_request and seen["job"] >= 2:
+                route.abort(); return
             if q.get("signed"):
                 route.fulfill(status=200, content_type="text/html", body=JOB); return
             # The redirect is done in the page: a fulfilled 302 is followed by
@@ -210,6 +218,17 @@ def test_a_board_page_that_only_shares_the_prefix_is_not_the_job():
                   f"path {path!r} -> {want}")
         check(intake._is_public_job(page, f"{BOARDS}/acme/jobs/123", "acme", "123") is False,
               "another board host than the one tried is not it")
+    check.done()
+
+
+def test_a_failed_way_back_to_the_link_parks_with_its_reason():
+    check = Checks()
+    with _context() as ctx:
+        _serve(ctx, jb=None, boards=None, abort_second_job_request=True)
+        landing = intake.open_link(ctx, f"{MG}/jobs/acme/123")
+        check(landing.parked == "couldn't get back to the MyGreenhouse link after trying the public boards",
+              f"parked with the reason ({landing.parked})")
+        check(not any("sign-in page is next" in s for s in landing.steps), f"no false step ({landing.steps})")
     check.done()
 
 

@@ -260,7 +260,10 @@ How the code keeps them, and rules of its own:
   Google's host on any scheme or spelling (`google.is_google_host`),
   whatever host family the link is in; only the exact https address is
   driven, anything else on that host is parked. A portal that bounces
-  straight back to Google after the button parks the job.
+  straight back to Google after the button parks the job, and every
+  typing, ticking and pressing helper in accounts.py does nothing on
+  Google's host, so a redirect in the middle of a step (a Forgot link, a
+  code page) lands on that check and not on a box.
   `google` alone left `accounts.NEVER_WORDS`; Microsoft, Apple, Facebook,
   LinkedIn and SSO controls are still never pressed.
 - MyGreenhouse (`my.greenhouse.io/jobs/<slug>/<id>`): when the link lands

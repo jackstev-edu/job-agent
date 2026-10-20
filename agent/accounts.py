@@ -250,7 +250,7 @@ def _press(page: "Page", words: re.Pattern, kind_now: str | None, what: str) -> 
     Press the one visible control reading as `words`, if the page is still
     of the kind this step is for. Returns the word pressed, or None.
     """
-    if pages.page_kind(page) != kind_now:
+    if _on_google(page) or pages.page_kind(page) != kind_now:
         return None
     try:
         found = page.evaluate(_FIND_BUTTON_JS, [words.pattern, NEVER_WORDS.pattern, _BTN_ATTR])
@@ -316,12 +316,26 @@ def on_google(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     return res
 
 
+def _on_google(page: "Page") -> bool:
+    """
+    Google's own site, on any address: nothing here types, ticks or presses
+    there (Jack, 2026-10-19). A redirect in the middle of a step (a Forgot
+    link, a code page, a bounce) lands on this check, not on a box.
+    """
+    try:
+        return google.is_google_host(page.url)
+    except Exception:
+        return True
+
+
 def _type_secret(page: "Page", key: str, value: str) -> bool:
     """
     Type a password into one located password box. Nothing is read back,
     nothing is logged, and the value isn't kept here. True if the keystrokes
     were sent. Only ever called from this module.
     """
+    if _on_google(page):
+        return False
     try:
         box = _box(page, _PW_ATTR, key)
         box.click(timeout=4000)
@@ -333,6 +347,8 @@ def _type_secret(page: "Page", key: str, value: str) -> bool:
 
 
 def _fill_text(page: "Page", attr: str, key: str, value: str) -> bool:
+    if _on_google(page):
+        return False
     try:
         box = _box(page, attr, key)
         box.click(timeout=4000)
@@ -344,6 +360,8 @@ def _fill_text(page: "Page", attr: str, key: str, value: str) -> bool:
 
 def _fill_identity(page: "Page", prof, steps: list[str]) -> None:
     """The email (and a first / last name if boxes are labelled so) from the profile."""
+    if _on_google(page):
+        return
     try:
         boxes = page.evaluate(_TEXT_BOXES_JS, _TEXT_ATTR) or []
     except Exception:
@@ -363,6 +381,8 @@ def _fill_identity(page: "Page", prof, steps: list[str]) -> None:
 
 def _tick_consent(page: "Page", steps: list[str]) -> None:
     """Tick a required terms / privacy box the policy allows; never anything else."""
+    if _on_google(page):
+        return
     try:
         boxes = page.evaluate(_CONSENT_BOXES_JS, _CONSENT_ATTR) or []
     except Exception:
@@ -453,6 +473,10 @@ def forgot_password(page: "Page", prof, pauser: pause_mod.Pauser, res: Result) -
         return Result(PARKED, "sign-in failed and there is no Forgot password link", res.steps,
                       res.events)
     res.steps.append(f"pressed '{pressed}'")
+    if _on_google(page):
+        # The link led to Google's own site: nothing is requested or typed
+        # there, and no event may say it was.
+        return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)
     if not _is_reset_page(page):
         return Result(PARKED, "the Forgot password link didn't lead to a reset page (one email "
                               "box, no password box)", res.steps, res.events)
@@ -600,7 +624,7 @@ def enter_code(page: "Page", code: str, steps: list[str]) -> bool:
     press Verify. The code is typed, never logged; True if it was typed.
     """
     code = str(code or "").strip()
-    if not code or pages.page_kind(page) != pages.VERIFICATION:
+    if not code or _on_google(page) or pages.page_kind(page) != pages.VERIFICATION:
         return False
     try:
         n = page.evaluate(_CODE_BOX_JS, _CODE_ATTR)

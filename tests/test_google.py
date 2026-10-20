@@ -18,7 +18,9 @@ look-alike host is not Google and gets no click. A link in Google's own
 host family never makes Google's pages fillable, nor does Google's host
 on http or with a trailing dot (refused, never driven); a portal that
 bounces straight back to Google after the button parks with nothing
-typed; the one-page `fill` command fills nothing on Google's page. Only
+typed; the one-page `fill` command fills nothing on Google's page; the
+typing, ticking and pressing helpers of accounts.py do nothing on
+Google's host (a Forgot link that lands there types nothing). Only
 `google` left
 NEVER_WORDS; the other providers are still refused and no step list
 matches a "... with Google" text.
@@ -57,14 +59,19 @@ def _doc(title, body):
     return f"<!doctype html><html><head><meta charset='utf-8'><title>{title}</title></head><body>{CLICKS_JS}{body}</body></html>"
 
 
-def _portal_sign_in(target, popup=False):
+def _portal_sign_in(target, popup=False, forgot_to_google=False):
     gbtn = (f"<button type='button' onclick=\"window.open('{target}')\">Continue with Google</button>" if popup
             else f"<a href='{target}'>Continue with Google</a>")
+    on_submit = "location.href = '/form?pw=1';"
+    if forgot_to_google:
+        # No Google button, Sign In fails, and the Forgot link goes to Google.
+        gbtn = f"<a href='{GOOGLE}/login'>Forgot password?</a>"
+        on_submit = ""
     return _doc("Sign in", f"""<h1>Sign in</h1><form id="f"><label for="em">Email Address</label>
 <input id="em" type="email" autocomplete="username"><label for="pw">Password</label>
 <input id="pw" type="password" autocomplete="current-password"><button type="submit">Sign In</button></form>
 {gbtn} <a href="#" id="ms">Sign in with Microsoft</a>
-<script>document.getElementById('f').addEventListener('submit', e => {{ e.preventDefault(); location.href = '/form?pw=1'; }});</script>""")
+<script>document.getElementById('f').addEventListener('submit', e => {{ e.preventDefault(); {on_submit} }});</script>""")
 
 
 def _portal_register(target):
@@ -127,8 +134,20 @@ GOOGLE_PAGES = {
     "/share-ok": lambda q: _consent([], SHARE_OK), "/share-lang": lambda q: _consent([], SHARE_LANG),
     "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE,
     # A consent whose Continue sends the portal a callback that bounces straight back to Google.
-    "/consent-bounce": lambda q: _consent(OK_LINES).replace(f"{PORTAL}/form?google=1", f"{PORTAL}/form?bounce=1")}
-BOUNCE = f"<!doctype html><html><body><script>location.replace('{GOOGLE}/login')</script></body></html>"
+    "/consent-bounce": lambda q: _consent(OK_LINES).replace(f"{PORTAL}/form?google=1", f"{PORTAL}/form?bounce=1"),
+    "/signup": lambda q: SIGNUP, "/code": lambda q: CODE_PAGE}
+# The bounce waits a moment, so the Google step always sees the portal first
+# and the bounce check (not the pause) is what parks the job.
+BOUNCE = (f"<!doctype html><html><body><script>setTimeout(() => location.replace('{GOOGLE}/login'), 300)"
+          f"</script></body></html>")
+# Google-host pages for the typing helpers: a sign-up shape and a code box.
+SIGNUP = _doc("Create your Google Account", """<h1>Create your Google Account</h1><form>
+<label for="em">Email</label><input id="em" type="email" name="Username">
+<label for="pw">Password</label><input id="pw" type="password" autocomplete="new-password">
+<input type="checkbox" id="agree" required><label for="agree">I agree to the Terms of Service and Privacy Policy</label>
+<button type="button">Create account</button><button type="button">Next</button></form>""")
+CODE_PAGE = _doc("Verify it's you", """<h1>Verify it's you</h1><form><label for="c">Enter verification code</label>
+<input id="c" name="code" aria-label="Enter verification code"><button type="button">Verify</button></form>""")
 
 
 def _routes():
@@ -140,7 +159,7 @@ def _routes():
             g = (q.get("g") or ["chooser"])[0]
             target = f"{LOOKALIKE}/chooser" if g == "lookalike" else f"{GOOGLE}/{g}"
             if u.path == "/apply":
-                body = _portal_sign_in(target, popup=g == "popup")
+                body = _portal_sign_in(target, popup=g == "popup", forgot_to_google=g == "forgot")
                 if g == "popup":
                     body = _portal_sign_in(f"{GOOGLE}/chooser?popup=1", popup=True)
             elif u.path == "/register":
@@ -414,10 +433,52 @@ def test_a_bounce_back_to_google_after_the_button_parks_with_nothing_typed():
         res, _ = _run(page, pages.SIGN_IN, pauser)
         check(res.status == accounts.PARKED and res.reason == accounts.GOOGLE_STUCK,
               f"parked, not typed into ({res.status}, {res.reason})")
+        check(not pauser.asked, f"parked by the bounce check, not by a pause ({pauser.asked})")
         check(page.url == f"{GOOGLE}/login" and _clicks(page) == []
               and page.evaluate("document.getElementById('id').value") == "",
               f"Google's sign-in box is empty and nothing was pressed there ({page.url}, {_clicks(page)})")
         check("typed" not in " ".join(res.steps), f"no email typed anywhere ({res.steps})")
+    check.done()
+
+
+def test_accounts_helpers_type_tick_and_press_nothing_on_googles_host():
+    check = Checks()
+    with _headless(_routes()) as ctx:
+        page = ctx.new_page(); page.goto(f"{GOOGLE}/signup")
+        steps: list = []
+        accounts._fill_identity(page, _Profile(), steps)
+        check(steps == [] and page.evaluate("document.getElementById('em').value") == "",
+              f"the identity helper types nothing on Google ({steps})")
+        boxes = page.evaluate(accounts._PASSWORD_BOXES_JS, accounts._PW_ATTR) or []
+        check(boxes and accounts._type_secret(page, boxes[0]["key"], GENERATED) is False
+              and page.evaluate("document.getElementById('pw').value") == "",
+              "the password helper types nothing on Google")
+        accounts._tick_consent(page, steps)
+        check(steps == [] and page.evaluate("document.getElementById('agree').checked") is False,
+              "the consent helper ticks nothing on Google")
+        kind = pages.page_kind(page)
+        check(accounts._press(page, accounts.CREATE_WORDS, kind, "Create account") is None
+              and _clicks(page) == [], f"no step list presses anything on Google ({_clicks(page)})")
+        page.goto(f"{GOOGLE}/code")
+        check(pages.page_kind(page) == pages.VERIFICATION, "the code page reads as a verification page")
+        check(accounts.enter_code(page, "123456", steps) is False and steps == []
+              and page.evaluate("document.getElementById('c').value") == "" and _clicks(page) == [],
+              "a code is never typed on Google")
+    check.done()
+
+
+def test_a_forgot_link_that_lands_on_google_types_nothing_there():
+    check = Checks()
+    with _headless(_routes()) as ctx:
+        page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g=forgot")
+        pauser = _Pauser([None, None])
+        res, _ = _run(page, pages.SIGN_IN, pauser)
+        check(res.status == accounts.PARKED, f"parked ({res.status}, {res.reason})")
+        check(page.url == f"{GOOGLE}/login" and _clicks(page) == []
+              and page.evaluate("document.getElementById('id').value") == "",
+              f"on Google's sign-in page nothing was typed or pressed ({page.url}, {_clicks(page)})")
+        check("typed the email" not in res.steps[1:] or res.steps.index("typed the email") < res.steps.index("pressed 'Forgot password?'"),
+              f"the email was typed only on the portal, before the Forgot link ({res.steps})")
     check.done()
 
 
