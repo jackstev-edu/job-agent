@@ -23,7 +23,7 @@ import json
 
 from _harness import Checks, mock_page, run_as_script
 from agent import accounts, pages
-from test_accounts import BLANK, CODE, EMAIL, GENERATED, _Pauser, _Profile, _run
+from test_accounts import BLANK, CODE, EMAIL, GENERATED, PASTED, _Pauser, _Profile, _nowhere, _run
 
 HOST = "https://acme.wd5.myworkdayjobs.com"
 
@@ -43,7 +43,7 @@ SIGN_IN = STATE_JS + """<h1>Sign In</h1><div data-automation-id="signInContent">
 <label for="input-2">Password</label><input id="input-2" type="password" data-automation-id="password">
 <div class="wrap"><button type="button" data-automation-id="signInSubmitButton" onclick="return false">Sign In</button>
 <div data-automation-id="click_filter" onclick="signIn()"></div></div></form>
-<button type="button" data-automation-id="forgotPasswordLink">Forgot Password?</button>
+<button type="button" data-automation-id="forgotPasswordLink" onclick="location.href='/forgot'">Forgot Password?</button>
 <p>Don't have an account? <button type="button" data-automation-id="createAccountLink"
    onclick="location.href='/create'">Create Account</button></p></div>
 <script>function signIn() {
@@ -75,6 +75,21 @@ VERIFY = STATE_JS + """<h1>Verify Your Email</h1><p>Enter the verification code 
 <button type="button" data-automation-id="verifyButton" onclick="verify()">Verify</button></form>
 <script>function verify() { if (document.getElementById('input-7').value === 'CODE') location.href = '/apply-form'; }</script>""".replace("CODE", CODE)
 
+FORGOT = STATE_JS + """<h1>Reset your password</h1><form id="f"><label for="input-8">Email Address</label>
+<input id="input-8" type="text" data-automation-id="email"><button type="button" onclick="sent()">Send reset link</button></form>
+<script>function sent() { sessionStorage.setItem('reset_for', document.getElementById('input-8').value); location.href = '/sent'; }</script>"""
+SENT = STATE_JS + "<h1>Check your email</h1><p>We sent a link.</p><a href='/apply'>Back to sign in</a>"
+# A create-account page whose submit reads like Submit application, and one
+# whose overlay covers the whole form (two controls under it).
+CREATE_SUBMIT_TEXT = CREATE.replace('>Create Account</button>', '>Submit application</button>')
+CREATE_WIDE = CREATE.replace('<div class="wrap"><button type="button" data-automation-id="createAccountSubmitButton" onclick="return false">Create Account</button>\n<div data-automation-id="click_filter" onclick="create()"></div></div>',
+                             '<div class="wrap" style="display:block"><button type="button" data-automation-id="deleteAccountButton" onclick="return false" style="display:block;width:200px;height:40px">Delete account</button>'
+                             '<button type="button" data-automation-id="createAccountSubmitButton" onclick="return false" style="display:block;width:200px;height:40px">Create Account</button>'
+                             '<div data-automation-id="click_filter" onclick="wide(event)"></div></div>'
+                             '<script>function wide(e) { const under = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.tagName === \'BUTTON\');'
+                             ' sessionStorage.setItem(\'under\', under ? under.getAttribute(\'data-automation-id\') : \'none\');'
+                             ' if (under && under.getAttribute(\'data-automation-id\') === \'createAccountSubmitButton\') create(); }</script>')
+assert "wide(event)" in CREATE_WIDE
 APPLY_FORM = STATE_JS + """<h1>My Information</h1><form><label for="fn">First Name</label><input id="fn" name="firstName">
 <label for="ln">Last Name</label><input id="ln" name="lastName">
 <button type="button" data-automation-id="bottom-navigation-next-button">Save and Continue</button></form>"""
@@ -82,7 +97,9 @@ APPLY_FORM = STATE_JS + """<h1>My Information</h1><form><label for="fn">First Na
 
 def _site():
     html = lambda body: f"<!doctype html><html><head><meta charset='utf-8'></head><body>{body}</body></html>"
-    return {"/apply": html(SIGN_IN), "/create": html(CREATE), "/verify": html(VERIFY), "/apply-form": html(APPLY_FORM)}
+    return {"/apply": html(SIGN_IN), "/create": html(CREATE), "/verify": html(VERIFY), "/apply-form": html(APPLY_FORM),
+            "/forgot": html(FORGOT), "/sent": html(SENT), "/create-submit-text": html(CREATE_SUBMIT_TEXT),
+            "/create-wide": html(CREATE_WIDE)}
 
 
 def _routes(site):
@@ -130,8 +147,8 @@ def test_no_account_yet_creates_one_through_the_overlay_and_answers_the_code():
               and created.get("tos") is True, f"the form got the email, the generated password twice and the consent tick")
         check("pressed 'Create Account (Workday)'" in res.steps and "pressed 'Sign In (Workday)'" in res.steps,
               f"the steps name the Workday presses ({res.steps})")
-        check(GENERATED not in printed and GENERATED not in json.dumps(res.__dict__, default=str),
-              "the password reaches no log or result")
+        _nowhere(check, "workday sign-up", printed, json.dumps(res.__dict__, default=str),
+                 json.dumps(pauser.asked), json.dumps(pauser.log))
     check.done()
 
 
@@ -150,6 +167,7 @@ def test_a_saved_password_signs_in_through_the_overlay():
         check([c for c in clicks if c not in ("email", "password")] == ["click_filter"],
               f"the only press was the overlay over Sign In ({clicks})")
         check("Saved-1234567890!" not in printed + json.dumps(res.__dict__, default=str), "the saved password was never read")
+        _nowhere(check, "workday sign-in", printed, json.dumps(res.__dict__, default=str))
     check.done()
 
 
@@ -170,6 +188,67 @@ def test_the_button_itself_is_never_the_click_and_nothing_is_pressed_off_its_pag
                       "document.querySelector('[data-automation-id=signInSubmitButton]').onclick = () => signIn()")
         check(accounts._press_workday(page, "sign_in", pages.SIGN_IN) is True
               and page.evaluate("window.__clicks") == ["signInSubmitButton"], "with no overlay the button is clicked")
+    check.done()
+
+
+def test_an_existing_account_goes_through_workdays_forgot_link():
+    check = Checks()
+    with mock_page(BLANK, _routes(_site())) as page:
+        page.goto(f"{HOST}/apply")
+        page.evaluate(f"sessionStorage.setItem('email', '{EMAIL}'); sessionStorage.setItem('pw', '{PASTED}')")
+        page.reload()
+        # The sign-in page has no Create Account link on this tenant: remove it.
+        page.evaluate("document.querySelector('[data-automation-id=createAccountLink]').remove()")
+        pauser = _Pauser([PASTED])
+        res, printed = _run(page, pages.SIGN_IN, _Profile(), pauser)
+        check(res.status == accounts.CONTINUE and page.url.endswith("/apply-form"),
+              f"Sign In through the overlay, Forgot Password by id, the reset, the pasted password, signed in "
+              f"({res.status}, {res.reason}, {page.url})")
+        check(_session(page, "reset_for") == EMAIL and "pressed 'Forgot Password (Workday)'" in res.steps,
+              f"the Forgot link was pressed by its id and the reset requested for the profile email ({res.steps})")
+        _nowhere(check, "workday forgot", printed, json.dumps(res.__dict__, default=str),
+                 json.dumps(pauser.asked), json.dumps(pauser.log))
+    check.done()
+
+
+def test_the_id_press_refuses_duplicates_submit_wording_google_and_lands_on_the_control():
+    check = Checks()
+    check(accounts.WORKDAY_PRESSABLE == {"create", "sign_in", "create_link", "forgot_link"},
+          "exactly the two submits and the two links are pressable by id")
+    with mock_page(BLANK, _routes(_site())) as page:
+        page.goto(f"{HOST}/create")
+        page.evaluate("document.querySelector('form').insertAdjacentHTML('beforeend', "
+                      "'<button type=\"button\" data-automation-id=\"createAccountSubmitButton\">Create Account</button>')")
+        check(accounts._press_workday(page, "create", pages.ACCOUNT) is False and page.evaluate("window.__clicks") == [],
+              "two visible controls with the id: nothing pressed")
+        page.goto(f"{HOST}/create-submit-text")
+        check(accounts._press_workday(page, "create", pages.ACCOUNT) is False and page.evaluate("window.__clicks") == [],
+              "a control with the id that reads 'Submit application' is never pressed")
+        page.goto(f"{HOST}/create")
+        # An overlay that doesn't cover the control's centre is not its overlay: the control is clicked.
+        page.evaluate("const o = document.querySelector('[data-automation-id=click_filter]'); o.style.inset = 'auto'; "
+                      "o.style.left = '-500px'; o.style.width = '10px'; o.style.height = '10px';"
+                      "document.querySelector('[data-automation-id=createAccountSubmitButton]').onclick = () => create()")
+        page.evaluate("document.getElementById('input-6').checked = true; document.getElementById('input-4').value = 'Abcdefghijkl1!'; document.getElementById('input-5').value = 'Abcdefghijkl1!'")
+        check(accounts._press_workday(page, "create", pages.ACCOUNT) is True
+              and page.evaluate("window.__clicks") == ["createAccountSubmitButton"], "an overlay elsewhere: the control itself is clicked")
+        page.goto(f"{HOST}/create-wide")
+        page.evaluate("document.getElementById('input-6').checked = true; document.getElementById('input-4').value = 'Abcdefghijkl1!'; document.getElementById('input-5').value = 'Abcdefghijkl1!'")
+        ok = accounts._press_workday(page, "create", pages.ACCOUNT)
+        check(ok is True and _session(page, "under") == "createAccountSubmitButton",
+              f"under a form-wide overlay the click lands on the control's own point ({ok}, {_session(page, 'under')})")
+    check.done()
+
+
+def test_nothing_is_pressed_by_id_on_googles_host():
+    check = Checks()
+    html = f"<!doctype html><html><head><meta charset='utf-8'></head><body>{SIGN_IN}</body></html>"
+    with mock_page(BLANK, {"https://accounts.google.com/**": lambda route: route.fulfill(content_type="text/html", body=html)}) as page:
+        page.goto("https://accounts.google.com/signin")
+        check(pages.page_kind(page) == pages.SIGN_IN, "the page reads as a sign-in page (so the refusal below is the host's)")
+        check(accounts._press_workday(page, "sign_in", pages.SIGN_IN) is False
+              and accounts._press_workday(page, "create_link", pages.SIGN_IN) is False
+              and page.evaluate("window.__clicks") == [], "on Google's host nothing is pressed by id")
     check.done()
 
 

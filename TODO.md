@@ -1404,3 +1404,29 @@ positioning), so "another block says more" can look like one line of
 prose; the strict reading would pause when any other visible block
 exists besides the sentence, the heading and the "This will allow" line.
 
+Commit e949249 (item 2): VERDICT FLAG, 6 FLAGs. Folded into the next
+commit: the Workday id press clicks the control's own point inside the
+overlay (an overlay larger than the button no longer sends the click to
+the overlay's centre) and takes only an overlay in the control's parent;
+a control with the id that reads like Submit application or another
+provider (NEVER_WORDS) is never pressed; sign_in_link is listed but no
+longer pressable; the tests run _nowhere (files, tracker, gate_runs) for
+the password; tests for two controls sharing an id, an overlay that
+doesn't cover the control, a form-wide overlay, Google's host, Workday's
+Forgot Password link and the Submit wording; the dry report lists the
+controls only on a Workday landing. Noted: the mock's overlay semantics
+are a reconstruction of Workday's markup; the real-page dry run of
+2026-10-20 (headless, the profile being in use) found the same ids on
+the GM tenant's Create Account page (create, email, password, verify,
+forgot_link, sign_in_link, overlay).
+
+Commit 62a90e0 (item 3): VERDICT FLAG, 4 low FLAGs. Folded into the next
+commit: the search-box normaliser sets aside only the punctuation
+normalize() does (quotes, brackets, full stops, commas, slashes,
+hyphens), so "Example & University" or "Example University!" no longer
+equals "Example University" (the first cut stripped every mark, a
+widening in that corner); the blank-box checks also assert the menu is
+closed. Noted: the first test in tests/test_search_dropdown.py (the exact
+value is chosen) passes on the previous commit too; only the second is a
+fails-before test.
+

@@ -38,14 +38,15 @@ if TYPE_CHECKING:
 # (their ids regenerate; the automation ids don't), and Workday covers its
 # Sign In / Create Account button with a "click_filter" overlay that takes
 # the click. Only these two submits and the two links are ever pressed by
-# id, each on the page kind its step is for.
+# id, each on the page kind its step is for (sign_in_link is listed, never
+# pressed).
 WORKDAY_IDS = {
     "email": "email", "password": "password", "verify": "verifyPassword",
     "consent": "createAccountCheckbox", "create": "createAccountSubmitButton",
     "sign_in": "signInSubmitButton", "create_link": "createAccountLink",
     "sign_in_link": "signInLink", "forgot_link": "forgotPasswordLink", "overlay": "click_filter",
 }
-WORKDAY_PRESSABLE = {"create", "sign_in", "create_link", "sign_in_link", "forgot_link"}
+WORKDAY_PRESSABLE = {"create", "sign_in", "create_link", "forgot_link"}
 
 # Buttons each step may press, as whole normalised text. Never anything that
 # reads like Submit application: on these pages there is no application to
@@ -272,11 +273,16 @@ _WORKDAY_IDS_JS = r"""
 }
 """
 
-# Marks the one visible control with this automation id and, if a
-# click_filter overlay covers it, that overlay too; returns where the
-# click should go ('overlay' or 'control') or null.
+# Marks the one visible control with this automation id (never one that
+# reads like Submit application or another provider, whatever its id)
+# and, if a click_filter overlay in the same parent covers its centre,
+# that overlay too. Returns {where: 'overlay' | 'control', x, y}, the
+# control's own centre as an offset inside the marked element, so the
+# click lands on the control's point even under a larger overlay; or null.
 _WORKDAY_MARK_JS = r"""
-([id, attr]) => {
+([id, attr, neverRx]) => {
+  const NEVER = new RegExp(neverRx, 'i');
+  const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
   const visible = el => {
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
@@ -284,15 +290,19 @@ _WORKDAY_MARK_JS = r"""
   document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
   const hits = [...document.querySelectorAll('[data-automation-id="' + id + '"]')].filter(visible);
   if (hits.length !== 1) return null;
-  const el = hits[0], b = el.getBoundingClientRect();
+  const el = hits[0];
+  const texts = [el.innerText, el.tagName === 'INPUT' ? el.value : '', el.getAttribute('aria-label'),
+                 el.getAttribute('title')].map(norm).filter(Boolean);
+  if (texts.some(t => NEVER.test(t))) return null;
+  const b = el.getBoundingClientRect();
   const cx = b.left + b.width / 2, cy = b.top + b.height / 2;
   const covers = o => { const r = o.getBoundingClientRect();
     return r.left <= cx && cx <= r.right && r.top <= cy && cy <= r.bottom; };
   const overlay = [...document.querySelectorAll('[data-automation-id="click_filter"]')]
-    .filter(visible).find(covers);
-  if (overlay) { overlay.setAttribute(attr, '1'); return 'overlay'; }
-  el.setAttribute(attr, '1');
-  return 'control';
+    .filter(visible).filter(o => el.parentElement && el.parentElement.contains(o)).find(covers);
+  const target = overlay || el, r = target.getBoundingClientRect();
+  target.setAttribute(attr, '1');
+  return {where: overlay ? 'overlay' : 'control', x: cx - r.left, y: cy - r.top};
 }
 """
 
@@ -318,13 +328,15 @@ def _press_workday(page: "Page", key: str, kind_now: str | None) -> bool:
     if key not in WORKDAY_PRESSABLE or _on_google(page) or pages.page_kind(page) != kind_now:
         return False
     try:
-        where = page.evaluate(_WORKDAY_MARK_JS, [WORKDAY_IDS[key], _BTN_ATTR])
+        mark = page.evaluate(_WORKDAY_MARK_JS, [WORKDAY_IDS[key], _BTN_ATTR, NEVER_WORDS.pattern])
     except Exception:
         return False
-    if where not in ("overlay", "control"):
+    if (not isinstance(mark, dict) or mark.get("where") not in ("overlay", "control")
+            or not isinstance(mark.get("x"), (int, float)) or not isinstance(mark.get("y"), (int, float))):
         return False
     try:
-        page.locator(f"[{_BTN_ATTR}='1']").first.click(timeout=4000)
+        page.locator(f"[{_BTN_ATTR}='1']").first.click(timeout=4000,
+                                                      position={"x": float(mark["x"]), "y": float(mark["y"])})
     except Exception:
         return False
     browser_mod.settle(page, 1500)

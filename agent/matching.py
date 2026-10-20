@@ -37,21 +37,23 @@ def normalize(text: str) -> str:
     return " ".join(words)
 
 
-_PUNCT = re.compile(r"[^\w\s]+")
-
-
 def _plain(text) -> str:
-    """Case, every punctuation mark and spacing set aside; no abbreviation equivalents."""
-    out = _PUNCT.sub(" ", str(text or "")).lower()
+    """
+    Case, the punctuation normalize() sets aside (quotes, brackets, full
+    stops, commas, slashes, hyphens) and spacing; no abbreviation
+    equivalents. Any other mark ("&", "!", "_") still has to match.
+    """
+    out = _TRIM.sub(" ", str(text or "")).lower()
     return _SPACE.sub(" ", out).strip()
 
 
 def exact_match(value, options: list[str]) -> tuple[str | None, str]:
     """
-    The one option that equals `value`, as written or once case,
+    The one option that equals `value`, as written or once case, the usual
     punctuation and spacing are set aside (and nothing else: the
     abbreviation table normalize() applies is not used here, so "Example
-    Univ" is not "Example University"). Nothing looser: a search box that
+    Univ" is not "Example University", and "&" or "!" must match as
+    written). Nothing looser: a search box that
     lists "Example University" and "Example University of Technology" for
     "Example Univ" gets no choice, and the reason says so.
     """

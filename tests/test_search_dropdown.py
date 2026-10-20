@@ -72,6 +72,10 @@ def _state(page):
             page.evaluate("window.__submits"), page.evaluate("window.__enters"))
 
 
+def _menu_closed(page):
+    return page.evaluate("getComputedStyle(document.getElementById('menu')).display") == "none"
+
+
 def test_the_scan_marks_a_search_box_and_the_exact_value_is_chosen():
     check = Checks()
     with mock_page(_page()) as page:
@@ -102,17 +106,20 @@ def test_anything_but_an_exact_row_is_left_blank_with_the_reason():
             field = _school(page)
             ok, detail = filler.fill_one(page, field, value)
             picked, left, submits, enters = _state(page)
-            check(not ok and "no exact match" in detail and picked is None and left == "",
-                  f"'{value}' ({why}): nothing chosen, the box left blank, the reason given ({ok}, {detail}, {picked}, {left!r})")
+            check(not ok and "no exact match" in detail and picked is None and left == "" and _menu_closed(page),
+                  f"'{value}' ({why}): nothing chosen, the box left blank, the menu closed, the reason given ({ok}, {detail}, {picked}, {left!r})")
             check(submits == 0 and enters == 0, f"'{value}': no Enter, nothing sent")
     with mock_page(_page()) as page:
         field = _school(page)
         ok, detail = filler.fill_one(page, field, "Nowhere College")
         picked, left, submits, enters = _state(page)
-        check(not ok and "found no match" in detail and picked is None and left == "",
-              f"a value the search doesn't know: left blank ({ok}, {detail}, {left!r})")
+        check(not ok and "found no match" in detail and picked is None and left == "" and _menu_closed(page),
+              f"a value the search doesn't know: left blank, the menu closed ({ok}, {detail}, {left!r})")
     for value, options, want in (("Example University", SCHOOLS, "Example University"),
-                                 ("example  university!", SCHOOLS, "Example University"),
+                                 ("example  university.", SCHOOLS, "Example University"),
+                                 ("example  university!", SCHOOLS, None),
+                                 ("Example & University", ["Example University"], None),
+                                 ("Example_University", ["Example University"], None),
                                  ("Example Univ", SCHOOLS, None), ("University", SCHOOLS, None),
                                  ("Technology", SCHOOLS, None), ("", SCHOOLS, None), (None, SCHOOLS, None),
                                  ("Example University", [], None),

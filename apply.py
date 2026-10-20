@@ -1090,7 +1090,8 @@ def dry_report(landing: "intake.Landing", ats: str, role: str = "", company: str
     steps = f"; {'; '.join(landing.steps)}" if landing.steps else "; nothing clicked"
     who = (f"; role '{_clean_title(role)}' at '{_clean_title(company)}'" if (role or company) else
            "; role and company: not read")
-    wd = sorted(accounts.workday_controls(page)) if page is not None and not page.is_closed() else []
+    wd = (sorted(accounts.workday_controls(page))
+          if ats == adapters.CATALOG["workday"].name and page is not None and not page.is_closed() else [])
     if wd:
         who += f"; Workday account controls: {', '.join(wd)}"
     text = (f"dry run: landed on {where}; portal {ats} (detected by {landing.portal_method}){who}; "
