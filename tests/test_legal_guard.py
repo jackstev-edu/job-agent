@@ -399,16 +399,30 @@ def test_a_department_of_defense_question_is_answered_only_from_its_own_line():
     check(v["action"] == "human" and "specific company" in v["reason"],
           f"'currently employed by' is a per-company stop before any line is read ({v['action']}, {v.get('reason')})")
     # BLOCK fix: any other DoD question has no line and is Jack's (through
-    # the guard, or earlier through a HARD_STOPS per-company stop).
-    prof = _Profile({"eligibility.dod_employment_past_two_years": False})
-    for label in ("Are you willing to work at a Department of Defense facility?",
-                  "Have you ever worked for the DoD?", "Have you worked on DoD contracts?",
-                  "Are you a current DoD contractor?",
-                  "Are you interested in working for the Department of Defense?",
-                  "Were you employed by the DoD at any time?"):
+    # the guard, or earlier through a HARD_STOPS per-company stop): a
+    # facility, a contract, an interest, a contractor, "currently", or the
+    # phrase in another sentence of the help text.
+    prof = _Profile({"eligibility.dod_employment_past_two_years": False, "eligibility.security_clearance": "None"})
+    for field in ({"label": "Are you willing to work at a Department of Defense facility?"},
+                  {"label": "Have you ever worked for the DoD?"}, {"label": "Have you worked on DoD contracts?"},
+                  {"label": "Are you a current DoD contractor?"},
+                  {"label": "Are you interested in working for the Department of Defense?"},
+                  {"label": "Were you employed by the DoD at any time?"},
+                  {"label": "Have you been employed by a DoD contractor in the past two years?"},
+                  {"label": "Have you been employed by the Department of Defense (civilian) subcontractor in the past two years?"},
+                  {"label": "Are you currently a DoD employee?"},
+                  {"label": "Are you currently employed as a contractor supporting the Department of Defense?"},
+                  {"label": "Are you willing to work at a Department of Defense facility?",
+                   "help_text": "Employees currently assigned to these sites receive a stipend. Staff employed by the DoD in the past two years must say so."}):
+        v = sensitive.decide({**field, "type": "radio", "options": ["Yes", "No"]}, "personal_fact", prof)
+        check(v["action"] == "human",
+              f"{field['label']!r}: no line claims it, so it is Jack's ({v['action']}, {v.get('reason')})")
+    # The phrase itself, in one sentence, either order.
+    for label in ("Have you been employed by the U.S. Department of Defense (civilian or military) in the past two years?",
+                  "Employed by DoD in the last 2 years?",
+                  "Within the past two years, were you employed with the Department of Defense?"):
         v = sensitive.decide({"label": label, "type": "radio", "options": ["Yes", "No"]}, "personal_fact", prof)
-        check(v["action"] == "human" and ("can't tell which profile line" in v["reason"] or "specific company" in v["reason"]),
-              f"{label!r}: no line claims it, so it is Jack's ({v['action']}, {v.get('reason')})")
+        check(v["action"] == "fill" and v["value"] == "No", f"{label!r}: the line's own question fills ({v['action']}, {v.get('reason')})")
     clearance = {"label": "Do you currently hold a DoD security clearance?", "type": "radio", "options": ["Yes", "No"]}
     v = sensitive.decide(clearance, "personal_fact", _Profile({"eligibility.dod_employment_past_two_years": True,
                                                                "eligibility.security_clearance": "None"}))

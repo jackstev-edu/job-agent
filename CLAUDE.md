@@ -199,7 +199,11 @@ How the code keeps them, and rules of its own:
   placeholder) names exactly one line and only the field's own identifier
   names another in the same area (Greenhouse's `hispanic_ethnicity`), the
   question's line answers it. A Department of Defense employment question
-  has its own guard kind and line (`eligibility.dod_employment_past_two_years`).
+  has its own guard kind and line (`eligibility.dod_employment_past_two_years`),
+  claimed only by the one phrase in one sentence ("employed by / with the
+  DoD", not a contractor, with the past-two-years scope) and only when
+  the label itself asks it (`LABEL_ONLY_LINES`); every other DoD question
+  is Jack's.
 - The browser's password manager lives in the agent's Chrome profile
   (`~/.job-agent/chrome-profile`; since 2026-10-19 it may be signed in to
   Jack's Google account, by his hand only).

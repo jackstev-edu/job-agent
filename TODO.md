@@ -1497,3 +1497,17 @@ Logged: "Do you hold a Secret clearance?" has no LEGAL_GUARD kind and
 goes to the model when the classifier calls it ordinary (pre-existing);
 a "clearance" guard kind mapped to the clearance lines would close it.
 
+Commit e5796b0 (fix of item 4's BLOCK): VERDICT BLOCK (narrowed, not
+closed: the three lookaheads spanned the whole text, so a DoD
+contractor, a "currently" question, or help text elsewhere still
+reached the line), 4 FLAGs. Fixed in the next commit: the row is one
+ordered phrase in one sentence ("employed by / with (the) (U.S.) DoD",
+not a (sub)contractor, with the past-two-years scope within 80
+characters either side); "currently" is gone (the line is "past two
+years", not "now"); tests for the contractor, current-employee and
+help-text cases. Noted: "Decline to self-identify." as a value passed
+on the previous commit too (a guard); hand-written decline values such
+as "Prefer not to respond" or "I'd rather not say" are not whole-value
+declines and come to Jack (safe; the template says to use "Prefer not
+to say").
+

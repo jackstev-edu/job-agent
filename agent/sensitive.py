@@ -59,12 +59,17 @@ PROFILE_PATHS: list[tuple[str, str]] = [
     # Employment by the Department of Defense in the past two years (a
     # post-government-employment question), above the clearance row so a
     # "DoD" employment question isn't read as a clearance one. The row
-    # claims only the question it was written for: the DoD, "employ" and
-    # the two-year (or current) scope all in the text; any other DoD
-    # question (a facility, a contract, an interest) has no line and is
-    # Jack's through the guard.
-    (r"^(?=[\s\S]*(department\s+of\s+defen[cs]e|\bdod\b))(?=[\s\S]*\bemploy\w*)"
-     r"(?=[\s\S]*((past|last|previous|within(\s+the)?|preceding|prior)\s+(two|2)\s+years?|\bcurrently\b))",
+    # claims only the question it was written for, as one phrase in one
+    # sentence: "employed by / with (the) (U.S.) Department of Defense /
+    # DoD", not a contractor, with the past-two-years scope within 80
+    # characters either side. "Currently", a contractor, a facility, a
+    # contract or an interest has no line and is Jack's through the guard.
+    (r"\bemploy\w*\s+(by|with)\s+(the\s+)?(u\.?\s?s\.?\s+)?(department\s+of\s+defen[cs]e|dod)\b"
+     r"(?!\s*(\((civilian|military)[^)]*\)\s*)?(sub)?contractor)[^.?!\n]{0,80}"
+     r"(past|last|previous|within(\s+the)?|preceding|prior)\s+(two|2)\s+years?"
+     r"|(past|last|previous|within(\s+the)?|preceding|prior)\s+(two|2)\s+years?[^.?!\n]{0,80}"
+     r"\bemploy\w*\s+(by|with)\s+(the\s+)?(u\.?\s?s\.?\s+)?(department\s+of\s+defen[cs]e|dod)\b"
+     r"(?!\s*(\((civilian|military)[^)]*\)\s*)?(sub)?contractor)",
      "eligibility.dod_employment_past_two_years"),
     (r"security\s+clearance|\bdod\b\s+clearance|(secret|ts/sci)\s+clearance",
      "eligibility.security_clearance"),
@@ -217,6 +222,11 @@ LEGAL_AREAS = {
     "compensation": "compensation.",
     "dod": frozenset({"eligibility.dod_employment_past_two_years"}),
 }
+
+
+# Lines whose question must be asked by the label itself, not by help text
+# beside another question. Only lines added on or after 2026-10-20.
+LABEL_ONLY_LINES = frozenset({"eligibility.dod_employment_past_two_years"})
 
 
 def in_legal_area(path: str | None, kinds) -> bool:
@@ -506,6 +516,13 @@ def decide(field: dict, category: str, profile) -> dict:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"This reads as a {kind} question, but the closest "
                               f"profile line is `{path}`. Answer it yourself."}
+        if path in LABEL_ONLY_LINES and path not in profile_lines(str(field.get("label") or "")):
+            # A line whose question must be the label itself: help text that
+            # mentions the same thing beside another question doesn't make
+            # that question this one (2026-10-20).
+            return {**base, "action": "human", "value": None, "source": "human",
+                    "reason": f"This is a {kind} question, but only its help text names "
+                              f"`{path}`. Answer it yourself."}
         ftype = (field.get("type") or "").lower()
         if guard and not field.get("options") and ftype != "checkbox":
             return {**base, "action": "human", "value": None, "source": "human",
