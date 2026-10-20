@@ -247,7 +247,11 @@ How the code keeps them, and rules of its own:
   combobox's own text) shows the choice; a plain input with no separate
   display is accepted but marked unconfirmed; one whose display holds the
   choice as whole words is kept and marked unconfirmed; otherwise it
-  empties the box and reports it unfilled. A radio option is checked with no click-time
+  empties the box and reports it unfilled. A type-to-search dropdown (one
+  that lists nothing until text is typed) takes only a row equal to the
+  profile value once case, punctuation and spacing are set aside; never the
+  first or the closest row; with no such row it is left blank and the
+  report says so (Jack, 2026-10-20). A radio option is checked with no click-time
   re-check. It has no code path that clicks Submit, accepts
   terms or signs anything. It must stay that way.
 - The submit gate: a pure function of the record and the profile. It never

@@ -37,6 +37,41 @@ def normalize(text: str) -> str:
     return " ".join(words)
 
 
+_PUNCT = re.compile(r"[^\w\s]+")
+
+
+def _plain(text) -> str:
+    """Case, every punctuation mark and spacing set aside; no abbreviation equivalents."""
+    out = _PUNCT.sub(" ", str(text or "")).lower()
+    return _SPACE.sub(" ", out).strip()
+
+
+def exact_match(value, options: list[str]) -> tuple[str | None, str]:
+    """
+    The one option that equals `value`, as written or once case,
+    punctuation and spacing are set aside (and nothing else: the
+    abbreviation table normalize() applies is not used here, so "Example
+    Univ" is not "Example University"). Nothing looser: a search box that
+    lists "Example University" and "Example University of Technology" for
+    "Example Univ" gets no choice, and the reason says so.
+    """
+    if value is None or not options:
+        return None, "no exact match — nothing to compare"
+    raw = str(value).strip()
+    hits = [o for o in options if o.strip() == raw]
+    if len(hits) == 1:
+        return hits[0], "exact"
+    target = _plain(raw)
+    if not target:
+        return None, "no exact match — the value is blank once punctuation is removed"
+    hits = list(dict.fromkeys(o for o in options if _plain(o) == target))
+    if len(hits) == 1:
+        return hits[0], "normalized"
+    if len(hits) > 1:
+        return None, f"no exact match — {len(hits)} rows read the same: {hits[:4]}"
+    return None, f"no exact match among the {len(options)} row(s) the search offered; left blank"
+
+
 def best_match(value, options: list[str], strict: bool = False) -> tuple[str | None, str]:
     """
     Returns (chosen_option, how_it_was_chosen).

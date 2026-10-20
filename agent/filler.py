@@ -367,9 +367,11 @@ def _fill_combobox(page: "Page", element, field: dict, value: str,
                 return False, "the focus moved away while typing; left empty for you"
             page.wait_for_timeout(45)
 
-    options = extract.wait_for_options(page, 3000)
+    searching = bool(field.get("search_required"))
+    # A type-to-search box fetches its rows after the typing: give it longer.
+    options = extract.wait_for_options(page, 5000 if searching else 3000)
     if not options:
-        if extract.menu_says_no_results(page) or field.get("search_required"):
+        if extract.menu_says_no_results(page) or searching:
             # The form searched and came back with nothing. Typing a value it
             # doesn't recognise leaves text in a box that hasn't actually been
             # answered, which reads as filled on screen and is blank underneath.
@@ -378,7 +380,13 @@ def _fill_combobox(page: "Page", element, field: dict, value: str,
         # Some boxes take free text. Leave it, but don't claim it was picked.
         return True, f"typed '{value}' — nothing offered to pick from{CONFIRM}"
 
-    choice, how = matching.best_match_for_field(field.get("label"), value, options)
+    if searching:
+        # A search box (Jack, 2026-10-20): only a row that equals the profile
+        # value once case, punctuation and spacing are set aside. Never the
+        # first row, never the closest; with no such row the box stays blank.
+        choice, how = matching.exact_match(value, options)
+    else:
+        choice, how = matching.best_match_for_field(field.get("label"), value, options)
     if choice is None:
         _abandon_combobox(page, element, contained)
         return False, f"'{value}' — {how}"
