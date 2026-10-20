@@ -1391,3 +1391,16 @@ clipping and off-screen positioning, so a block Jack cannot see could be
 the one that equals the sentence (the same holds for permission lines);
 with the sibling-prose question for Jack.
 
+Commit 5634535 (second fix of the block rule): VERDICT FLAG (the BLOCK is
+closed), 6 FLAGs. Folded into the next commit: a candidate block holding
+a shadow root, a custom element or a slot is refused (its innerText could
+hide text Jack sees); a visible iframe, frame, object or embed on the
+consent screen makes it pause (the top document can't see into it); a
+positive control for the late "not secure" notice; fixtures for ruby and
+inline-grid containers and an en-dash case; CLAUDE.md names inline-block
+and the -webkit-inline-* forms. Decision for Jack, restated: sibling
+blocks may sit on one visual line (flex, grid, float, absolute
+positioning), so "another block says more" can look like one line of
+prose; the strict reading would pause when any other visible block
+exists besides the sentence, the heading and the "This will allow" line.
+

@@ -278,8 +278,10 @@ How the code keeps them, and rules of its own:
   all, one visible block-level text block of the page equals
   `ALLOWED_SENTENCE` word for word with the app name as the only variable
   (Jack, 2026-10-20). A block is a block-level element (not inline,
-  inline-flex, inline-grid, inline-table, ruby, contents or a table part)
-  with no block-level child. The bound on that variable is the
+  inline-block, any -webkit-inline-* form, inline-flex, inline-grid,
+  inline-table, ruby, contents or a table part) with no block-level
+  child and no shadow root, custom element or slot inside it; a visible
+  frame anywhere on the screen makes it pause. The bound on that variable is the
   implementation's: 1-80 characters, no sentence end, no list or joining
   punctuation, no joining word such as "and", "with" or "or". A sign-in box, a code box,
   "this browser may not be secure", no list and no sentence, an

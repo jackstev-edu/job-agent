@@ -140,10 +140,16 @@ _SHAPE_JS = r"""
   // -webkit-inline-* forms), ruby, contents, none, and table parts (cells
   // sit side by side on one line).
   const inline = el => /^(inline|-webkit-inline|ruby|table-)|^(contents|none)$/.test(getComputedStyle(el).display);
+  // A candidate whose subtree holds a shadow root, a custom element or a
+  // slot could show Jack text its innerText doesn't carry: not a block.
+  const opaque = el => [el, ...el.querySelectorAll('*')].some(e => e.shadowRoot || e.tagName.includes('-') || e.tagName === 'SLOT');
   const blocks = [...document.querySelectorAll('p, div, li, h1, h2, h3, h4, h5, h6, section, article, main, dd, dt')]
-    .filter(visible).filter(el => !inline(el)).filter(el => [...el.children].every(inline))
+    .filter(visible).filter(el => !inline(el)).filter(el => [...el.children].every(inline)).filter(el => !opaque(el))
     .map(el => norm(el.innerText)).filter(t => t && t.length <= 400).slice(0, 400);
-  return {boxes, ticks, ids, entries, ok, insecure, blocks};
+  // Anything the top document can't see into: a frame could hold a box, a
+  // second Continue or more wording.
+  const frames = [...document.querySelectorAll('iframe, frame, object, embed')].filter(visible).length;
+  return {boxes, ticks, ids, entries, ok, insecure, blocks, frames};
 }
 """
 
@@ -190,7 +196,7 @@ def classify(page: "Page") -> tuple[str, dict]:
             or not isinstance(shape.get("ticks"), int) or not isinstance(shape.get("ids"), list)
             or not isinstance(shape.get("entries"), list) or not isinstance(shape.get("ok"), int)):
         return OTHER, {}
-    if shape["boxes"] > 0 or shape.get("insecure"):
+    if shape["boxes"] > 0 or shape.get("insecure") or shape.get("frames"):
         return OTHER, shape
     if shape["ids"]:
         return CHOOSER, shape

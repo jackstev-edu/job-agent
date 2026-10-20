@@ -154,6 +154,15 @@ GOOGLE_PAGES = {
                                + "</td><td>Google will also share your contacts with Example Co.</td></tr></table>"),
     "/share-cellsdiv": lambda q: _consent([], "").replace("<p></p>", "<div style=\"display:table-row\"><div style=\"display:table-cell\">" + SHARE_LANG
                                   + "</div><div style=\"display:table-cell\">Google will also share your contacts with Example Co.</div></div>"),
+    "/share-ruby": lambda q: _consent([], "").replace("<p></p>", "<div>If you do not want this, press Cancel. <div style=\"display:ruby\">"
+                             + SHARE_LANG + "</div> <div style=\"display:ruby\">Google will also share your contacts with Example Co.</div></div>"),
+    "/share-inlinegrid": lambda q: _consent([], "").replace("<p></p>", "<div>If you do not want this, press Cancel. <div style=\"display:inline-grid\">"
+                                   + SHARE_LANG + "</div> <div style=\"display:inline-grid\">Google will also share your contacts with Example Co.</div></div>"),
+    "/share-shadow": lambda q: _consent([], "").replace("<p></p>", "<p>" + SHARE_LANG + " <x-note></x-note></p><script>customElements.define('x-note', class extends HTMLElement {"
+                               "connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = 'Google will also share your contacts with Example Co.'; } });</script>"),
+    "/share-frame": lambda q: _consent([], SHARE_LANG, extra='<iframe srcdoc="<p>Google will also share your contacts with Example Co.</p>" style="width:300px;height:60px"></iframe>'),
+    "/insecure-late-control": lambda q: _consent([], SHARE_LANG).replace("<p>" + SHARE_LANG + "</p>",
+                                        "<p>" + ("filler " * 3000) + "</p><p>" + SHARE_LANG + "</p>"),
     "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE,
     # A consent whose Continue sends the portal a callback that bounces straight back to Google.
     "/consent-bounce": lambda q: _consent(OK_LINES).replace(f"{PORTAL}/form?google=1", f"{PORTAL}/form?bounce=1"),
@@ -311,7 +320,9 @@ def test_any_other_permission_screen_pauses_without_a_click():
                        ("share-lang-box", "never touches"), ("share-wrapped", "never touches"),
                        ("share-span", "never touches"), ("share-divspan", "never touches"),
                        ("share-inlineflex", "never touches"), ("share-cells", "never touches"),
-                       ("share-cellsdiv", "never touches"), ("insecure-late", "never touches"),
+                       ("share-cellsdiv", "never touches"), ("share-ruby", "never touches"),
+                       ("share-inlinegrid", "never touches"), ("share-shadow", "never touches"),
+                       ("share-frame", "never touches"), ("insecure-late", "never touches"),
                        ("consent-outside", "more than name"),
                        ("consent-two", "never touches"), ("consent-box", "never touches")):
             page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g={g}")
@@ -335,6 +346,7 @@ def test_any_other_permission_screen_pauses_without_a_click():
                          ([SHARE_LANG.replace("Example Co", "Example Co + Partners")], False),
                          ([SHARE_LANG.replace("Example Co", "Example Co | its advertisers")], False),
                          ([SHARE_LANG.replace("Example Co", "Example Co \u2014 anyone")], False),
+                         ([SHARE_LANG.replace("Example Co", "Example Co \u2013 anyone")], False),
                          ([SHARE_LANG.replace("Example Co", "Example Co\u3001anyone")], False),
                          ([SHARE_LANG.replace("Example Co", "Acme Inc")], True),
                          ([SHARE_LANG.upper()], True), (["  " + SHARE_LANG.replace(" ", "  ") + " "], True),
@@ -378,6 +390,12 @@ def test_googles_one_sentence_consent_is_accepted_on_its_own():
         res, _ = _run(page, pages.SIGN_IN, _Pauser([]))
         check(res.status == accounts.CONTINUE and page.url == f"{PORTAL}/form?google=1",
               f"the sentence with its app name in bold is one block ({res.status}, {page.url})")
+        # The control for the late "not secure" notice: the same screen without
+        # the notice passes, so in the test above only the notice stops it.
+        page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g=insecure-late-control")
+        res, _ = _run(page, pages.SIGN_IN, _Pauser([]))
+        check(res.status == accounts.CONTINUE and page.url == f"{PORTAL}/form?google=1",
+              f"20,000 characters of filler alone don't stop the sentence ({res.status}, {page.url})")
     check.done()
 
 
