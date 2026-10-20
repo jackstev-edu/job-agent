@@ -213,6 +213,20 @@ class Wizard:
                                   until=until, wants_code=wants_code)
         return how
 
+    def _handled_by_jack(self, kind: str, detail: str | None) -> int:
+        """
+        Mark every unhandled event of this kind (and detail, if given) as
+        handled by Jack: the pause it belongs to ended with his Continue.
+        Returns how many were marked.
+        """
+        n = 0
+        for ev in self.out.events:
+            if (ev.get("kind") == kind and ev.get("handled") is None
+                    and (detail is None or ev.get("detail") == detail)):
+                ev["handled"] = "jack"
+                n += 1
+        return n
+
     def _captcha(self) -> None:
         found = browser_mod.detect_captcha(self.page)
         if not found:
@@ -528,8 +542,17 @@ class Wizard:
                     self._after_pause(fill, pending.get("marked_before"), info.get("approved") or {})
                 if kind == "gate":
                     self._gate_page(fill, pending.get("page_events") or [])
+                else:
+                    # Continue ends the final pause the way Enter does in the
+                    # terminal: the stop's event becomes Jack's, and the gate
+                    # judges the page again before anything is pressed.
+                    self._handled_by_jack("gate_pause", "final page")
                 skip_fill = True
-            # "captcha": the top of the loop looks again.
+            elif kind == "captcha":
+                # Only once the page shows no CAPTCHA; otherwise the top of
+                # the loop pauses again and the event stays unhandled.
+                if not browser_mod.detect_captcha(page):
+                    self._handled_by_jack("captcha", None)
         while True:
             if self._over_time():
                 raise _Parked("over the 60-minute cap of the agent's own time for one application")

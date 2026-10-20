@@ -216,7 +216,10 @@ How the code keeps them, and rules of its own:
   the value he was shown; the gate skips field-level stops for those,
   never the required-but-empty check. Every other field keeps the normal
   checks: a pause proves he was present, not that he checked every field;
-  Continue alone approves nothing (Jack, 2026-10-19). A field that was
+  Continue alone approves nothing (Jack, 2026-10-19). Continue after a
+  final-page gate stop or a CAPTCHA marks that pause's event as Jack's
+  (the CAPTCHA one only once the page shows none), as Enter does in the
+  terminal, and the gate judges the full record again before Submit. A field that was
   empty before the pause and holds a value after it with no new touch mark
   is never counted as his. `filler.py` never presses Enter and never types a line break
   outside a textarea. At click time it checks again, on the element and on
