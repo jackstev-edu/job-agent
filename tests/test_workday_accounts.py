@@ -262,6 +262,11 @@ def test_a_password_box_carrying_a_pressable_id_is_never_read_or_pressed():
               "a password box with the id is not pressed")
         check(page.evaluate("window.__valueReads") == 0 and page.evaluate("window.__clicks") == [],
               f"its value was never read and nothing was clicked ({page.evaluate('window.__valueReads')})")
+        # The IDL type can be shadowed by the page; the attribute still says password.
+        page.evaluate("Object.defineProperty(document.getElementById('input-4'), 'type', {get: () => 'submit', configurable: true})")
+        check(accounts._press_workday(page, "create", pages.ACCOUNT) is False
+              and page.evaluate("window.__valueReads") == 0 and page.evaluate("window.__clicks") == [],
+              f"with the IDL type shadowed to 'submit', the attribute keeps it refused ({page.evaluate('window.__valueReads')})")
         # A submit input with the id is pressable and its value is its wording.
         page.goto(f"{HOST}/create")
         page.evaluate("""() => {

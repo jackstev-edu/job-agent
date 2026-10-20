@@ -1541,3 +1541,16 @@ here); the help-text DoD check asserts the action only, not value None
 (every human branch sets None). Verified by the reviewer: the removal is
 safe-direction only, an old profile still carrying the DoD key loads
 unchanged, and no row was narrowed.
+
+Item 3 (the fold of 722bf10's FLAGs, plus Jack's shadow-root decision):
+a DOM.getDocument response without a root now counts as a host (it
+counted none); the threat model records the CDP read of Google's DOM
+tree as an accepted local-only route (the response carries attributes
+and text; only structural keys are read, nothing kept, logged or sent);
+the attribute-side input-kind check has a test that shadows the IDL
+type to "submit". Only author shadow roots (shadowRootType "open" or
+"closed") count now (Jack, 2026-10-20, second set): a user-agent root
+(a <progress>'s own) no longer pauses the sentence screen; a root of
+unknown kind still does. 722bf10's own note (user-agent roots counted
+too) is closed by that decision.
+

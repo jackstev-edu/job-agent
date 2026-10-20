@@ -185,11 +185,16 @@ _MARK_JS = r"""
 
 def shadow_hosts(page: "Page") -> int:
     """
-    How many elements of the page carry a shadow root, open or closed,
-    attached by script or declared in the markup: read through the
-    browser's own DOM tree (CDP DOM.getDocument, pierced), not the page's
-    JavaScript, which can't see a closed root. Any failure counts as one:
-    a page that can't be read this way is not driven.
+    How many elements of the page carry an author shadow root, open or
+    closed, attached by script or declared in the markup: read through
+    the browser's own DOM tree (CDP DOM.getDocument, pierced), not the
+    page's JavaScript, which can't see a closed root. A user-agent root
+    (the browser's own, inside a text box or a <progress>) is not counted
+    (Jack, 2026-10-20, second set). Any failure counts as one: a page
+    that can't be read this way is not driven. The response holds the
+    whole tree (attributes and text nodes included); only the structural
+    keys are consulted, nothing of it is kept, logged or sent (CLAUDE.md
+    threat model: accepted, local only).
     """
     try:
         cdp = page.context.new_cdp_session(page)
@@ -197,14 +202,24 @@ def shadow_hosts(page: "Page") -> int:
         return 1
     try:
         doc = cdp.send("DOM.getDocument", {"depth": -1, "pierce": True})
+        root = doc.get("root") if isinstance(doc, dict) else None
+        if not isinstance(root, dict):
+            return 1                       # no tree to read: not driven
         count = 0
-        stack = [doc.get("root") or {}]
+        stack = [root]
         while stack:
             node = stack.pop()
             if not isinstance(node, dict):
                 continue
-            if node.get("shadowRoots"):
-                count += 1
+            roots = node.get("shadowRoots")
+            if roots:
+                # Only an author root counts (Jack, 2026-10-20, second set):
+                # a user-agent root (a text box's own, a <progress>'s) is the
+                # browser's, not the page's. A root of any other or unknown
+                # kind, or a list of the wrong shape, counts: default deny.
+                if not isinstance(roots, list) or any(
+                        not isinstance(r, dict) or r.get("shadowRootType") != "user-agent" for r in roots):
+                    count += 1
             for key in ("children", "shadowRoots", "contentDocument", "templateContent", "pseudoElements"):
                 val = node.get(key)
                 if isinstance(val, list):

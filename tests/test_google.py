@@ -168,6 +168,11 @@ GOOGLE_PAGES = {
     "/share-slot": lambda q: _consent([], "").replace("<p></p>", "<p>" + SHARE_LANG + " <slot></slot></p>"),
     "/share-declclosed": lambda q: _consent([], "").replace("<p></p>", "<p>" + SHARE_LANG + " <span><template shadowrootmode=\"closed\">"
                                    "Google will also share your contacts with Example Co.</template></span></p>"),
+    # A user-agent shadow root (a <progress>'s own) beside the sentence, and
+    # the same with a closed author root too.
+    "/share-uaroot": lambda q: _consent([], SHARE_LANG, extra='<progress value="1" max="2"></progress>'),
+    "/share-uaroot-author": lambda q: _consent([], SHARE_LANG, extra='<progress value="1" max="2"></progress><div id="h"></div>'
+                                      '<script>document.getElementById(\'h\').attachShadow({mode: \'closed\'}).innerHTML = \'x\';</script>'),
     "/share-hostaway": lambda q: _consent([], SHARE_LANG, extra='<div id="h"></div><script>document.getElementById(\'h\').attachShadow({mode: \'closed\'}).innerHTML = \'<input type="text" aria-label="Note">\';</script>'),
     "/insecure-late-control": lambda q: _consent([], SHARE_LANG).replace("<p>" + SHARE_LANG + "</p>",
                                         "<p>" + ("filler " * 3000) + "</p><p>" + SHARE_LANG + "</p>"),
@@ -365,6 +370,17 @@ def test_any_other_permission_screen_pauses_without_a_click():
         check(google.shadow_hosts(page) == 1, "a declarative closed root is counted through the browser's DOM tree")
         page.goto(f"{GOOGLE}/share-closedroot")
         check(google.shadow_hosts(page) == 1, "a script-attached closed root too")
+        page.goto(f"{GOOGLE}/share-uaroot")
+        check(page.evaluate("document.querySelector('progress') !== null"), "the fixture has its <progress>")
+        check(google.shadow_hosts(page) == 0,
+              f"a user-agent root (a <progress>'s own) is not an author root and is not counted ({google.shadow_hosts(page)})")
+        kind, shape = google.classify(page)
+        check(kind == google.CONSENT and google.consent_ok(shape),
+              f"so the sentence screen with a <progress> on it is still the control ({kind})")
+        page.goto(f"{GOOGLE}/share-uaroot-author")
+        check(google.shadow_hosts(page) == 1,
+              f"a closed author root beside the user-agent one is still counted ({google.shadow_hosts(page)})")
+        check(google.classify(page)[0] == google.OTHER, "and that screen pauses")
     for entries, want in (([], False), (OK_LINES, True), (BROAD_LINES, False),
                           (["See your primary Google Account email address", ""], False),
                           (["See your primary Google Account email address", 3], False),

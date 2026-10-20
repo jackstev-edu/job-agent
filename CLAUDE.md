@@ -317,8 +317,9 @@ How the code keeps them, and rules of its own:
   inline-table, ruby, contents or a table part) with no block-level
   child; a visible frame, or a shadow host (open ones through the page,
   closed ones, scripted or declarative, through the browser's own DOM
-  tree over CDP), a custom element or a slot anywhere on the screen
-  makes it pause. The bound on that variable is the
+  tree over CDP; author roots only, never the browser's own user-agent
+  roots), a custom element or a slot anywhere on the screen makes it
+  pause. The bound on that variable is the
   implementation's: 1-80 characters, no sentence end, no list or joining
   punctuation, no joining word such as "and", "with" or "or". A sign-in box, a code box,
   "this browser may not be secure", no list and no sentence, an
@@ -361,6 +362,13 @@ How the code keeps them, and rules of its own:
   value of an ordinary, agent-filled field beside its approve tick. It is
   shown only to Jack's own browser, never stored, logged or sent anywhere.
   (Confirmed by Jack, 2026-10-20.)
+- Accepted, local only: on https://accounts.google.com, to count shadow
+  roots (closed ones are invisible to page scripts), the consent-screen
+  check reads the browser's own DOM tree over CDP once; the response
+  carries the tree's attributes and text nodes. Only the structural keys
+  are consulted; nothing of it is kept, logged or sent, and the session
+  is detached at once. It runs only after the in-page checks found no box
+  to type into. (Confirmed by Jack, 2026-10-20, second set.)
 - Defended: benign page behaviour (show-password toggles, re-renders,
   framework node reuse, password boxes appearing after a scan, stale refs)
   must never get a password value into Python. No field value read from the
