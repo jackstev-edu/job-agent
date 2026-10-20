@@ -1330,3 +1330,13 @@ nothing done), pre-existing; on Google it now parks first. Jack to
 decide whether a None-kind page after an unanswered pause should park
 instead (recommended).
 
+Commit fca6d00 (fold of f9392f6's FLAGs): VERDICT FLAG, 5 low FLAGs.
+Folded into the next commit: _google_first (a pressing primitive) sits
+behind the Google-host check too; forgot_password's park on Google has
+its own reason (GOOGLE_FORGOT) instead of the pause wording; the forgot
+test pins the park to that line (reason, no pause, the email typed once
+on the portal) and the helpers test calls _fill_text and _google_first
+directly on a Google-host page. Already logged (Jack's decision): a page
+of no kind after an unanswered pause is read as "signed in by Jack" in
+forgot_password; recommended: park unless the pause ended FINISHED.
+

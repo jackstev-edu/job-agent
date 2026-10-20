@@ -275,7 +275,7 @@ def _google_first(page: "Page", prof, pauser: pause_mod.Pauser, res: Result,
     is no such control (or it couldn't be pressed); else google.DONE or
     google.STUCK. The caller re-reads the portal page's kind afterwards.
     """
-    if pages.page_kind(page) != kind_now:
+    if _on_google(page) or pages.page_kind(page) != kind_now:
         return None
     try:
         found = page.evaluate(_FIND_BUTTON_JS, [google.BUTTON_WORDS.pattern, NEVER_WORDS.pattern, _BTN_ATTR])
@@ -306,6 +306,7 @@ def _google_first(page: "Page", prof, pauser: pause_mod.Pauser, res: Result,
 
 
 GOOGLE_STUCK = "Google's page needs you, and the pause didn't get it done"
+GOOGLE_FORGOT = "the Forgot password link led to Google's site; nothing is requested or typed there"
 
 
 def on_google(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
@@ -476,7 +477,7 @@ def forgot_password(page: "Page", prof, pauser: pause_mod.Pauser, res: Result) -
     if _on_google(page):
         # The link led to Google's own site: nothing is requested or typed
         # there, and no event may say it was.
-        return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)
+        return Result(PARKED, GOOGLE_FORGOT, res.steps, res.events)
     if not _is_reset_page(page):
         return Result(PARKED, "the Forgot password link didn't lead to a reset page (one email "
                               "box, no password box)", res.steps, res.events)

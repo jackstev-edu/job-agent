@@ -145,7 +145,8 @@ SIGNUP = _doc("Create your Google Account", """<h1>Create your Google Account</h
 <label for="em">Email</label><input id="em" type="email" name="Username">
 <label for="pw">Password</label><input id="pw" type="password" autocomplete="new-password">
 <input type="checkbox" id="agree" required><label for="agree">I agree to the Terms of Service and Privacy Policy</label>
-<button type="button">Create account</button><button type="button">Next</button></form>""")
+<button type="button">Create account</button><button type="button">Next</button>
+<button type="button">Continue with Google</button></form>""")
 CODE_PAGE = _doc("Verify it's you", """<h1>Verify it's you</h1><form><label for="c">Enter verification code</label>
 <input id="c" name="code" aria-label="Enter verification code"><button type="button">Verify</button></form>""")
 
@@ -459,6 +460,14 @@ def test_accounts_helpers_type_tick_and_press_nothing_on_googles_host():
         kind = pages.page_kind(page)
         check(accounts._press(page, accounts.CREATE_WORDS, kind, "Create account") is None
               and _clicks(page) == [], f"no step list presses anything on Google ({_clicks(page)})")
+        text_boxes = page.evaluate(accounts._TEXT_BOXES_JS, accounts._TEXT_ATTR) or []
+        check(text_boxes and accounts._fill_text(page, accounts._TEXT_ATTR, text_boxes[0]["key"], EMAIL) is False
+              and page.evaluate("document.getElementById('em').value") == "",
+              "the text helper itself types nothing on Google")
+        res = accounts.Result(accounts.CONTINUE)
+        check(accounts._google_first(page, _Profile(), _Pauser([]), res, kind) is None
+              and _clicks(page) == [] and res.steps == [],
+              f"the Google-button press itself presses nothing on Google ({_clicks(page)}, {res.steps})")
         page.goto(f"{GOOGLE}/code")
         check(pages.page_kind(page) == pages.VERIFICATION, "the code page reads as a verification page")
         check(accounts.enter_code(page, "123456", steps) is False and steps == []
@@ -473,12 +482,14 @@ def test_a_forgot_link_that_lands_on_google_types_nothing_there():
         page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g=forgot")
         pauser = _Pauser([None, None])
         res, _ = _run(page, pages.SIGN_IN, pauser)
-        check(res.status == accounts.PARKED, f"parked ({res.status}, {res.reason})")
+        check(res.status == accounts.PARKED and res.reason == accounts.GOOGLE_FORGOT and not pauser.asked,
+              f"parked by the Forgot-link check, with no pause ({res.status}, {res.reason}, {pauser.asked})")
         check(page.url == f"{GOOGLE}/login" and _clicks(page) == []
               and page.evaluate("document.getElementById('id').value") == "",
               f"on Google's sign-in page nothing was typed or pressed ({page.url}, {_clicks(page)})")
-        check("typed the email" not in res.steps[1:] or res.steps.index("typed the email") < res.steps.index("pressed 'Forgot password?'"),
-              f"the email was typed only on the portal, before the Forgot link ({res.steps})")
+        check(res.steps.count("typed the email") == 1
+              and res.steps.index("typed the email") < res.steps.index("pressed 'Forgot password?'"),
+              f"the email was typed once, on the portal, before the Forgot link ({res.steps})")
     check.done()
 
 
