@@ -228,7 +228,12 @@ How the code keeps them, and rules of its own:
   set). A Department of Defense question has its own guard kind (`dod`)
   and no profile line: every one is Jack's, whatever other line its words
   match (Jack, 2026-10-20, second set). `LABEL_ONLY_LINES` (a line whose
-  question must be the label itself) is kept and empty.
+  question must be the label itself) is kept and empty. A security
+  clearance question has its own guard kind (`clearance`), answered only
+  from `eligibility.security_clearance` or `eligibility.clearance_eligible`
+  with a strict fit (an option equal to the value, or yes / no from a
+  real true / false), else Jack's; a question naming both lines, or a
+  DoD clearance, is Jack's (Jack, 2026-10-20, second set).
 - The browser's password manager lives in the agent's Chrome profile
   (`~/.job-agent/chrome-profile`; since 2026-10-19 it may be signed in to
   Jack's Google account, by his hand only).

@@ -1562,3 +1562,45 @@ ended FINISHED (the sign-in page went away while he was there); a timed
 out or otherwise unanswered pause there parks the job instead of
 logging "signed in by Jack" with nothing done (the pre-existing read
 noted after the Google round).
+
+Item 5 (a "clearance" LEGAL_GUARD kind): any question naming a
+clearance, TS/SCI or Top Secret is answered only from
+`eligibility.security_clearance` (an option equal to the value) or
+`eligibility.clearance_eligible` (yes / no from a real true / false,
+through a new PROFILE_PATHS row for "eligible to obtain / for a
+clearance"), else Jack's; a question naming both lines, or a DoD
+clearance, is Jack's. Closes the 2b39159 note ("Do you hold a Secret
+clearance?" went to the model when the classifier called it ordinary).
+Known limit: "Are you eligible to obtain a security clearance?" names
+both lines and is Jack's even with both filled.
+
+
+Commit b8c5bd3 (item 2, the chooser): VERDICT FLAG, 5 medium and 3 low
+FLAGs, none in the fold set (password, legal answer, submit, model
+input), so logged. Medium: after the chooser's click _advance returns
+with no moved check and no step count, so a control that does nothing
+is pressed again every loop until the 60-minute cap (fix: read the
+shape before choose and park when the page didn't move, or count the
+step); the control is re-found at click time by index with no text
+check, so a control appearing or vanishing between the two reads shifts
+the index onto another control (the accepted scan-to-fill structure
+class; fix: pass the text into _MARK_JS and mark only an equal one);
+the mark, click and settle are unwrapped, so a Playwright timeout
+escapes the wizard and parks the job FAILED, not needs-you (fix: map
+to ValueError as the Next press does); `label` is in the selector, so a
+label wholly reading "Apply Manually" over a checkbox or radio would
+toggle that box (fix: keep a label only when its control is null or a
+file input); ALLOWED is wider than the three labels in Jack's item
+("Upload (a|my|your) (resume|cv)", "From (my) (computer|device)",
+"Apply / Continue without (a) resume"), and _upload puts the resume in
+the page's first file input whichever control it belongs to (decision
+for Jack: trim to the three labels, or approve the extra wordings;
+require exactly one file input). Low: the _upload fallback clicks the
+control before knowing a chooser opens, so a plain link may have
+navigated when the job parks "gave no file input"; CLAUDE.md cites
+"(Jack, 2026-10-20)" for the chooser click but the decision lists carry
+no chooser line (the relayed instruction to commit the stash was the
+approval; decision for Jack: record it); the Avature mock's hidden file
+input and onclick are unverified portal behaviour, and no wizard run
+drives the Ashby page (is_chooser is True there; the wizard's fill_page
+is what keeps it off the chooser).

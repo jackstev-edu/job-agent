@@ -60,6 +60,14 @@ PROFILE_PATHS: list[tuple[str, str]] = [
     # 2026-10-20, second set): the "dod" guard kind below sends every one
     # to Jack. The row that answered "employed by the DoD in the past two
     # years" was removed that day.
+    # A security clearance: eligibility to obtain one, and the level held,
+    # each from its own line. The "clearance" guard kind below holds every
+    # clearance question to a strict fit from these two lines or sends it
+    # to Jack (2026-10-20, second set). A question naming both ("eligible
+    # to obtain a security clearance") matches both rows and is Jack's.
+    (r"eligib\w*\s+(to\s+(obtain|get|hold|receive|be\s+granted)|for)\s+(a|an)?\s*(\w+\s+)?clearance"
+     r"|clearance[\s-]+eligib\w*|obtain\w*\s+(a|an)\s+(\w+\s+)?clearance",
+     "eligibility.clearance_eligible"),
     (r"security\s+clearance|\bdod\b\s+clearance|(secret|ts/sci)\s+clearance",
      "eligibility.security_clearance"),
 
@@ -188,6 +196,10 @@ LEGAL_GUARD: list[tuple[str, str]] = [
     # Added 2026-10-20 (Jack): a Department of Defense question is yours,
     # every one; no profile line answers this kind (second set, same day).
     (r"\bdepartment\s+of\s+defen[cs]e\b|\bdod\b", "dod"),
+    # Added 2026-10-20 (Jack, second set): a security-clearance question is
+    # answered only from the two clearance lines, with a strict fit, or by
+    # you. Never by the model, whatever the classifier called it.
+    (r"\bclearances?\b|\bts/sci\b|\btop\s+secret\b", "clearance"),
 ]
 
 # The fits a legal answer may take: the profile value as one of the form's
@@ -212,6 +224,7 @@ LEGAL_AREAS = {
     # No line: a DoD question matching a profile line elsewhere (a clearance
     # row) is still Jack's, and one matching none names no line.
     "dod": frozenset(),
+    "clearance": frozenset({"eligibility.security_clearance", "eligibility.clearance_eligible"}),
 }
 
 

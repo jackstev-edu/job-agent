@@ -414,8 +414,72 @@ def test_every_department_of_defense_question_is_jacks():
     check(v["action"] == "human", f"DoD in the help text: Jack's ({v['action']}, {v.get('reason')})")
     v = sensitive.decide({"label": "Do you currently hold a DoD security clearance?", "type": "radio",
                           "options": ["Yes", "No"]}, "personal_fact", prof)
-    check("closest profile line is `eligibility.security_clearance`" in v["reason"],
-          f"a DoD clearance question names the clearance line and stays Jack's ({v.get('reason')})")
+    check(v["action"] == "human" and "more than one kind" in v["reason"] and "dod" in v["reason"],
+          f"a DoD clearance question reads as two kinds of legal question and stays Jack's ({v.get('reason')})")
+    check.done()
+
+
+def test_a_security_clearance_question_is_answered_only_from_the_clearance_lines():
+    # Jack, 2026-10-20 (second set): a "clearance" guard kind. With the
+    # lines blank, every clearance question is his; filled, only an exact
+    # option or a yes / no from a real true / false answers it; never the
+    # model, whatever the classifier called the field.
+    check = Checks()
+    check(sensitive.LEGAL_AREAS["clearance"] == {"eligibility.security_clearance", "eligibility.clearance_eligible"},
+          "the kind answers from the two clearance lines only")
+    blank = _Profile({})
+    labels = ("Do you hold a Secret clearance?", "Are you eligible to obtain a clearance?",
+              "What is your current security clearance level?", "Do you have an active Top Secret clearance?",
+              "Clearance eligibility", "Are you eligible for a security clearance?",
+              "This role requires TS/SCI. Do you have it?", "Have you ever had a clearance revoked?",
+              "Are you willing to obtain a clearance?")
+    for label in labels:
+        for extra in ({"type": "radio", "options": ["Yes", "No"]}, {"type": "text", "options": []},
+                      {"type": "checkbox", "options": []}, {"type": "select", "options": ["None", "Secret", "Top Secret"]}):
+            field = {"label": label, **extra}
+            check("clearance" in sensitive.legal_guard_kinds(field), f"{label!r}: the guard sees it")
+            for category in ("personal_fact", "work_authorization", "free_text", "per_company", "eeo"):
+                v = sensitive.decide(field, category, blank)
+                check(v["action"] == "human" and v["value"] is None and v["source"] != "model",
+                      f"{label!r} as {category} ({extra['type']}), lines blank: Jack's ({v['action']}, {v.get('reason')})")
+    # The level held: only an option equal to the profile value.
+    held = _Profile({"eligibility.security_clearance": "Secret"})
+    level = {"label": "What is your current security clearance level?", "type": "select",
+             "options": ["None", "Secret", "Top Secret"]}
+    v = sensitive.decide(level, "personal_fact", held)
+    check(v["action"] == "fill" and v["value"] == "Secret" and v["fit"] == "exact"
+          and v["profile_path"] == "eligibility.security_clearance", f"the level is picked exactly ({v})")
+    v = sensitive.decide({"label": "Do you hold a Secret clearance?", "type": "radio", "options": ["Yes", "No"]},
+                         "personal_fact", held)
+    check(v["action"] == "human" and "Pick one yourself" in v["reason"],
+          f"a level is not a yes / no: a hold-a-Secret question is Jack's even with the level filled ({v.get('reason')})")
+    v = sensitive.decide({"label": "What is your current security clearance level?", "type": "text", "options": []},
+                         "personal_fact", held)
+    check(v["action"] == "human" and "box to type in" in v["reason"], f"a typed box is Jack's ({v.get('reason')})")
+    v = sensitive.decide({**level, "options": ["None", "Confidential", "Top Secret"]}, "personal_fact", held)
+    check(v["action"] == "human", f"no option equals the value: Jack's ({v.get('reason')})")
+    # Eligibility: a yes / no from a real true / false, from its own line.
+    eligible = _Profile({"eligibility.clearance_eligible": True})
+    v = sensitive.decide({"label": "Are you eligible to obtain a clearance?", "type": "radio", "options": ["Yes", "No"]},
+                         "personal_fact", eligible)
+    check(v["action"] == "fill" and v["value"] == "Yes" and v["fit"] == "bool"
+          and v["profile_path"] == "eligibility.clearance_eligible", f"eligibility from its line ({v})")
+    v = sensitive.decide({"label": "Are you eligible to obtain a clearance?", "type": "radio", "options": ["Yes", "No"]},
+                         "personal_fact", _Profile({"eligibility.clearance_eligible": "Not sure"}))
+    check(v["action"] == "human" and "Pick one yourself" in v["reason"],
+          f"a value that is neither an option nor a real true / false: Jack's ({v.get('reason')})")
+    both = _Profile({"eligibility.security_clearance": "Secret", "eligibility.clearance_eligible": True})
+    v = sensitive.decide({"label": "Are you eligible to obtain a security clearance?", "type": "radio",
+                          "options": ["Yes", "No"]}, "personal_fact", both)
+    check(v["action"] == "human" and "more than one profile line" in v["reason"],
+          f"a question naming both lines is Jack's ({v.get('reason')})")
+    v = sensitive.decide({"label": "Have you ever had a clearance revoked?", "type": "radio", "options": ["Yes", "No"]},
+                         "personal_fact", both)
+    check(v["action"] == "human" and "can't tell which profile line" in v["reason"],
+          f"a clearance question no line answers is Jack's ({v.get('reason')})")
+    v = sensitive.decide({"label": "Do you currently hold a DoD security clearance?", "type": "radio",
+                          "options": ["Yes", "No"]}, "personal_fact", both)
+    check(v["action"] == "human" and "more than one kind" in v["reason"], f"a DoD clearance: two kinds, Jack's ({v.get('reason')})")
     check.done()
 
 
