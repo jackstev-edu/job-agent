@@ -291,7 +291,12 @@ _WORKDAY_MARK_JS = r"""
   const hits = [...document.querySelectorAll('[data-automation-id="' + id + '"]')].filter(visible);
   if (hits.length !== 1) return null;
   const el = hits[0];
-  const texts = [el.innerText, el.tagName === 'INPUT' ? el.value : '', el.getAttribute('aria-label'),
+  // An <input> is pressable only as a submit / button input; its value is
+  // read for the wording check only then. Any other input with the id
+  // (a text or password box) is never read and never pressed.
+  const isBtnInput = el.tagName === 'INPUT' && ['submit', 'button'].includes((el.type || '').toLowerCase());
+  if (el.tagName === 'INPUT' && !isBtnInput) return null;
+  const texts = [el.innerText, isBtnInput ? el.value : '', el.getAttribute('aria-label'),
                  el.getAttribute('title')].map(norm).filter(Boolean);
   if (texts.some(t => NEVER.test(t))) return null;
   const b = el.getBoundingClientRect();
@@ -302,7 +307,8 @@ _WORKDAY_MARK_JS = r"""
     .filter(visible).filter(o => el.parentElement && el.parentElement.contains(o)).find(covers);
   const target = overlay || el, r = target.getBoundingClientRect();
   target.setAttribute(attr, '1');
-  return {where: overlay ? 'overlay' : 'control', x: cx - r.left, y: cy - r.top};
+  // Playwright's position is relative to the padding box: the border is taken off.
+  return {where: overlay ? 'overlay' : 'control', x: cx - r.left - target.clientLeft, y: cy - r.top - target.clientTop};
 }
 """
 

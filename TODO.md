@@ -1430,3 +1430,19 @@ closed. Noted: the first test in tests/test_search_dropdown.py (the exact
 value is chosen) passes on the previous commit too; only the second is a
 fails-before test.
 
+Commit 4d2d762 (fold of items 2 and 3): VERDICT BLOCK, 1 BLOCK and 6
+FLAGs. Fixed in the next commit: the Workday marking script read any
+input's value for the wording check, a password box with a pressable id
+included (the value never reached Python); an input is now pressable
+only as a submit / button input and only then is its value read; the
+click offset is taken from the padding box (border width off); the
+form-wide-overlay fixture puts the overlay's centre on the Delete button
+so it proves the position fix; a test instruments a password box's
+value getter and asserts no read and no press. Logged: between the mark
+and the click the page could move the control inside a larger overlay
+(the accepted structure-change route, MUST FIX BEFORE AUTO-SUBMIT); if
+a real tenant's click_filter is not inside the control's parent the
+press times out and parks (safe; to confirm on a real-page run); the
+"overlay elsewhere", "Example_University", Forgot-link and Google-host
+cases are guards that pass on the previous commit.
+

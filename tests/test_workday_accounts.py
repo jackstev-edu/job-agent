@@ -83,7 +83,7 @@ SENT = STATE_JS + "<h1>Check your email</h1><p>We sent a link.</p><a href='/appl
 # whose overlay covers the whole form (two controls under it).
 CREATE_SUBMIT_TEXT = CREATE.replace('>Create Account</button>', '>Submit application</button>')
 CREATE_WIDE = CREATE.replace('<div class="wrap"><button type="button" data-automation-id="createAccountSubmitButton" onclick="return false">Create Account</button>\n<div data-automation-id="click_filter" onclick="create()"></div></div>',
-                             '<div class="wrap" style="display:block"><button type="button" data-automation-id="deleteAccountButton" onclick="return false" style="display:block;width:200px;height:40px">Delete account</button>'
+                             '<div class="wrap" style="display:block"><button type="button" data-automation-id="deleteAccountButton" onclick="return false" style="display:block;width:200px;height:120px">Delete account</button>'
                              '<button type="button" data-automation-id="createAccountSubmitButton" onclick="return false" style="display:block;width:200px;height:40px">Create Account</button>'
                              '<div data-automation-id="click_filter" onclick="wide(event)"></div></div>'
                              '<script>function wide(e) { const under = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.tagName === \'BUTTON\');'
@@ -235,8 +235,41 @@ def test_the_id_press_refuses_duplicates_submit_wording_google_and_lands_on_the_
         page.goto(f"{HOST}/create-wide")
         page.evaluate("document.getElementById('input-6').checked = true; document.getElementById('input-4').value = 'Abcdefghijkl1!'; document.getElementById('input-5').value = 'Abcdefghijkl1!'")
         ok = accounts._press_workday(page, "create", pages.ACCOUNT)
-        check(ok is True and _session(page, "under") == "createAccountSubmitButton",
-              f"under a form-wide overlay the click lands on the control's own point ({ok}, {_session(page, 'under')})")
+        check(ok is True and _session(page, "under") == "createAccountSubmitButton"
+              and _session(page, "under") != "deleteAccountButton",
+              f"under a form-wide overlay (its centre on Delete) the click lands on the control's own point ({ok}, {_session(page, 'under')})")
+    check.done()
+
+
+def test_a_password_box_carrying_a_pressable_id_is_never_read_or_pressed():
+    # BLOCK fix: the wording check read any input's value; a text or password
+    # box with the id is now neither read nor pressed.
+    check = Checks()
+    with mock_page(BLANK, _routes(_site())) as page:
+        page.goto(f"{HOST}/create")
+        # Put the pressable id on the password box and instrument its value getter.
+        page.evaluate("""() => {
+          const pw = document.getElementById('input-4');
+          document.querySelector('[data-automation-id=createAccountSubmitButton]').removeAttribute('data-automation-id');
+          pw.setAttribute('data-automation-id', 'createAccountSubmitButton');
+          window.__valueReads = 0;
+          const proto = Object.getPrototypeOf(pw);
+          const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+          Object.defineProperty(pw, 'value', {get() { window.__valueReads++; return desc.get.call(this); },
+                                              set(v) { desc.set.call(this, v); }, configurable: true});
+        }""")
+        check(accounts._press_workday(page, "create", pages.ACCOUNT) is False,
+              "a password box with the id is not pressed")
+        check(page.evaluate("window.__valueReads") == 0 and page.evaluate("window.__clicks") == [],
+              f"its value was never read and nothing was clicked ({page.evaluate('window.__valueReads')})")
+        # A submit input with the id is pressable and its value is its wording.
+        page.goto(f"{HOST}/create")
+        page.evaluate("""() => {
+          const b = document.querySelector('[data-automation-id=createAccountSubmitButton]');
+          const i = document.createElement('input'); i.type = 'submit'; i.value = 'Submit application';
+          i.setAttribute('data-automation-id', 'createAccountSubmitButton'); b.replaceWith(i); }""")
+        check(accounts._press_workday(page, "create", pages.ACCOUNT) is False and page.evaluate("window.__clicks") == [],
+              "a submit input reading 'Submit application' is refused on its wording")
     check.done()
 
 
