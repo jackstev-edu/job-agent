@@ -144,7 +144,16 @@ GOOGLE_PAGES = {
     "/share-span": lambda q: _consent([], "If you do not want this, press Cancel. <span>" + SHARE_LANG
                                       + "</span> <span>Google will also share your contacts with Example Co.</span>"),
     "/share-divspan": lambda q: _consent([], "").replace("<p></p>", "<div><span>" + SHARE_LANG + "</span> <span>Google will also share your contacts with Example Co.</span></div>"),
-    "/insecure-late": lambda q: INSECURE.replace("<h1>Couldn't sign you in</h1>", "<p>" + ("filler " * 3000) + "</p><h1>Couldn't sign you in</h1>"),
+    # The notice past 20,000 characters on a screen that would otherwise pass
+    # (the sentence, one Continue): only the notice can stop it.
+    "/insecure-late": lambda q: _consent([], SHARE_LANG).replace("<p>" + SHARE_LANG + "</p>",
+                                "<p>" + ("filler " * 3000) + "</p><p>This browser or app may not be secure.</p><p>" + SHARE_LANG + "</p>"),
+    "/share-inlineflex": lambda q: _consent([], "").replace("<p></p>", "<div>If you do not want this, press Cancel. <div style=\"display:inline-flex\">"
+                                   + SHARE_LANG + "</div> <div style=\"display:inline-flex\">Google will also share your contacts with Example Co.</div></div>"),
+    "/share-cells": lambda q: _consent([], "").replace("<p></p>", "<table><tr><td>" + SHARE_LANG
+                               + "</td><td>Google will also share your contacts with Example Co.</td></tr></table>"),
+    "/share-cellsdiv": lambda q: _consent([], "").replace("<p></p>", "<div style=\"display:table-row\"><div style=\"display:table-cell\">" + SHARE_LANG
+                                  + "</div><div style=\"display:table-cell\">Google will also share your contacts with Example Co.</div></div>"),
     "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE,
     # A consent whose Continue sends the portal a callback that bounces straight back to Google.
     "/consent-bounce": lambda q: _consent(OK_LINES).replace(f"{PORTAL}/form?google=1", f"{PORTAL}/form?bounce=1"),
@@ -301,7 +310,8 @@ def test_any_other_permission_screen_pauses_without_a_click():
                        ("share-lang-two", "never touches"), ("share-lang-list", "more than name"),
                        ("share-lang-box", "never touches"), ("share-wrapped", "never touches"),
                        ("share-span", "never touches"), ("share-divspan", "never touches"),
-                       ("insecure-late", "never touches"),
+                       ("share-inlineflex", "never touches"), ("share-cells", "never touches"),
+                       ("share-cellsdiv", "never touches"), ("insecure-late", "never touches"),
                        ("consent-outside", "more than name"),
                        ("consent-two", "never touches"), ("consent-box", "never touches")):
             page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g={g}")
@@ -322,6 +332,10 @@ def test_any_other_permission_screen_pauses_without_a_click():
                          ([SHARE_LANG.replace("Example Co", "Example Co & anyone")], False),
                          ([SHARE_LANG.replace("Example Co", "Example Co, its partners, advertisers")], False),
                          ([SHARE_LANG.replace("Example Co", "Example Co/partners")], False),
+                         ([SHARE_LANG.replace("Example Co", "Example Co + Partners")], False),
+                         ([SHARE_LANG.replace("Example Co", "Example Co | its advertisers")], False),
+                         ([SHARE_LANG.replace("Example Co", "Example Co \u2014 anyone")], False),
+                         ([SHARE_LANG.replace("Example Co", "Example Co\u3001anyone")], False),
                          ([SHARE_LANG.replace("Example Co", "Acme Inc")], True),
                          ([SHARE_LANG.upper()], True), (["  " + SHARE_LANG.replace(" ", "  ") + " "], True),
                          ([SHARE_OK], False),

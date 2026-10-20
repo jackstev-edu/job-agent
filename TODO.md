@@ -1378,3 +1378,16 @@ reading would pause when any other visible block names sharing or
 access. Logged under the accepted page-structure items: CSS generated
 content (::after) is shown to Jack but not read by the check.
 
+Commit 3216844 (fix of 5188ce6's BLOCK): VERDICT BLOCK (the same hole
+through inline-flex / inline-grid / inline-table / ruby displays), 4
+FLAGs. Fixed in the next commit: a candidate block is refused when its
+display starts with inline, -webkit-inline, ruby or table-, or is
+contents or none (td / th are off the selector too, so side-by-side
+cells never count); the app-name bound also refuses + | en dash, em dash
+and the ideographic comma; the "not secure" fixture now sits on a screen
+that would otherwise pass, so only the notice stops it. Logged under the
+accepted page-structure items: the visibility check accepts opacity 0,
+clipping and off-screen positioning, so a block Jack cannot see could be
+the one that equals the sentence (the same holds for permission lines);
+with the sibling-prose question for Jack.
+

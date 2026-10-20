@@ -135,8 +135,12 @@ _SHAPE_JS = r"""
   // sits in a <b>, while a <span> inside prose is part of its block, not
   // a block of its own. The sentence rule needs a block that IS the
   // sentence, not a page that contains it somewhere.
-  const inline = el => /^(inline|inline-block|contents|none)$/.test(getComputedStyle(el).display);
-  const blocks = [...document.querySelectorAll('p, div, li, td, th, h1, h2, h3, h4, h5, h6, section, article, main, dd, dt')]
+  // Not a block of its own: anything whose outer display type is inline
+  // (inline, inline-block, inline-flex, inline-grid, inline-table, the
+  // -webkit-inline-* forms), ruby, contents, none, and table parts (cells
+  // sit side by side on one line).
+  const inline = el => /^(inline|-webkit-inline|ruby|table-)|^(contents|none)$/.test(getComputedStyle(el).display);
+  const blocks = [...document.querySelectorAll('p, div, li, h1, h2, h3, h4, h5, h6, section, article, main, dd, dt')]
     .filter(visible).filter(el => !inline(el)).filter(el => [...el.children].every(inline))
     .map(el => norm(el.innerText)).filter(t => t && t.length <= 400).slice(0, 400);
   return {boxes, ticks, ids, entries, ok, insecure, blocks};
@@ -208,7 +212,7 @@ def permissions_ok(entries: list) -> bool:
 # ("Acme, its partners", "Acme & anyone", "Acme, and your contacts with
 # Acme"). An app called "Acme, Inc" or "Acme and Sons" pauses: a false
 # pause costs seconds, a false pass would share more than Jack allowed.
-_APP_NAME = re.compile(r"^(?!.*\b(and|with|or|your|share|also|plus)\b)[^.,&/;:]{1,80}$")
+_APP_NAME = re.compile(r"^(?!.*\b(and|with|or|your|share|also|plus)\b)[^.,&/;:+|\u2013\u2014\u3001]{1,80}$")
 
 
 def sentence_ok(blocks) -> bool:
