@@ -415,7 +415,8 @@ class Wizard:
         """
         Every scan in this process makes earlier refs stale (they then read
         as missing, never wrongly), so after another job ran, this page's
-        refs are stale. Re-scan the page and carry the plan, results, flags,
+        refs are stale. Re-scan the page (a scan that fails leaves every
+        field unpaired) and carry the plan, results, flags,
         read-backs, marks and approvals over to the new refs, by field
         identity (type, tag, name, id, labels, options), one-to-one matches
         only: exactly one old field and exactly one new field with that
@@ -430,7 +431,7 @@ class Wizard:
         try:
             new_fields = extract.extract_fields(self.page, self.guard)
         except Exception:
-            return
+            new_fields = []            # unreadable: every field is unpaired below
         by_key: dict = {}
         for nf in new_fields:
             by_key.setdefault(self._ident(nf), []).append(nf)
@@ -492,7 +493,9 @@ class Wizard:
         self.prefill = {m(g): [remap_box(b) for b in boxes] for g, boxes in self.prefill.items()}
         self.human_reviewed = [m(r) for r in self.human_reviewed if r not in unpaired]
         if isinstance(pending.get("marked_before"), set):
-            pending["marked_before"] = {m(r) for r in pending["marked_before"] if r not in unpaired}
+            # Kept whole: a stale ref left in "before" can only shrink what
+            # counts as touched since (touched = after - before).
+            pending["marked_before"] = {m(r) for r in pending["marked_before"]}
         if isinstance(info.get("approved"), dict):
             info["approved"] = remap_keys(info["approved"])
         self.out.log.append(f"re-scanned after other jobs ran: {len(pairs)} of {len(fill.fields)} "

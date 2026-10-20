@@ -1266,3 +1266,13 @@ resume after a same-tab Google pause. Logged, not folded:
 - "all ten fail on 5cba445" was verified by the main session's run, not
   the reviewer's.
 
+Commit d72fbb6 (fold of 5cba445's FLAG): VERDICT FLAG, 3 FLAGs and two
+notes. Folded into the next commit: a re-scan that raises now leaves
+every field unpaired (dropping read-backs, results and reviews) instead
+of returning with everything kept; the filter on pending["marked_before"]
+is gone (a stale ref left in "before" can only shrink what counts as
+touched); the test seeds the census, marked_before and approvals and
+checks the gate's own verdict ("filling it failed", "required, but
+empty"), and a new test covers the failed re-scan. Noted: the reviewer
+verified the fail-on-previous-commit claims by reading, not by running.
+
