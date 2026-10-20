@@ -23,9 +23,9 @@ import time
 from pathlib import Path
 
 from agent import (adapters, browser as browser_mod, classify, config, extract,
-                   filler, follow, gate, gui, intake, learn, ledger, letters, mapper, outcome,
-                   pages, pause, pipeline, report, score, sensitive, shadow, template, tracker,
-                   wizard)
+                   filler, follow, gate, google, gui, intake, learn, ledger, letters, mapper,
+                   outcome, pages, pause, pipeline, report, score, sensitive, shadow, template,
+                   tracker, wizard)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
@@ -1287,7 +1287,14 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
             return
         if state.google_login:
             state.google_login = False
-            state.notice = "Google login arrives with item 3 of docs/PLAN-gui.md"
+            # A tab on Google's sign-in site, for Jack's hands only: nothing
+            # is typed, read or pressed there by the agent.
+            try:
+                google.open_login_tab(ctx)
+                state.notice = ("a Google sign-in tab is open: sign in there yourself; the agent "
+                                "touches nothing on it")
+            except Exception as e:
+                state.notice = f"couldn't open the Google sign-in tab ({type(e).__name__})"
         for job_id in state.resumable():
             info = state.take_resume(job_id)
             kept = waiting.pop(job_id, None)
@@ -1338,6 +1345,24 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
         if job.id not in waiting:
             state.update(job.id, status=status, reason=reason)
         last_busy = clock()
+
+
+def cmd_google_login(args) -> None:
+    """
+    Open the agent's own Chrome profile at accounts.google.com and wait for
+    Jack to sign in by hand. The agent types nothing, reads nothing from the
+    page and presses nothing: the session Google leaves in the profile is
+    what later "Continue with Google" buttons use (Jack, 2026-10-19).
+    """
+    print(f"\n{BOLD}Google sign-in{OFF}")
+    print(f"{DIM}A browser window opens on Google's sign-in page, in the agent's own profile "
+          f"({config.CHROME_PROFILE_DIR}). Sign in there yourself. The agent touches nothing on "
+          f"that page and reads nothing from it.{OFF}")
+    with browser_mod.browser() as ctx:
+        google.open_login_tab(ctx)
+        print("Press Enter here when you're signed in (or to give up).")
+        input()
+    print(f"{GREEN}Done.{OFF} {DIM}Whatever Google saved in the profile stays on this machine.{OFF}")
 
 
 def cmd_gui(args) -> None:
@@ -1490,6 +1515,9 @@ def main() -> None:
     p_gui.add_argument("--force", action="store_true",
                        help="redo links already logged; ignore profile warnings")
     p_gui.set_defaults(fn=cmd_gui)
+
+    sub.add_parser("google-login", help="open the agent's browser at Google's sign-in page "
+                                        "for you to sign in by hand").set_defaults(fn=cmd_google_login)
 
     sub.add_parser("applied", help="every link run has logged, with its status"
                    ).set_defaults(fn=cmd_applied)

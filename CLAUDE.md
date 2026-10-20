@@ -65,6 +65,9 @@ run as `python apply.py <command>` (no make).
   Windows toast (fallback bell), a prompt (hidden via getpass for a
   password), a 15-minute wait that also ends when the page moves on
   (item 2 of `docs/PLAN-gui.md` replaces the wait with the GUI).
+- `agent/google.py` — Google's sign-in site by exact https hostname, and the
+  tab `apply.py google-login` (or the GUI's button) opens there for Jack's
+  hands only: nothing typed, read or pressed by the agent.
 - `agent/gui.py` — the one-page local GUI (`apply.py gui`): loopback only,
   Host and Origin checks, a per-session token on every change, a strict
   CSP, text-node rendering; the State the queue loop and the page share.

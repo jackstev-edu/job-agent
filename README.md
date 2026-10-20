@@ -127,6 +127,7 @@ applications is somewhere under five dollars.
 
 ```bash
 python apply.py gui                            # a local page: paste links, watch rows
+python apply.py google-login                   # sign in to Google by hand, in the agent's browser
 python apply.py run https://company.example/careers/jobs/1234
 python apply.py run --queue links.txt          # one link per line, # comments
 python apply.py run <url> --dry                # intake only: open, click Apply, report
@@ -145,7 +146,13 @@ per-company, checkbox or password field); a verification pause shows a
 box for the code. Continue resumes that tab from where it stopped: a field
 you typed into there, or ticked in the GUI while the page still holds that
 value, counts as yours; Continue alone approves nothing. The browser closes
-only from the page's Close button (it asks first if a job is waiting). The page talks only to that port, checks the
+only from the page's Close button (it asks first if a job is waiting).
+
+`google-login` (or the page's "Google login" button) opens the agent's own
+Chrome profile at Google's sign-in page for you to sign in by hand. The
+agent types nothing there, reads nothing from it and presses nothing; the
+session Google leaves in the profile is what "Continue with Google"
+buttons on portals use afterwards. The page talks only to that port, checks the
 Host and Origin of every request, needs a per-session token for every
 change, and renders everything from the job pages as plain text. A dry run
 (the toggle on the page, or `run --dry`) opens the link, clicks Apply,
