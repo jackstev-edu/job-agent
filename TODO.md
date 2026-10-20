@@ -1840,3 +1840,18 @@ no store when the page stays an account page (the real by-hand case,
 the page moving on during the pause, is covered by code order, with no
 test); `_site(exists=True)` passes an argument the mock never uses.
 
+
+Commit 0da7f76 (the Workday plan): VERDICT FLAG, 9 FLAGs on the plan's
+text, all taken into the amended plan: item 1 names the waived stop
+reasons (left blank, not answered, an unanswered per-company question,
+an optional unticked box) and keeps every other stop, with "required"
+as page data written down as accepted; item 2 fills through filler.py's
+primitives so no layer is lost; item 4 presses Enter only in
+workday.py, only with the automation-id, `input.form === null` and the
+submit check; item 5 counts the entries already present before any
+Add; item 6 puts Workday's mid-wizard terms box to Jack; item 7 is
+rescoped to the Review page and Submit (Next is already recognised);
+item 8 defines "loose match" (token containment either way, or the
+employer's initials), the doubt cases, the guard kind and the gate's
+per_company admission; item 9 is marked not asked for and names
+submit.find_submit; fixtures from snapshots are scanned before commit.
