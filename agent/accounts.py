@@ -20,6 +20,7 @@ can be checked in one place.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import secrets
 import string
@@ -293,9 +294,14 @@ def _google_first(page: "Page", prof, pauser: pause_mod.Pauser, res: Result,
         if not clicked:
             return None                    # the same tab, or a popup that didn't come
     res.steps.append(f"pressed '{found.get('word')}'")
-    browser_mod.settle(gpage, 1000)
+    # A popup Google already sent back may close at any moment: a settle
+    # on a closed page raises, and that is not a failure of the job.
+    with contextlib.suppress(Exception):
+        if not gpage.is_closed():
+            browser_mod.settle(gpage, 1000)
     status = google.drive(gpage, prof, pauser, res.steps, res.events)
-    browser_mod.settle(page, 800)
+    with contextlib.suppress(Exception):
+        browser_mod.settle(page, 800)
     return status
 
 
@@ -382,7 +388,7 @@ def sign_up(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     if g == google.STUCK:
         return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)
     if g is not None and pages.page_kind(page) != pages.ACCOUNT:
-        res.steps.append("signed up with Google")
+        res.steps.append("the account page went away after the Google button")
         return _then_verify(page, prof, pauser, res)
     try:
         pw_boxes = page.evaluate(_PASSWORD_BOXES_JS, _PW_ATTR) or []
@@ -538,7 +544,7 @@ def sign_in(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     if g == google.STUCK:
         return Result(PARKED, GOOGLE_STUCK, res.steps, res.events)
     if g is not None and pages.page_kind(page) != pages.SIGN_IN:
-        res.steps.append("signed in with Google")
+        res.steps.append("the sign-in page went away after the Google button")
         return res
     if _sign_in_with(page, prof, None, res):
         res.steps.append("signed in (a saved password)")

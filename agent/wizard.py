@@ -536,10 +536,11 @@ class Wizard:
                 raise _Parked("the tab closed")
             if not skip_fill:
                 self._captcha()
-                verdict = pages.fill_allowed(page, self.url, None)
-                if verdict == pages.OFF_HOST and google.is_google(page.url):
+                if google.is_google(page.url):
                     # A same-tab Google sign-in: walked by structure, or a
-                    # pause; never filled, never typed into.
+                    # pause; never filled, never typed into. Checked by
+                    # address before anything else: a link in Google's own
+                    # host family must not make this an ordinary page.
                     res = accounts.on_google(page, self.prof, self.pauser)
                     self.out.events += res.events
                     self.out.log += res.steps
@@ -547,6 +548,7 @@ class Wizard:
                         raise _Parked(res.reason)
                     browser_mod.settle(page, 800)
                     continue
+                verdict = pages.fill_allowed(page, self.url, None)
                 if verdict in (pages.LINKEDIN, pages.OFF_HOST):
                     raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
                 if verdict in (pages.ACCOUNT, pages.SIGN_IN, pages.VERIFICATION):

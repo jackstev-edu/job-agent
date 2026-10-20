@@ -1238,3 +1238,31 @@ identities between scans would move a review to the other box; the
 accepted structure-change route (threat model), under MUST FIX BEFORE
 AUTO-SUBMIT.
 
+Commit 2a36fc7 (GUI item 4): VERDICT BLOCK, 1 BLOCK and 8 FLAGs. Fixed in
+the next commit: the BLOCK (a link in Google's own host family, say
+careers.google.com, never tripped the off-host check, so the wizard could
+fill Google's pages: now `pages.fill_allowed` refuses Google's site by
+address and the wizard checks the address first; test with a
+careers.google.com start link). Folded (safety direction): the
+share-sentence route is dropped (Google's sentence names language
+preference anyway; Jack to decide); permission lines are read from the
+whole page and a tick box or a second Continue refuses the screen; the
+chooser entry's identifier is read again and compared before the click;
+a settle on a closed popup no longer fails the job; after a pause Jack
+ends with Enter the Google page is looked at again instead of parking;
+OK_WORDS is the one pattern, passed into the page script; the step after
+the Google button says the page went away, not "signed in". Tests added:
+the email listed twice, two Continues, a text box on the consent screen,
+a line outside the main region, the Google-family start link, the GUI
+resume after a same-tab Google pause. Logged, not folded:
+- GUI resume on the popup path: Continue re-presses the portal's Google
+  button and opens a second popup while the first is open. Fix: drive an
+  open Google page in the context first.
+- The ALLOWED_PERMISSIONS strings are the main session's transcription of
+  Google's wording; Jack to confirm the exact list (open decision).
+- The mock structures (data-identifier entries, li permission lines) have
+  not been checked against a real Google screen; a footer <select> would
+  make every page pause (fail-safe).
+- "all ten fail on 5cba445" was verified by the main session's run, not
+  the reviewer's.
+

@@ -247,12 +247,15 @@ How the code keeps them, and rules of its own:
   on `https://accounts.google.com` (exact hostname): a chooser entry is
   clicked only if its identifier equals the profile email after NFKC,
   casefold and collapsed whitespace; Continue / Allow is pressed only
-  when the page has no box to type into, exactly one such button, and
-  every permission line (or every item of Google's "will share your ..."
-  sentence) equals an entry of `ALLOWED_PERMISSIONS` /
-  `ALLOWED_SHARE_ITEMS`, compared the same way. A sign-in box, a code box,
-  "this browser may not be secure", an empty or unreadable list or any
-  other line pauses for Jack; nothing is ever typed on a Google page.
+  when the page has no box to type into, no tick box, exactly one such
+  button, and every visible permission line on the page equals an entry
+  of `ALLOWED_PERMISSIONS`, compared the same way (Google's one-sentence
+  "will share your ..." form is not accepted: it names language
+  preference). A sign-in box, a code box, "this browser may not be
+  secure", no list, an unreadable list or any other line pauses for Jack;
+  nothing is ever typed on a Google page. `pages.fill_allowed` refuses
+  Google's site by address whatever host family the link is in, and the
+  wizard checks the address before anything else.
   `google` alone left `accounts.NEVER_WORDS`; Microsoft, Apple, Facebook,
   LinkedIn and SSO controls are still never pressed.
 - The outcome hook's read counts as submit-time ("exact") only for the

@@ -9,13 +9,15 @@ control is pressed first, the chooser entry equal to the profile email
 (in another case) is clicked, a consent screen listing only the allowed
 lines gets Continue, and the portal's form is reached with no password
 typed, in the same tab and in a popup. Google's sign-in page, the 2-step
-check, the notice, a broader permission list, the share sentence with an
-extra item and a chooser without the account each pause with nothing
-typed and nothing clicked (in the terminal: parked; in GUI mode: a
-Deferred). The look-alike host is not Google and gets no click. Only
-`google` left NEVER_WORDS; the other providers are still refused and no
-step list matches a "... with Google" text. The wizard hands a same-tab
-Google page to accounts rather than parking it as off-host.
+check, the notice, a broader permission list, the one-sentence form, a
+line outside the main region, a text box or a second Continue on the
+consent screen, and a chooser without the account (or with it twice)
+each pause with nothing typed and nothing clicked (in the terminal:
+parked; in GUI mode: a Deferred, and Continue resumes the job). The
+look-alike host is not Google and gets no click. A link in Google's own
+host family never makes Google's pages fillable. Only `google` left
+NEVER_WORDS; the other providers are still refused and no step list
+matches a "... with Google" text.
 WHY IT MATTERS: Jack's 2026-10-19 decisions let the agent press exactly
 two things on Google's site and nothing more; these are the proofs.
 
@@ -26,7 +28,7 @@ from contextlib import redirect_stdout
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
-from _fill_run import _headless
+from _fill_run import _headless, classify_by_label, map_from_profile
 from _harness import Checks, run_as_script
 from agent import accounts, google, pages, pause, wizard
 from test_accounts import EMAIL, GENERATED, _Pauser, _Profile
@@ -35,6 +37,7 @@ from test_wizard import _profile
 PORTAL = "https://careers.example-co.com"
 GOOGLE = "https://accounts.google.com"
 LOOKALIKE = "https://accounts.google.com.example"
+GOOGLE_CAREERS = "https://careers.google.com"
 
 CLICKS_JS = """<script>
   window.__clicks = [];
@@ -76,25 +79,28 @@ FINISH_JS = f"""<script>function finish() {{
   else location.href = '{PORTAL}/form?google=1'; }}</script>"""
 
 
-def _chooser(match, popup=False):
+def _chooser(match, popup=False, twice=False):
     nxt = "/consent" + ("?popup=1" if popup else "")
+    again = (f'<li><div role="link" data-identifier="{match}" onclick="location.href=\'/login\'">Test Person again</div></li>'
+             if twice else "")
     return _doc("Choose an account", f"""<div role="main"><h1>Choose an account</h1><p>to continue to Example Co</p><ul>
-<li><div role="link" data-identifier="{match}" onclick="location.href='{nxt}'">Test Person<br>{match}</div></li>
+<li><div role="link" data-identifier="{match}" onclick="location.href='{nxt}'">Test Person<br>{match}</div></li>{again}
 <li><div role="link" data-identifier="other@example.invalid" onclick="location.href='/login'">Other Person<br>other@example.invalid</div></li>
 <li><div role="link" onclick="location.href='/login'">Use another account</div></li></ul></div>""")
 
 
-def _consent(lines, share=None):
+def _consent(lines, share=None, extra="", outside=""):
     items = "".join(f"<li>{ln}</li>" for ln in lines)
     body = f"<ul>{items}</ul>" if lines else f"<p>{share}</p>"
     return _doc("Sign in to Example Co", f"""<div role="main"><h1>Sign in to Example Co</h1>
-<p>This will allow Example Co to:</p>{body}
-<button type="button">Cancel</button><button type="button" onclick="finish()">Continue</button></div>{FINISH_JS}""")
+<p>This will allow Example Co to:</p>{body}{extra}
+<button type="button">Cancel</button><button type="button" onclick="finish()">Continue</button></div>{outside}{FINISH_JS}""")
 
 
 OK_LINES = ["See your primary Google Account email address",
             "See your personal info, including any personal info you've made publicly available"]
 BROAD_LINES = OK_LINES + ["See, edit, create, and delete all of your Google Drive files"]
+DRIVE = "See, edit, create, and delete all of your Google Drive files"
 SHARE_OK = "To continue, Google will share your name, email address, and profile picture with Example Co."
 SHARE_LANG = "To continue, Google will share your name, email address, language preference, and profile picture with Example Co."
 
@@ -105,11 +111,16 @@ CHALLENGE = _doc("2-Step Verification", """<h1>2-Step Verification</h1><p>Enter 
 INSECURE = _doc("Google", """<h1>Couldn't sign you in</h1><p>This browser or app may not be secure.</p>
 <button type="button">Try again</button>""")
 
-GOOGLE_PAGES = {"/chooser": lambda q: _chooser("Test@Example.invalid", popup="popup" in q),
-                "/chooser-nomatch": lambda q: _chooser("nobody@example.invalid"),
-                "/consent": lambda q: _consent(OK_LINES), "/consent-broad": lambda q: _consent(BROAD_LINES),
-                "/share-ok": lambda q: _consent([], SHARE_OK), "/share-lang": lambda q: _consent([], SHARE_LANG),
-                "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE}
+GOOGLE_PAGES = {
+    "/chooser": lambda q: _chooser("Test@Example.invalid", popup="popup" in q),
+    "/chooser-nomatch": lambda q: _chooser("nobody@example.invalid"),
+    "/chooser-twice": lambda q: _chooser("test@example.invalid", twice=True),
+    "/consent": lambda q: _consent(OK_LINES), "/consent-broad": lambda q: _consent(BROAD_LINES),
+    "/consent-two": lambda q: _consent(OK_LINES, extra='<button type="button" onclick="finish()">Continue</button>'),
+    "/consent-box": lambda q: _consent(OK_LINES, extra='<input type="text" aria-label="Note">'),
+    "/consent-outside": lambda q: _consent(OK_LINES, outside=f"<footer><ul><li>{DRIVE}</li></ul></footer>"),
+    "/share-ok": lambda q: _consent([], SHARE_OK), "/share-lang": lambda q: _consent([], SHARE_LANG),
+    "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE}
 
 
 def _routes():
@@ -117,7 +128,7 @@ def _routes():
         u = urlparse(route.request.url)
         q = parse_qs(u.query)
         base = f"{u.scheme}://{u.hostname}"
-        if base == PORTAL:
+        if base in (PORTAL, GOOGLE_CAREERS):
             g = (q.get("g") or ["chooser"])[0]
             target = f"{LOOKALIKE}/chooser" if g == "lookalike" else f"{GOOGLE}/{g}"
             if u.path == "/apply":
@@ -136,7 +147,7 @@ def _routes():
         else:
             body = "<p>404</p>"
         route.fulfill(status=200, content_type="text/html", body=body)
-    return {f"{PORTAL}/**": handle, f"{GOOGLE}/**": handle, f"{LOOKALIKE}/**": handle}
+    return {f"{PORTAL}/**": handle, f"{GOOGLE}/**": handle, f"{LOOKALIKE}/**": handle, f"{GOOGLE_CAREERS}/**": handle}
 
 
 def _run(page, kind, pauser, prof=None):
@@ -152,6 +163,16 @@ def _clicks(page):
     return page.evaluate("window.__clicks")
 
 
+def _gui_pauser():
+    return pause.GuiPauser(notify_fn=lambda t, b, echo=print: None, echo=lambda *a, **k: None)
+
+
+def _wizard(page, url, pauser):
+    return wizard.Wizard(page, _profile(), url=url, portal="generic", portal_method="default",
+                         company="Example Co", role="Engineer", resume=None, posting_text="",
+                         pauser=pauser, echo=lambda *a, **k: None)
+
+
 def test_google_is_pressed_ahead_of_the_password_flow():
     check = Checks()
     with _headless(_routes()) as ctx:
@@ -163,7 +184,7 @@ def test_google_is_pressed_ahead_of_the_password_flow():
         check(not pauser.asked, "no pause")
         check(res.steps[:3] == ["pressed 'Continue with Google'", "chose the profile's account on Google's chooser",
                                 "pressed Continue on Google's permission screen (name, email address, profile picture only)"]
-              and res.steps[-1] == "signed in with Google", f"the steps, in order ({res.steps})")
+              and res.steps[-1] == "the sign-in page went away after the Google button", f"the steps, in order ({res.steps})")
         check(any(e["kind"] == "google_sign_in" and e["handled"] == "agent" for e in res.events),
               "the event says the agent did it")
         check("typed" not in " ".join(res.steps), "nothing typed anywhere")
@@ -196,12 +217,17 @@ def test_googles_sign_in_page_pauses_with_nothing_typed():
               f"still on the sign-in page, nothing clicked or typed ({page.url}, {_clicks(page)})")
         check(len(pauser.asked) == 1 and "never touches" in pauser.asked[0][0] and not pauser.asked[0][1],
               f"one pause, plain prompt ({pauser.asked})")
+        # Enter pressed while still on the sign-in page: looked at again, then parked.
+        page.goto(f"{PORTAL}/apply?g=login")
+        pauser = _Pauser(["", ""])
+        res, _ = _run(page, pages.SIGN_IN, pauser)
+        check(res.status == accounts.PARKED and len(pauser.asked) >= 2 and _clicks(page) == [],
+              f"Enter with the page unchanged: looked again, still nothing touched, parked ({len(pauser.asked)})")
         # GUI mode: the pause is deferred, the page untouched.
         page.goto(f"{PORTAL}/apply?g=login")
-        gui = pause.GuiPauser(notify_fn=lambda t, b, echo=print: None, echo=lambda *a, **k: None)
         raised = None
         try:
-            _run(page, pages.SIGN_IN, gui)
+            _run(page, pages.SIGN_IN, _gui_pauser())
         except pause.Deferred as e:
             raised = e
         check(raised is not None and "never touches" in raised.body, "GUI mode: a Deferred")
@@ -225,39 +251,45 @@ def test_a_two_step_check_and_a_not_secure_notice_pause():
     check.done()
 
 
-def test_a_broader_permission_screen_pauses_without_a_click():
+def test_any_other_permission_screen_pauses_without_a_click():
     check = Checks()
     with _headless(_routes()) as ctx:
-        for g in ("consent-broad", "share-lang"):
+        for g, why in (("consent-broad", "more than name"), ("share-lang", "never touches"),
+                       ("share-ok", "never touches"), ("consent-outside", "more than name"),
+                       ("consent-two", "never touches"), ("consent-box", "never touches")):
             page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g={g}")
             pauser = _Pauser([None])
             res, _ = _run(page, pages.SIGN_IN, pauser)
             check(res.status == accounts.PARKED and page.url == f"{GOOGLE}/{g}" and _clicks(page) == [],
                   f"{g}: parked, Continue not pressed ({res.status}, {page.url}, {_clicks(page)})")
-            check(pauser.asked and "more than name" in pauser.asked[0][0], f"{g}: the pause says why")
+            check(pauser.asked and why in pauser.asked[0][0], f"{g}: the pause says why ({pauser.asked[0][0][:60]})")
             page.close()
-        page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g=share-ok")
-        res, _ = _run(page, pages.SIGN_IN, _Pauser([]))
-        check(res.status == accounts.CONTINUE and page.url == f"{PORTAL}/form?google=1",
-              f"the share sentence with only name, email address and profile picture passes ({page.url})")
-    for entries, share, want in (([], "", False), (OK_LINES, "", True), (BROAD_LINES, "", False),
-                                 (["See your primary Google Account email address", ""], "", False),
-                                 ([], "name, email address, and profile picture", True),
-                                 ([], "name, email address, language preference, and profile picture", False),
-                                 (["see your primary google account email address"], "", True)):
-        check(google.permissions_ok(entries, share) is want, f"permissions_ok({entries}, {share!r}) -> {want}")
+    for entries, want in (([], False), (OK_LINES, True), (BROAD_LINES, False),
+                          (["See your primary Google Account email address", ""], False),
+                          (["See your primary Google Account email address", 3], False),
+                          (["see your primary google account email address"], True),
+                          (["See  your primary Google Account email address "], True)):
+        check(google.permissions_ok(entries) is want, f"permissions_ok({entries}) -> {want}")
     check.done()
 
 
-def test_a_chooser_without_the_profile_account_pauses():
+def test_a_chooser_without_the_profile_account_or_with_it_twice_pauses():
     check = Checks()
     with _headless(_routes()) as ctx:
-        page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g=chooser-nomatch")
-        pauser = _Pauser([None])
-        res, _ = _run(page, pages.SIGN_IN, pauser)
-        check(res.status == accounts.PARKED and page.url == f"{GOOGLE}/chooser-nomatch" and _clicks(page) == [],
-              f"no entry clicked, not even 'Use another account' ({res.status}, {page.url}, {_clicks(page)})")
-        check(pauser.asked and "doesn't list the profile's account" in pauser.asked[0][0], "the pause says why")
+        for g in ("chooser-nomatch", "chooser-twice"):
+            page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g={g}")
+            pauser = _Pauser([None])
+            res, _ = _run(page, pages.SIGN_IN, pauser)
+            check(res.status == accounts.PARKED and page.url == f"{GOOGLE}/{g}" and _clicks(page) == [],
+                  f"{g}: no entry clicked, not even 'Use another account' ({res.status}, {page.url}, {_clicks(page)})")
+            check(pauser.asked and "doesn't list the profile's account" in pauser.asked[0][0], f"{g}: the pause says why")
+            page.close()
+        # The list changing between the shape read and the mark: no click.
+        page = ctx.new_page(); page.goto(f"{GOOGLE}/chooser")
+        ids = ["test@example.invalid", "other@example.invalid"]       # a stale read: the page has the other order
+        page.evaluate("const l = document.querySelectorAll('li'); l[0].parentNode.insertBefore(l[1], l[0])")
+        check(google.pick_account(page, ids, EMAIL) is False and _clicks(page) == [],
+              f"a stale index that now points at another account gets no click ({_clicks(page)})")
     check.done()
 
 
@@ -305,26 +337,63 @@ def test_google_first_on_a_sign_up_page():
         res, printed = _run(page, pages.ACCOUNT, _Pauser([]))
         check(res.status == accounts.CONTINUE and page.url == f"{PORTAL}/form?google=1",
               f"sign-up went through Google ({res.status}, {res.reason}, {page.url})")
-        check(res.steps[0] == "pressed 'Sign up with Google'" and res.steps[-1] == "signed up with Google"
+        check(res.steps[0] == "pressed 'Sign up with Google'"
+              and res.steps[-1] == "the account page went away after the Google button"
               and not any("password" in s for s in res.steps), f"no password generated or typed ({res.steps})")
         check(GENERATED not in printed + str(res.__dict__), "the sentinel is nowhere")
     check.done()
 
 
-def test_the_wizard_hands_a_same_tab_google_page_to_accounts():
+def test_the_wizard_hands_a_same_tab_google_page_to_accounts_and_resumes():
     check = Checks()
     with _headless(_routes()) as ctx:
         page = ctx.new_page(); page.goto(f"{GOOGLE}/login")
-        pauser = pause.GuiPauser(notify_fn=lambda t, b, echo=print: None, echo=lambda *a, **k: None)
-        w = wizard.Wizard(page, _profile(), url=f"{PORTAL}/apply", portal="generic", portal_method="default",
-                          company="Example Co", role="Engineer", resume=None, posting_text="",
-                          pauser=pauser, echo=lambda *a, **k: None)
+        w = _wizard(page, f"{PORTAL}/apply", _gui_pauser())
         with redirect_stdout(io.StringIO()):
             out = w.run()
         check(out.status == wizard.WAITING and "never touches" in out.reason,
               f"a same-tab Google sign-in page waits for Jack instead of parking off-host ({out.status}, {out.reason})")
         check(page.url == f"{GOOGLE}/login" and _clicks(page) == []
               and page.evaluate("document.getElementById('id').value") == "", "nothing touched on it")
+        # Jack signs in by hand and the tab comes back to the portal; Continue goes on.
+        page.goto(f"{PORTAL}/form?google=1")
+        with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                mock.patch("agent.mapper.map_fields", map_from_profile), redirect_stdout(io.StringIO()):
+            out = w.continue_from({})
+        # The job went on: the portal's form was filled and its gate paused on
+        # City (a gate pause now, not the Google one).
+        check(out.status == wizard.WAITING and "City" in out.reason and "never touches" not in out.reason
+              and "resumed after a account pause" in out.log and w.pending and w.pending.get("kind") == "gate",
+              f"Continue resumes the job on the portal's form ({out.status}, {out.reason}, {out.log[-3:]})")
+    check.done()
+
+
+def test_a_google_family_start_link_never_makes_googles_pages_fillable():
+    check = Checks()
+    with _headless(_routes()) as ctx:
+        page = ctx.new_page(); page.goto(f"{GOOGLE}/login")
+        check(pages.fill_allowed(page, f"{GOOGLE_CAREERS}/jobs/1") == pages.OFF_HOST
+              and pages.fill_allowed(page, f"{GOOGLE}/x") == pages.OFF_HOST,
+              "fill_allowed refuses Google's site whatever the link's host family")
+        # The terminal wizard, started from careers.google.com, on Google's sign-in page.
+        w = _wizard(page, f"{GOOGLE_CAREERS}/jobs/1", _Pauser([None]))
+        with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                mock.patch("agent.mapper.map_fields", map_from_profile), redirect_stdout(io.StringIO()):
+            out = w.run()
+        check(out.status == "needs_you" and out.reason == accounts.GOOGLE_STUCK and out.pages_filled == 0,
+              f"parked after the Google pause, nothing filled ({out.status}, {out.reason}, {out.pages_filled})")
+        check(page.url == f"{GOOGLE}/login" and _clicks(page) == []
+              and page.evaluate("document.getElementById('id').value") == "",
+              f"nothing typed into 'Email or phone', Next never pressed ({_clicks(page)})")
+        # The same from the portal in Google's family: the button leads to Google's sign-in page.
+        page.goto(f"{GOOGLE_CAREERS}/apply?g=login")
+        w = _wizard(page, f"{GOOGLE_CAREERS}/apply", _Pauser([None]))
+        with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                mock.patch("agent.mapper.map_fields", map_from_profile), redirect_stdout(io.StringIO()):
+            out = w.run()
+        check(out.status == "needs_you" and page.url == f"{GOOGLE}/login" and _clicks(page) == []
+              and page.evaluate("document.getElementById('id').value") == "",
+              f"from a careers.google.com sign-in page too ({out.status}, {out.reason}, {page.url})")
     check.done()
 
 

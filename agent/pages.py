@@ -19,7 +19,7 @@ import json
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from . import extract
+from . import extract, google
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -123,8 +123,9 @@ def is_linkedin(url: str) -> bool:
 def fill_allowed(page: "Page", start_url: str, seen: dict | None = None) -> str | None:
     """
     None if the agent may fill this page; otherwise the event to log and
-    the reason it fills nothing: LinkedIn, another host family, or an
-    account / sign-in / verification page. `seen` (follow mode passes one
+    the reason it fills nothing: LinkedIn, another host family (Google's
+    sign-in site always counts as another host), or an account / sign-in /
+    verification page. `seen` (follow mode passes one
     for the whole run) remembers each page (host and path) found to be an
     account, sign-in or verification page, so a later look, after a
     show-password toggle say, can't make it fillable.
@@ -133,6 +134,10 @@ def fill_allowed(page: "Page", start_url: str, seen: dict | None = None) -> str 
         url = page.url
         if is_linkedin(url) or is_linkedin(start_url):
             return LINKEDIN
+        # Google's own site is never filled, whatever host family the link
+        # is in (a careers.google.com link shares Google's family).
+        if google.is_google(url):
+            return OFF_HOST
         # No host on either side (a missing start, about:blank, a local
         # file) is never "the same site".
         here, there = host_family(url), host_family(start_url)
