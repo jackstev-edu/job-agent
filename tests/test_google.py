@@ -18,7 +18,9 @@ look-alike host is not Google and gets no click. A link in Google's own
 host family never makes Google's pages fillable, nor does Google's host
 on http or with a trailing dot (refused, never driven); a portal that
 bounces straight back to Google after the button parks with nothing
-typed; the one-page `fill` command fills nothing on Google's page; the
+typed; Google's one-sentence consent form is accepted on its own (Jack,
+2026-10-20) and refused with any line, tick box, text box, second
+Continue or other wording; the one-page `fill` command fills nothing on Google's page; the
 typing, ticking and pressing helpers of accounts.py do nothing on
 Google's host (a Forgot link that lands there types nothing). Only
 `google` left
@@ -132,6 +134,11 @@ GOOGLE_PAGES = {
     "/consent-box": lambda q: _consent(OK_LINES, extra='<input type="text" aria-label="Note">'),
     "/consent-outside": lambda q: _consent(OK_LINES, outside=f"<footer><ul><li>{DRIVE}</li></ul></footer>"),
     "/share-ok": lambda q: _consent([], SHARE_OK), "/share-lang": lambda q: _consent([], SHARE_LANG),
+    "/share-lang-tick": lambda q: _consent([], SHARE_LANG, extra='<input type="checkbox" id="x"><label for="x">Also share my contacts</label>'),
+    "/share-lang-two": lambda q: _consent([], SHARE_LANG, extra='<button type="button" onclick="finish()">Continue</button>'),
+    "/share-lang-list": lambda q: _consent([], SHARE_LANG, extra=f"<ul><li>{DRIVE}</li></ul>"),
+    "/share-lang-box": lambda q: _consent([], SHARE_LANG, extra='<input type="text" aria-label="Note">'),
+    "/share-more": lambda q: _consent([], SHARE_LANG.replace("and profile picture", "profile picture, and contacts")),
     "/login": lambda q: LOGIN, "/challenge": lambda q: CHALLENGE, "/insecure": lambda q: INSECURE,
     # A consent whose Continue sends the portal a callback that bounces straight back to Google.
     "/consent-bounce": lambda q: _consent(OK_LINES).replace(f"{PORTAL}/form?google=1", f"{PORTAL}/form?bounce=1"),
@@ -283,8 +290,10 @@ def test_a_two_step_check_and_a_not_secure_notice_pause():
 def test_any_other_permission_screen_pauses_without_a_click():
     check = Checks()
     with _headless(_routes()) as ctx:
-        for g, why in (("consent-broad", "more than name"), ("share-lang", "never touches"),
-                       ("share-ok", "never touches"), ("consent-outside", "more than name"),
+        for g, why in (("consent-broad", "more than name"), ("share-ok", "never touches"),
+                       ("share-more", "never touches"), ("share-lang-tick", "never touches"),
+                       ("share-lang-two", "never touches"), ("share-lang-list", "more than name"),
+                       ("share-lang-box", "never touches"), ("consent-outside", "more than name"),
                        ("consent-two", "never touches"), ("consent-box", "never touches")):
             page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g={g}")
             pauser = _Pauser([None])
@@ -299,6 +308,30 @@ def test_any_other_permission_screen_pauses_without_a_click():
                           (["see your primary google account email address"], True),
                           (["See  your primary Google Account email address "], True)):
         check(google.permissions_ok(entries) is want, f"permissions_ok({entries}) -> {want}")
+    for text, want in ((SHARE_LANG, True), ("Sign in to Example Co " + SHARE_LANG + " See Example Co's privacy policy.", True),
+                       (SHARE_LANG.replace("Example Co", "Acme, Inc"), True),
+                       (SHARE_LANG.upper(), True), (SHARE_OK, False),
+                       (SHARE_LANG.replace("and profile picture", "profile picture, and contacts"), False),
+                       (SHARE_LANG.replace("with Example Co.", "with ."), False),
+                       (SHARE_LANG.replace("with Example Co.", "with Example Co"), False),
+                       (SHARE_LANG.replace("To continue, ", ""), False), ("", False), (None, False)):
+        check(google.sentence_ok(text) is want, f"sentence_ok({str(text)[:50]!r}...) -> {want}")
+    check.done()
+
+
+def test_googles_one_sentence_consent_is_accepted_on_its_own():
+    # Jack, 2026-10-20: the sentence passes only with no permission lines,
+    # no tick box, no text box and exactly one Continue (the negatives are
+    # in the test above).
+    check = Checks()
+    with _headless(_routes()) as ctx:
+        page = ctx.new_page(); page.goto(f"{PORTAL}/apply?g=share-lang")
+        pauser = _Pauser([])
+        res, _ = _run(page, pages.SIGN_IN, pauser)
+        check(res.status == accounts.CONTINUE and page.url == f"{PORTAL}/form?google=1" and not pauser.asked,
+              f"the approved sentence alone gets Continue pressed ({res.status}, {res.reason}, {page.url})")
+        check("pressed Continue on Google's permission screen (name, email address, profile picture only)" in res.steps,
+              f"the step says so ({res.steps})")
     check.done()
 
 

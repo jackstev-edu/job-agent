@@ -1067,11 +1067,13 @@ def _park(url: str, reason: str, *, company: str = "", role: str = "", ats: str 
     tracker.record(url, company=company, role=role, ats=ats, status=status, notes=reason)
 
 
-def dry_report(landing: "intake.Landing", ats: str) -> tuple[str, bool, int]:
+def dry_report(landing: "intake.Landing", ats: str, role: str = "", company: str = "") -> tuple[str, bool, int]:
     """
-    What a dry run says about a link: the final address, the portal, and
-    whether a form with fields is there (two or more fields, or a file box;
-    the scan's count beside it). The scan reads structure only; nothing is
+    What a dry run says about a link: the final address, the portal, the
+    role and company read off the page's title (Jack, 2026-10-20: so a
+    public-board lookup can be checked before a real run), and whether a
+    form with fields is there (two or more fields, or a file box; the
+    scan's count beside it). The scan reads structure only; nothing is
     filled or clicked here.
     """
     page = landing.page
@@ -1085,9 +1087,16 @@ def dry_report(landing: "intake.Landing", ats: str) -> tuple[str, bool, int]:
     where = landing.url if landing.page is not None else "(the link didn't open)"
     tail = f"; parked: {landing.parked}" if landing.parked else ""
     steps = f"; {'; '.join(landing.steps)}" if landing.steps else "; nothing clicked"
-    text = (f"dry run: landed on {where}; portal {ats} (detected by {landing.portal_method}); "
+    who = (f"; role '{_clean_title(role)}' at '{_clean_title(company)}'" if (role or company) else
+           "; role and company: not read")
+    text = (f"dry run: landed on {where}; portal {ats} (detected by {landing.portal_method}){who}; "
             f"form with fields: {'yes' if found else 'no'} ({count} field(s) scanned){steps}{tail}")
     return text, found, count
+
+
+def _clean_title(text: str) -> str:
+    """Page-derived text for the terminal: no control or escape characters, capped."""
+    return re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", str(text or ""))[:80]
 
 
 def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
@@ -1117,7 +1126,7 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
             pass
     ats = adapters.CATALOG.get(landing.portal, adapters.CATALOG["generic"]).name
     if getattr(args, "dry", False):
-        text, found, _ = dry_report(landing, ats)
+        text, found, _ = dry_report(landing, ats, role=role, company=company)
         print(f"  {text}")
         if report_to is not None:
             report_to({"company": company, "role": role, "portal": ats,

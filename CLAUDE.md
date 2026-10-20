@@ -150,6 +150,21 @@ supersede the pause lines above:
   that to the page: an approval counts only if, on Continue, the field
   still holds the value Jack was shown.
 
+Added by Jack on 2026-10-20 (after his first GUI run):
+
+- Google consent: the five ALLOWED_PERMISSIONS lines are approved as
+  committed. Also approved as one whole-sentence entry, compared exactly
+  after normalisation with the app name as the only variable: "To
+  continue, Google will share your name, email address, language
+  preference, and profile picture with <app>." This sentence passes only
+  when the screen also has no permission list items, no tick boxes, no
+  text boxes and exactly one Continue; otherwise it pauses.
+- MyGreenhouse slug-and-id matching accepted. The dry-run report must also
+  show the board page's role and company.
+- Both threat-model lines written by the main session (the local-only
+  read-back value; the Google session line) are confirmed as written.
+- MyGreenhouse email code: leave the pause as it is.
+
 ## Design rules — do not relax these
 
 - The model never answers legal questions. Eligibility, EEO and compensation
@@ -251,10 +266,11 @@ How the code keeps them, and rules of its own:
   casefold and collapsed whitespace; Continue / Allow is pressed only
   when the page has no box to type into, no tick box, exactly one such
   button, and every visible permission line on the page equals an entry
-  of `ALLOWED_PERMISSIONS`, compared the same way (Google's one-sentence
-  "will share your ..." form is not accepted: it names language
-  preference). A sign-in box, a code box, "this browser may not be
-  secure", no list, an unreadable list or any other line pauses for Jack;
+  of `ALLOWED_PERMISSIONS`, compared the same way, or, with no lines at
+  all, the page holds `ALLOWED_SENTENCE` word for word with the app name
+  as the only variable (Jack, 2026-10-20). A sign-in box, a code box,
+  "this browser may not be secure", no list and no sentence, an
+  unreadable list or any other line pauses for Jack;
   nothing is ever typed on a Google page. `pages.fill_allowed`, the
   wizard (before anything else) and the one-page `fill` command refuse
   Google's host on any scheme or spelling (`google.is_google_host`),
@@ -288,10 +304,11 @@ How the code keeps them, and rules of its own:
   sign-in: Playwright's bundled Chromium carries no API keys, so no Chrome
   sync upload is possible; the session cookies go only to Google hosts, as
   any signed-in browser's would). The agent never reads cookies and never
-  automates accounts.google.com's login.
+  automates accounts.google.com's login. (Confirmed by Jack, 2026-10-20.)
 - Accepted, local only: the GUI page (127.0.0.1) shows the page's read-back
   value of an ordinary, agent-filled field beside its approve tick. It is
   shown only to Jack's own browser, never stored, logged or sent anywhere.
+  (Confirmed by Jack, 2026-10-20.)
 - Defended: benign page behaviour (show-password toggles, re-renders,
   framework node reuse, password boxes appearing after a scan, stale refs)
   must never get a password value into Python. No field value read from the

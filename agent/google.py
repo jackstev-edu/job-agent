@@ -10,9 +10,11 @@ whose email equals the profile email; on the consent screen it may press
 Continue / Allow only when every permission line on the page equals,
 after NFKC, casefold and collapsed whitespace, an entry of
 ALLOWED_PERMISSIONS (name, email address, profile picture: Google's own
-wording, transcribed). Any other page (a sign-in box, a code box, a
-checkbox, "this browser may not be secure", no permission list, an extra
-line) pauses for Jack with nothing typed. It never types anywhere.
+wording, confirmed by Jack), or, with no lines at all, the page holds
+ALLOWED_SENTENCE word for word with the app name as the only variable.
+Any other page (a sign-in box, a code box, a checkbox, "this browser may
+not be secure", no list and no sentence, an extra line) pauses for Jack
+with nothing typed. It never types anywhere.
 WHY IT MATTERS: The profile may hold Jack's Google session only because he
 put it there himself; the agent never touches Google's login page, and
 page text here can only fail an exact comparison, never pass one.
@@ -41,9 +43,7 @@ BUTTON_WORDS = re.compile(r"^((sign|log) ?in|login|continue|sign ?up|register) w
 # the openid / email / profile scopes, transcribed by the main session
 # from Jack's 2026-10-19 answer (name, email address, profile picture /
 # basic profile). Compared exactly after _norm; anything else pauses.
-# Google's one-sentence form ("Google will share your name, email address,
-# language preference, and profile picture with X") is not accepted: it
-# names language preference, which is not on Jack's list.
+# Jack confirmed these five lines on 2026-10-20.
 ALLOWED_PERMISSIONS = (
     "See your primary Google Account email address",
     "See your personal info, including any personal info you've made publicly available",
@@ -51,6 +51,13 @@ ALLOWED_PERMISSIONS = (
     "Name and profile picture",
     "Email address",
 )
+
+# Google's one-sentence form, approved by Jack on 2026-10-20 as one whole
+# sentence with the app name as the only variable. It passes only when the
+# screen also has no permission list items, no tick boxes, no text boxes and
+# exactly one Continue; otherwise it pauses.
+ALLOWED_SENTENCE = ("To continue, Google will share your name, email address, language preference, "
+                    "and profile picture with <app>.")
 
 OK_WORDS = re.compile(r"^(continue|allow)$", re.I)
 
@@ -121,8 +128,9 @@ _SHAPE_JS = r"""
   const btnText = b => norm(b.innerText || (b.tagName === 'INPUT' ? b.value : '') || b.getAttribute('aria-label'));
   const ok = [...document.querySelectorAll('button, [role=button], input[type=submit], input[type=button]')]
     .filter(visible).filter(b => OK.test(btnText(b))).length;
-  const insecure = /browser or app may not be secure|couldn.t sign you in/i.test(norm(document.body.innerText));
-  return {boxes, ticks, ids, entries, ok, insecure};
+  const text = norm(document.body.innerText).slice(0, 20000);
+  const insecure = /browser or app may not be secure|couldn.t sign you in/i.test(text);
+  return {boxes, ticks, ids, entries, ok, insecure, text};
 }
 """
 
@@ -156,9 +164,10 @@ _MARK_JS = r"""
 def classify(page: "Page") -> tuple[str, dict]:
     """
     CHOOSER (account entries, no box to type into), CONSENT (permission
-    lines with one Continue / Allow, no box, no tick box), or OTHER: a
-    sign-in box, a code box, a "not secure" notice, or anything the
-    script can't describe. Default deny.
+    lines, or the one approved sentence with no lines at all, with one
+    Continue / Allow, no box, no tick box), or OTHER: a sign-in box, a
+    code box, a "not secure" notice, or anything the script can't
+    describe. Default deny.
     """
     try:
         shape = page.evaluate(_SHAPE_JS, OK_WORDS.pattern)
@@ -172,7 +181,7 @@ def classify(page: "Page") -> tuple[str, dict]:
         return OTHER, shape
     if shape["ids"]:
         return CHOOSER, shape
-    if shape["entries"] and shape["ok"] == 1 and shape["ticks"] == 0:
+    if shape["ok"] == 1 and shape["ticks"] == 0 and (shape["entries"] or sentence_ok(shape.get("text"))):
         return CONSENT, shape
     return OTHER, shape
 
@@ -182,6 +191,33 @@ def permissions_ok(entries: list) -> bool:
     allowed = {_norm(a) for a in ALLOWED_PERMISSIONS}
     got = [_norm(e) for e in entries if isinstance(e, str)]
     return bool(got) and len(got) == len(entries) and all(g in allowed for g in got)
+
+
+def sentence_ok(text) -> bool:
+    """
+    The page text holds ALLOWED_SENTENCE, word for word after _norm, with
+    the app name (no sentence end in it, at most 80 characters) as the only
+    variable. The clause found is rebuilt with that name and must equal the
+    template exactly; page text can only fail this, never pass with other
+    wording.
+    """
+    body = _norm(text)
+    before, after = (_norm(part) for part in ALLOWED_SENTENCE.split("<app>"))
+    if not body or not before:
+        return False
+    m = re.search(re.escape(before) + r"([^.]{1,80})" + re.escape(after), body)
+    if not m:
+        return False
+    app = m.group(1).strip()
+    return bool(app) and m.group(0) == before + m.group(1) + after
+
+
+def consent_ok(shape: dict) -> bool:
+    """A permission list that is all allowed, or, with no list at all, the approved sentence."""
+    entries = shape.get("entries") or []
+    if entries:
+        return permissions_ok(entries)
+    return sentence_ok(shape.get("text"))
 
 
 def _click_marked(page: "Page") -> bool:
@@ -257,7 +293,7 @@ def drive(page: "Page", prof, pauser: pause_mod.Pauser, steps: list[str],
             why = "Google's account chooser doesn't list the profile's account (or lists it twice)."
         elif kind == CONSENT:
             n = len(shape.get("entries") or [])
-            if not permissions_ok(shape.get("entries") or []):
+            if not consent_ok(shape):
                 why = (f"Google's permission screen asks for more than name, email address and "
                        f"profile picture ({n} line(s)), or the agent couldn't read the list.")
             elif not allow(page):

@@ -236,12 +236,12 @@ def test_run_dry_reports_the_landing_and_fills_nothing():
     seen = {}
     real_report = apply.dry_report
 
-    def spy(landing, ats):
+    def spy(landing, ats, **kw):
         # Read the form's state while the browser is still open: what the
         # run left in the boxes, and what it clicked on the form page.
         seen["values"] = [landing.page.input_value("#fn"), landing.page.input_value("#em")]
         seen["clicks"] = landing.page.evaluate("window.__clicks")
-        return real_report(landing, ats)
+        return real_report(landing, ats, **kw)
     with ExitStack() as stack:
         for target, name, value in ((apply.browser_mod, "browser", lambda: _headless(_routes())),
                                     (apply, "dry_report", spy),
@@ -259,6 +259,7 @@ def test_run_dry_reports_the_landing_and_fills_nothing():
     check("dry run: landed on https://jobs.example-co.com/jobs/1/apply" in text
           and "portal Unknown or custom" in text and "form with fields: yes (2 field(s) scanned)" in text
           and "clicked 'Apply now'" in text, "the landing is reported: address, portal, form, clicks")
+    check("role 'Engineer' at 'Example Co'" in text, "the role and company read off the page's title are reported")
     check(values == ["", ""] and clicks == [], f"nothing filled, nothing clicked on the form ({values}, {clicks})")
     check(tracker.find(f"{COMPANY}/jobs/1") is None, "a dry run writes nothing to the tracker")
     check("dry 1" in text, "the batch summary counts it as dry")
