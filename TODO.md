@@ -1879,3 +1879,18 @@ supplier wordings Jack's, defines the token rule and scopes the item to
 Workday tenants; item 1 says nothing is waived on a sensitive field
 and names the one census reason waived; item 5 defines the remainder.
 
+
+Commit 25ef976 (the second plan amendment): VERDICT FLAG, 4 low, logged
+as plan notes for the build (not amended again): item 1 must say the
+checkbox census gains a `required` key and that a box with no key, or a
+non-boolean one, counts as required (the waiver only on an explicit
+False; a negative test for the missing key); item 5 must count an
+existing non-empty entry whose employer / school equals a profile
+entry's after normalisation as that entry placed (skipping an Add,
+never causing one), or write the duplicate case down as accepted; item
+6, if Jack picks the mid-wizard tick, lives in wizard.py calling
+submit.py's tick helper (gate, tick, gate again; required boxes only;
+never filler.py or the plan-driven fill), with the owner-decision line
+amended in his words; item 8's template comment should tell Jack to
+list every brand, parent and former name he worked under, since the
+match is lexical.
