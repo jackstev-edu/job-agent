@@ -369,6 +369,21 @@ and any string holding a value from your profile is replaced by
 `[profile]` before the file is written. The folder is gitignored; the
 dumps are what the mock pages in the tests are built from.
 
+### Stored portal passwords
+
+The password the agent generates when it creates a portal account, and
+the one you paste after a reset, go into Windows Credential Manager
+(through the `keyring` library) under the portal's host, and nowhere
+else. On the next sign-in to that host the agent types the stored one
+once; if it doesn't work it is forgotten and the Forgot-password flow
+runs as before.
+
+```powershell
+.venv\Scripts\python.exe apply.py passwords                     # the hosts (never the values)
+.venv\Scripts\python.exe apply.py passwords --forget <host>     # delete one
+.venv\Scripts\python.exe apply.py passwords --forget-all        # delete all
+```
+
 ### Saving a portal login once
 
 Some portals want an account per employer. Do this once for each (Workday

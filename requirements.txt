@@ -4,3 +4,5 @@ playwright>=1.48
 anthropic>=0.40
 # PyYAML     — reads profile.yaml
 PyYAML>=6.0
+# keyring    — Windows Credential Manager, for the portal passwords the agent stores
+keyring>=25.0

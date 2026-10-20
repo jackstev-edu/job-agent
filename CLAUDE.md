@@ -56,8 +56,16 @@ run as `python apply.py <command>` (no make).
   Apply and Handshake's own applications, detects the portal. A
   MyGreenhouse job link is tried on the public Greenhouse boards first.
 - `agent/accounts.py` — sign-up, sign-in, forgot password and verification
-  pages. The only module that types a password (generated or pasted), once,
-  reading nothing back. On Workday the Sign In / Create Account submits and
+  pages. The only module that types a password (generated, pasted or
+  stored), once, reading nothing back; after a create-account press that
+  went through, or a pasted password that signed in, it stores the
+  password for the host through `secrets_store`; on a sign-in page it
+  tries the stored one first, and one that fails is forgotten, not
+  retried.
+- `agent/secrets_store.py` — the one module that stores and reads back a
+  portal password: Windows Credential Manager through keyring, keyed by
+  host, plus an index of hosts (no values). `apply.py passwords` lists
+  the hosts; `--forget <host>` / `--forget-all` delete. On Workday the Sign In / Create Account submits and
   links are pressed by data-automation-id through the click_filter overlay.
 - `agent/wizard.py` — the unattended loop: CAPTCHA pauses, account pages to
   accounts.py, each page filled and gated, Next pressed, the final page to
@@ -113,7 +121,8 @@ Jack's own prompt; the plan is `docs/PLAN-autonomy.md`.
   stored, screenshotted, written to the DB / reports / corrections /
   gate_runs, or sent to any model or network beyond typing it into that
   page's password field. Tests prove no password reaches any log, file, DB
-  row or model input.
+  row or model input. (Superseded in part on 2026-10-20: it may be stored
+  in Windows Credential Manager, see the third set.)
 - The agent MAY tick terms-of-service / privacy-policy consent during account
   creation and on the final submit page. Never marketing, newsletters, SMS or
   talent-community opt-ins.
@@ -239,9 +248,14 @@ Caterpillar and Divergent run):
 
 - The model never answers legal questions. Eligibility, EEO and compensation
   come only from named profile lines.
-- The agent never reads a password from a page and never stores, logs or
-  sends one. It may type a generated or pasted site password, once, into
-  that page's password box, only in `agent/accounts.py`, and discards it.
+- The agent never reads a password from a page and never logs, prints,
+  screenshots or sends one, and never writes one to a file, the repo,
+  ~/.job-agent, the DB, a report, gate_runs, the GUI or any model input.
+  It may type a generated, pasted or stored site password, once, into
+  that page's password box, only in `agent/accounts.py`, and discards it
+  from memory. It may store that password in Windows Credential Manager
+  through `agent/secrets_store.py`, keyed by the portal's host, and read
+  it back there for one typed sign-in on that host (Jack, 2026-10-20).
   It never touches Google's own login page. The browser's own password
   manager may fill a site password.
 - Never invent facts; missing beats plausible.

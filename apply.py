@@ -25,8 +25,8 @@ from pathlib import Path
 
 from agent import (accounts, adapters, browser as browser_mod, classify, config, extract,
                    filler, follow, gate, google, gui, intake, learn, ledger, letters, mapper,
-                   outcome, pages, pause, pipeline, report, score, sensitive, shadow, snapshot,
-                   template, tracker, wizard)
+                   outcome, pages, pause, pipeline, report, score, secrets_store, sensitive, shadow,
+                   snapshot, template, tracker, wizard)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
@@ -1387,6 +1387,29 @@ def cmd_google_login(args) -> None:
     print(f"{GREEN}Done.{OFF} {DIM}Whatever Google saved in the profile stays on this machine.{OFF}")
 
 
+def cmd_passwords(args) -> None:
+    """
+    The hosts with a password in Windows Credential Manager (hosts only,
+    never a value), or forget one / all of them (Jack, 2026-10-20).
+    """
+    if args.forget_all:
+        n = secrets_store.forget_all()
+        print(f"{GREEN}Forgot {n} stored password(s).{OFF}")
+        return
+    if args.forget:
+        had = secrets_store.forget(args.forget)
+        print(f"{GREEN}Forgot the password for {args.forget.lower()}.{OFF}" if had
+              else f"{DIM}No stored password for {args.forget.lower()}.{OFF}")
+        return
+    names = secrets_store.hosts()
+    print(f"\n{BOLD}Stored portal passwords{OFF} {DIM}({secrets_store.backend_name()}){OFF}")
+    if not names:
+        print(f"{DIM}none{OFF}")
+    for host in names:
+        print(f"  {host}")
+    print(f"{DIM}Values are never shown. `apply.py passwords --forget <host>` or `--forget-all` deletes them.{OFF}")
+
+
 def cmd_snapshot(args) -> None:
     """
     A structure dump of the page the agent's browser shows, for building
@@ -1575,6 +1598,12 @@ def main() -> None:
 
     sub.add_parser("google-login", help="open the agent's browser at Google's sign-in page "
                                         "for you to sign in by hand").set_defaults(fn=cmd_google_login)
+
+    p_pw = sub.add_parser("passwords", help="the hosts with a stored portal password (never the values); "
+                                            "--forget <host> or --forget-all deletes them")
+    p_pw.add_argument("--forget", default=None, metavar="HOST")
+    p_pw.add_argument("--forget-all", action="store_true")
+    p_pw.set_defaults(fn=cmd_passwords)
 
     p_snap = sub.add_parser("snapshot", help="dump the structure of the page the agent's browser is on "
                                              "to snapshots/ (no values, no profile data)")

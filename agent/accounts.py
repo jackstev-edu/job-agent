@@ -26,10 +26,11 @@ import contextlib
 import re
 import secrets
 import string
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
-from . import browser as browser_mod, gate, google, pages, pause as pause_mod
+from . import browser as browser_mod, gate, google, secrets_store, pages, pause as pause_mod
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -94,6 +95,28 @@ class Result:
     reason: str = ""
     steps: list[str] = dataclass_field(default_factory=list)
     events: list[dict] = dataclass_field(default_factory=list)
+
+
+def _host(page: "Page") -> str | None:
+    """The portal's host (tenant) a stored password is keyed by; None on Google or with no host."""
+    try:
+        host = (urlsplit(page.url).hostname or "").lower().rstrip(".")
+    except Exception:
+        return None
+    if not host or google.is_google_host(page.url):
+        return None
+    return host
+
+
+def _remember(host: str | None, password: str | None, steps: list[str]) -> None:
+    """Store a password that just signed in or created the account (Jack, 2026-10-20)."""
+    if not host or not password:
+        return
+    try:
+        secrets_store.save(host, password)
+        steps.append(f"stored the password for {host} in Windows Credential Manager")
+    except Exception as e:
+        steps.append(f"couldn't store the password for {host} ({type(e).__name__})")
 
 
 def generate_password(length: int = PASSWORD_LENGTH) -> str:
@@ -531,9 +554,10 @@ def sign_up(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
         return Result(PARKED, f"the password box allows only {min(limits)} characters; the "
                               f"policy is {PASSWORD_MIN}+", res.steps)
     password = generate_password(min(limits) if limits else PASSWORD_LENGTH)
+    host = _host(page)
     typed = all(_type_secret(page, b["key"], password) for b in new_boxes)
-    del password
     if not typed:
+        del password
         return Result(PARKED, "couldn't type into the new-password boxes", res.steps)
     res.steps.append(f"typed a generated password into {len(new_boxes)} box(es)")
     _tick_consent(page, res.steps)
@@ -542,10 +566,17 @@ def sign_up(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
     else:
         pressed = _press(page, CREATE_WORDS, pages.ACCOUNT, "Create account")
     if pressed is None:
+        del password
         return Result(PARKED, "no single Create account button to press", res.steps)
     res.steps.append(f"pressed '{pressed}'")
     res.events.append({"kind": "account_created", "detail": "by the agent", "handled": "agent"})
     kind = pages.page_kind(page)
+    if kind != pages.ACCOUNT:
+        # The press went through: this is the account's password. (When the
+        # page stays and Jack finishes by hand, nothing is stored: the
+        # password in use is not known.)
+        _remember(host, password, res.steps)
+    del password
     if kind == pages.ACCOUNT:
         _, how = pauser.wait("job-agent needs you", "The sign-up page didn't go through. Finish "
                              "creating the account in the browser, then press Enter here.",
@@ -626,7 +657,10 @@ def forgot_password(page: "Page", prof, pauser: pause_mod.Pauser, res: Result) -
         del password
         return Result(PARKED, "couldn't get back to the sign-in page after the reset", res.steps,
                       res.events)
+    host = _host(page)
     ok = _sign_in_with(page, prof, password, res)
+    if ok:
+        _remember(host, password, res.steps)
     del password
     if not ok:
         return Result(PARKED, "the password you pasted didn't sign in", res.steps, res.events)
@@ -650,8 +684,14 @@ def _is_reset_page(page: "Page") -> bool:
                  or bool(EMAIL_BOX.search(str(boxes[0].get("words") or "")))))
 
 
-def _sign_in_with(page: "Page", prof, password: str | None, res: Result) -> bool:
-    """Email, the password if given (once), Sign in. True if the sign-in page went away."""
+def _sign_in_with(page: "Page", prof, password: str | None, res: Result,
+                  out: dict | None = None, what: str = "the password you set") -> bool:
+    """
+    Email, the password if given (once), Sign in. True if the sign-in page
+    went away. `out`, if given, records whether the password was typed and
+    the button pressed, so a caller can tell a failed attempt from none.
+    """
+    out = out if out is not None else {}
     _fill_identity(page, prof, res.steps)
     if password is not None:
         try:
@@ -661,13 +701,15 @@ def _sign_in_with(page: "Page", prof, password: str | None, res: Result) -> bool
         current = [b for b in boxes if isinstance(b, dict) and b.get("role") == "current"]
         if len(current) != 1 or not _type_secret(page, current[0]["key"], password):
             return False
-        res.steps.append("typed the password you set, once")
+        out["typed"] = True
+        res.steps.append(f"typed {what}, once")
     if "sign_in" in workday_controls(page):
         pressed = "Sign In (Workday)" if _press_workday(page, "sign_in", pages.SIGN_IN) else None
     else:
         pressed = _press(page, SIGN_IN_WORDS, pages.SIGN_IN, "Sign in")
     if pressed is None:
         return False
+    out["pressed"] = True
     res.steps.append(f"pressed '{pressed}'")
     return pages.page_kind(page) != pages.SIGN_IN
 
@@ -702,7 +744,25 @@ def sign_in(page: "Page", prof, pauser: pause_mod.Pauser) -> Result:
                           res.steps, res.events)
         res.events.append({"kind": "login_wall", "detail": "finished by Jack", "handled": "jack"})
         return res
-    if _sign_in_with(page, prof, None, res):
+    # A password stored for this host (Jack, 2026-10-20): typed once; one
+    # that fails is forgotten, not retried, and the flow goes on as before.
+    host = _host(page)
+    stored = secrets_store.get(host) if host else None
+    tried_stored = False
+    if stored is not None:
+        attempt: dict = {}
+        ok = _sign_in_with(page, prof, stored, res, attempt, what="the stored password")
+        del stored
+        if ok:
+            res.steps.append("signed in (the stored password)")
+            res.events.append({"kind": "login_wall", "detail": "signed in with the stored password",
+                               "handled": "agent"})
+            return res
+        if attempt.get("typed") and attempt.get("pressed"):
+            tried_stored = True
+            secrets_store.forget(host)
+            res.steps.append(f"the stored password for {host} didn't sign in; forgotten, not retried")
+    if not tried_stored and _sign_in_with(page, prof, None, res):
         res.steps.append("signed in (a saved password)")
         return res
     if "create_link" in workday_controls(page):

@@ -27,6 +27,14 @@ import pytest
 
 import _harness  # noqa: F401
 
+
+@pytest.fixture(autouse=True)
+def _empty_vault():
+    """Every test starts and ends with the in-memory keyring empty: a password stored by one test is never another's."""
+    _harness.FAKE_KEYRING.store.clear()
+    yield
+    _harness.FAKE_KEYRING.store.clear()
+
 TESTS_DIR = Path(__file__).resolve().parent
 
 # A name whose presence in a function's source means a browser is launched:

@@ -1734,3 +1734,35 @@ The test proves name, email, phone in any digit form, city, postal
 code, employer, a typed box value, a password box's value and the
 header's text are nowhere in the dump.
 
+Item 2 of the pre-plan set (the password store): agent/secrets_store.py
+(save / get / forget / forget_all / hosts, keyring service "job-agent",
+an index entry of hosts with no values); accounts.py stores a generated
+password after a Create-account press that moved the page on (not when
+Jack finished the form by hand: the password in use is unknown) and a
+pasted password that signed in, keyed by the page's host (never on
+Google's); on a sign-in page it types a stored password first, once; one
+that was typed and pressed and still failed is forgotten and the flow
+goes on to Create account / Forgot password without the browser-saved
+attempt (so the wrong password is not pressed again). `apply.py
+passwords` lists hosts; --forget / --forget-all delete. The tests run on
+an in-memory keyring installed by tests/_harness.py before any agent
+module (the real vault is never touched), and prove the sentinels reach
+no file under the test home, no tracker row, no gate_runs, no step, no
+event, no printed line and no model input.
+
+
+Commit 00d2720 (item 0): VERDICT FLAG, 4 low FLAGs, logged: CLAUDE.md's
+password design rule and the accounts.py line still said "never stores"
+beside the new decision (the password-store commit amends them); the
+gate's wording "optional fields left empty do not stop the gate" is
+recorded as Jack wrote it and is for him to confirm; step_entry and
+redacted() pass a row's reason into the record and gate_runs with no
+shape check (today every reason comes from filler.reason_for; the gate
+itself repeats only the fixed shape; fix: the same fullmatch in
+redacted()); the "no plan value in any detail" assertion holds for the
+four exception paths only, since a fixed phrase such as "'X' is not one
+of the radio options" still quotes the value in detail (kept in the
+record, never in gate_runs; the new guarantee is for reason); a
+dropdown whose committed display wasn't found reads as
+read_back_mismatch, the text-box category (a "display_unconfirmed"
+category would be truer).

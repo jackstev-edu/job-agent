@@ -31,6 +31,37 @@ TEST_HOME = Path(tempfile.mkdtemp(prefix="job-agent-test-"))
 os.environ["JOB_AGENT_HOME"] = str(TEST_HOME)
 atexit.register(shutil.rmtree, TEST_HOME, ignore_errors=True)
 
+# Every test gets an in-memory keyring, never Windows Credential Manager:
+# agent.secrets_store calls keyring's module functions, which go to the
+# backend set here. Installed before any agent module loads.
+import keyring  # noqa: E402
+import keyring.backend  # noqa: E402
+import keyring.errors  # noqa: E402
+
+
+class FakeKeyring(keyring.backend.KeyringBackend):
+    """An in-memory vault; its dict is the only place a test password goes."""
+    priority = 1
+
+    def __init__(self):
+        super().__init__()
+        self.store: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service, username):
+        return self.store.get((service, username))
+
+    def set_password(self, service, username, password):
+        self.store[(service, username)] = password
+
+    def delete_password(self, service, username):
+        if (service, username) not in self.store:
+            raise keyring.errors.PasswordDeleteError(username)
+        del self.store[(service, username)]
+
+
+FAKE_KEYRING = FakeKeyring()
+keyring.set_keyring(FAKE_KEYRING)
+
 
 class Checks:
     """Collects every failure in a test instead of stopping at the first."""
