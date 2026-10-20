@@ -68,8 +68,10 @@ _DUMP_JS = r"""
                     + ' [role=listbox], [role=option], [aria-haspopup]';
   const holdsValue = el => el.matches(HOLDS_VALUE);
   // A label's own words: a clone with every value-holding descendant removed.
-  const cleanText = node => {
-    if (!node) return '';
+  const cleanText = (node, own) => {
+    // A value-holding root (a dropdown named by its own id) has no words of its
+    // own to give a label; a plain button asked for its own wording (own) does.
+    if (!node || (!own && holdsValue(node))) return '';
     const c = node.cloneNode(true);
     c.querySelectorAll(HOLDS_VALUE).forEach(e => e.remove());
     return norm(c.textContent);
@@ -105,7 +107,8 @@ _DUMP_JS = r"""
     const chooser = isChooser(el);
     const aria = {};
     for (const a of el.attributes) {
-      if (!a.name.startsWith('aria-') || ['aria-valuenow', 'aria-valuetext'].includes(a.name)) continue;
+      // The value-like aria attributes: a number, a text, a chosen / pressed state.
+      if (!a.name.startsWith('aria-') || ['aria-valuenow', 'aria-valuetext', 'aria-checked', 'aria-selected', 'aria-pressed'].includes(a.name)) continue;
       if (a.name === 'aria-label' && (chooser || holdsValue(el))) continue;   // may carry the choice or the value
       aria[a.name] = norm(a.value);
     }
@@ -114,7 +117,7 @@ _DUMP_JS = r"""
       automation_id: el.getAttribute('data-automation-id') || null,
       name: el.getAttribute('name') || null, id: el.id || null,
       label: ['input', 'select', 'textarea'].includes(tag) || el.getAttribute('role') || chooser || el.hasAttribute('contenteditable') ? labelOf(el) : '',
-      text: TEXTUAL.has(tag) ? cleanText(el) : plainButton(el) ? cleanText(el) : '',
+      text: (TEXTUAL.has(tag) && !chooser && !holdsValue(el)) ? cleanText(el) : plainButton(el) ? cleanText(el, true) : '',
       chooser,
       required: el.required === true || el.getAttribute('aria-required') === 'true' || el.hasAttribute('required'),
       disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',

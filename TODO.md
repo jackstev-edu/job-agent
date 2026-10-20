@@ -1813,3 +1813,30 @@ catch and print the message); a stored password is forgotten on any
 single failed press, a CAPTCHA or a slow page included (safe direction;
 Jack goes through a reset he may not have needed).
 
+Commit a075ddc (the snapshot fold): VERDICT FLAG, 1 medium, 5 low.
+Folded in the next commit (the same value class): cleanText kept the
+root node's own text, so a dropdown whose aria-labelledby names its own
+id (Workday's "label value" pattern) copied its choice into the label;
+a value-holding root now gives no text; an <a> or heading that is a
+chooser or holds a value dumps no text either; aria-checked,
+aria-selected and aria-pressed are dropped with aria-valuenow /
+aria-valuetext (a custom radio's state is the answer); fixtures for the
+self-named dropdown, a custom radio group, a chooser link and a slider.
+Logged: aria-label is dropped for every input / button / editor, not
+only choosers (the earlier entry's "other aria attributes stay" was too
+broad; over-redaction, safe direction, and the label still comes from
+the <label> / aria-labelledby / legend); a bare <button> dropdown with
+no aria-haspopup, no role and no Workday formField container is a plain
+button and keeps its text, so a hand-chosen value not in the profile
+can reach the local gitignored file (residual gap); the Google-host
+refusal in `apply.py snapshot` has no test.
+
+Commit a57888e (the password fold): VERDICT FLAG, 3 low, logged: a
+sign-up that succeeds but lands on the portal's sign-in page ("account
+created, please sign in") now stores nothing, so Jack resets a password
+that was correct (safe direction; decision for him: accept, or find a
+stronger signal than page kind); the "finished by hand" test only shows
+no store when the page stays an account page (the real by-hand case,
+the page moving on during the pause, is covered by code order, with no
+test); `_site(exists=True)` passes an argument the mock never uses.
+

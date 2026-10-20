@@ -56,6 +56,12 @@ PAGE.write_text("""<!doctype html><html><head><meta charset="utf-8"><title>My In
 <div data-automation-id="formField-gender"><label for="gd">Gender</label>
   <button id="gd" data-automation-id="gender" aria-haspopup="listbox" aria-label="Gender CHOSEN-GENDER-SENTINEL">CHOSEN-GENDER-SENTINEL</button></div>
 <label for="cl">Cover letter <div id="cl" contenteditable="true">TYPED-EDITOR-SENTINEL</div></label>
+<div data-automation-id="formField-country"><span id="country-label">Country</span>
+  <button id="country" data-automation-id="countryDropdown" aria-haspopup="listbox" aria-labelledby="country-label country">CHOSEN-COUNTRY-SENTINEL</button></div>
+<div role="radiogroup" aria-labelledby="vet-label"><span id="vet-label">Veteran status</span>
+  <div role="radio" aria-checked="true" tabindex="0">CHOSEN-VETERAN-SENTINEL</div><div role="radio" aria-checked="false" tabindex="-1">Not a veteran</div></div>
+<a href="#" role="combobox" aria-haspopup="listbox">CHOSEN-LINK-SENTINEL</a>
+<div role="slider" aria-valuenow="42" aria-valuemin="0" aria-valuemax="100" aria-label="Years"></div>
 <label for="st">State</label><select id="st" name="state"><option>Select One</option><option>Springfield</option><option>Ohio</option></select>
 <label for="em">Email Address for test.person@example.invalid</label><input id="em" type="email" value="test.person@example.invalid">
 <label for="hp" style="display:none">Enter website. This input is for robots only, do not enter if you're human.</label>
@@ -90,7 +96,8 @@ def test_a_dump_holds_structure_and_no_value_from_the_profile_the_boxes_or_the_h
         check(path.parent == TEST_HOME / "snapshots" and path.name.startswith("test-page-"), f"written under snapshots/ ({path})")
         banned = ["Testfirst", "Testlast", "test.person", "example.invalid", "5558249000", "555) 824", "824-9000",
                   "Springfield", "43210", "Example Lane", "Example Widgets", VALUE_IN_BOX, "hunter2", "Account Settings",
-                  "userName", "CHOSEN-GENDER-SENTINEL", "TYPED-EDITOR-SENTINEL", "Mobile"]
+                  "userName", "CHOSEN-GENDER-SENTINEL", "TYPED-EDITOR-SENTINEL", "Mobile", "CHOSEN-COUNTRY-SENTINEL",
+                  "CHOSEN-VETERAN-SENTINEL", "CHOSEN-LINK-SENTINEL", "aria-checked", "aria-valuenow", '"42"']
         for b in banned:
             check(b.lower() not in text.lower(), f"{b!r} is nowhere in the dump")
         ids = [e.get("automation_id") for e in d["elements"]]
@@ -112,6 +119,13 @@ def test_a_dump_holds_structure_and_no_value_from_the_profile_the_boxes_or_the_h
               f"a chosen EEO value on a dropdown button is nowhere ({gd})")
         cl = next(e for e in d["elements"] if e.get("id") == "cl")
         check(cl["label"] == "Cover letter" and cl["text"] == "", f"a label wrapping an editor keeps its own words only ({cl['label']!r}, {cl['text']!r})")
+        country = next(e for e in d["elements"] if e.get("automation_id") == "countryDropdown")
+        check(country["label"] == "Country" and country["text"] == "", f"a dropdown named by its own id keeps the label only ({country['label']!r})")
+        radios = [e for e in d["elements"] if e.get("role") == "radio"]
+        check(len(radios) == 2 and all("aria-checked" not in r["aria"] for r in radios) and all(r["text"] == "" for r in radios),
+              f"custom radios carry no checked state and no text ({[(r['aria'], r['text']) for r in radios]})")
+        slider = next(e for e in d["elements"] if e.get("role") == "slider")
+        check("aria-valuenow" not in slider["aria"] and slider["aria"].get("aria-valuemax") == "100", f"a slider's value is dropped, its range kept ({slider['aria']})")
         nxt = next(e for e in d["elements"] if e.get("automation_id") == "bottom-navigation-next-button")
         check(nxt["text"] == "Save and Continue" and nxt["chooser"] is False, f"a plain button keeps its wording ({nxt['text']!r})")
         check(d["frames"] == 0 and d["shadow_hosts"] == 0 and "taken" in d, "frame and shadow-host counts, and the time, are recorded")
