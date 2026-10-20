@@ -1652,3 +1652,19 @@ wording. Low, folded in the same fix: the raw legal patterns are
 asserted to carry the kind. Low, logged: no test drives extract.py's
 page-side raw_legal flag for a clearance label.
 
+Commit 2380425 (item 6): VERDICT FLAG, 1 high and 4 low FLAGs. Fixed in
+the next commit (the high one, since the per-commit rule rests on it):
+in the main checkout inspect.getsource failed for five test modules
+under pytest's assertion rewriter (test_captcha, test_gate_fill,
+test_gate_record, test_greenhouse_select, one test of
+test_follow_steps), so 17 browser tests went unmarked there (233 marked
+of 343, not 250; the no-Chromium run of `-m "not browser"` failed 17);
+the marker now reads sources from the test files themselves (ast), an
+unreadable test counts as browser, and no negative result is cached
+(the low cycle-caching note). Low, logged: one test
+(test_follow_fill.py::test_follow_and_dry_run_together_are_refused) is
+over-marked through its module's helper and runs only before a push;
+a repo-root pytest.ini makes node ids `tests/test_x.py::...`, so saved
+deselect lists with bare ids no longer match; the item 6 TODO entry
+ended in a literal backslash-n with no newline (fixed).
+
