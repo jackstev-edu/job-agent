@@ -47,7 +47,8 @@ def step_entry(fields: list[dict], categories: dict, plan: dict, flags: list[dic
     if rows is not None:
         refs = [ref for ref in plan if ref in by_ref]
         results = {ref: {"filled": bool(r.get("filled")), "detail": r.get("detail", ""),
-                         "unconfirmed": bool(r.get("unconfirmed"))}
+                         "unconfirmed": bool(r.get("unconfirmed")),
+                         "reason": r.get("reason")}       # a fixed category, never a value
                    for ref, r in zip(refs, rows)}
     return {
         "fields": [{k: f.get(k) for k in _FIELD_KEYS if k in f} for f in fields],
@@ -208,6 +209,7 @@ def redacted(record: dict, result: dict) -> dict:
             "review_reasons": d.get("review_reasons"), "draft": d.get("draft"),
             "answered": d.get("value") is not None if d else False,
             "filled": None if results is None else bool((results.get(ref) or {}).get("filled")),
+            "fill_reason": None if results is None else (results.get(ref) or {}).get("reason"),
         })
         if ref in consent:
             fields[-1]["consent_action"] = consent[ref]

@@ -458,7 +458,11 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         if results is not None:
             res = results.get(ref)
             if not res or not res.get("filled"):
-                content.append(f"{name}: filling it failed")
+                # The filler's fixed category (a str of its own making, never
+                # a value); anything else in that slot is not repeated.
+                why = (res or {}).get("reason")
+                why = why if isinstance(why, str) and re.fullmatch(r"[a-z_]+(:[A-Za-z_]+)?", why) else None
+                content.append(f"{name}: filling it failed" + (f" ({why})" if why else ""))
             # A results entry with no "unconfirmed" key is unreadable, not
             # confirmed: the gate defaults to stopping on anything missing.
             elif res.get("unconfirmed", True):

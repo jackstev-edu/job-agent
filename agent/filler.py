@@ -240,7 +240,81 @@ def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple
         return True, f"typed, but the box shows something else{UNCONFIRMED}"
 
     except Exception as e:
-        return False, f"{type(e).__name__}: {str(e)[:110]}"
+        # The category and the exception's class only: Playwright's message
+        # can quote an option label or a selector, never wanted in a row.
+        return False, f"{exception_reason(e)} ({type(e).__name__})"
+
+
+# Why a fill failed, as one of a fixed set of short categories (Jack,
+# 2026-10-20): read off the fixed phrase fill_one returns, never off a
+# value. Shown in the GUI row, the report and the gate's reason.
+_REASON_RULES = (
+    ("skipped — no value", "skipped_no_value"),
+    ("refused — this tool does not enter passwords", "password_refused"),
+    ("refused — this box now reads like terms", "click_check_refused:terms"),
+    ("refused — this box now reads as a different question", "click_check_refused:question_changed"),
+    ("refused — this box could submit", "click_check_refused:submits"),
+    ("refused — this dropdown could submit", "click_check_refused:submits"),
+    ("refused — the row for", "click_check_refused:submits"),
+    ("refused — that button is no longer inside", "click_check_refused:outside_group"),
+    ("refused — '", "click_check_refused:submits_or_agrees"),
+    ("file uploads are handled separately", "file_separate"),
+    ("the box didn't take the value", "not_taken"),
+    ("can't keep keystrokes", "focus_lost"),
+    ("the focus moved away", "focus_lost"),
+    ("the form's search found no match", "no_option_match"),
+    ("couldn't click the row", "click_failed"),
+    ("the dropdown didn't keep", "not_kept"),
+    ("clicked '", "not_registered"),
+)
+EXCEPTION_REASONS = ("obscured", "not_visible", "not_editable", "detached", "timeout")
+
+
+def exception_reason(e: BaseException) -> str:
+    """
+    The category for an exception raised while filling. The message is
+    read here only to pick the category; none of it is kept.
+    """
+    msg = str(e).lower()
+    if "did not find some options" in msg:
+        return "no_option_match"
+    if "intercepts pointer events" in msg:
+        return "obscured"
+    if "not visible" in msg or "is hidden" in msg:
+        return "not_visible"
+    if any(w in msg for w in ("read-only", "readonly", "not editable", "is disabled", "not an <input>")):
+        return "not_editable"
+    if ("not attached" in msg or "detached" in msg
+            or ("waiting for" in msg and "resolved to" not in msg)):
+        return "detached"                # the box is no longer in the page
+    if "timeout" in msg or type(e).__name__ == "TimeoutError":
+        return "timeout"
+    return f"exception:{type(e).__name__}"
+
+
+def reason_for(worked: bool, detail: str) -> str | None:
+    """
+    The fixed category behind a fill_one result: None for a clean fill,
+    read_back_mismatch / read_back_unreadable for a fill the page didn't
+    confirm, else the failure's category. An unrecognised failure phrase
+    is "unknown", never the phrase itself.
+    """
+    detail = str(detail or "")
+    if worked:
+        if UNCONFIRMED in detail:
+            return "read_back_unreadable" if "couldn't be read back" in detail else "read_back_mismatch"
+        return None
+    for prefix, reason in _REASON_RULES:
+        if detail.startswith(prefix):
+            return reason
+    if detail.startswith("'"):
+        return "ambiguous_option" if "— ambiguous" in detail else "no_option_match"
+    for reason in EXCEPTION_REASONS + ("no_option_match",):
+        if detail.startswith(reason + " ("):
+            return reason
+    if detail.startswith("exception:"):
+        return detail.split(" (", 1)[0]
+    return "unknown"
 
 
 # Appended to the outcome of anything chosen by judgement rather than copied —
@@ -509,6 +583,7 @@ def run_plan(page: "Page", fields: list[dict], plan: dict,
             "value": decision.get("value"),
             "filled": worked,
             "detail": detail,
+            "reason": reason_for(worked, detail),
             "needs_review": bool(decision.get("needs_review")) or CONFIRM in detail,
             "unconfirmed": UNCONFIRMED in detail,
             "source": decision.get("source", "model"),

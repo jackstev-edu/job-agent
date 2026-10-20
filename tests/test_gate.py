@@ -159,6 +159,17 @@ def test_3_nothing_flagged_null_failed_or_unsure():
     stops(check, r, "'Website': not answered", "a field the mapper never answered")
     r = base(); r["results"]["f0"] = {"filled": False, "detail": "timeout"}
     stops(check, r, "'First Name *': filling it failed", "a fill that failed")
+    # The filler's fixed category is repeated in the reason (Jack, 2026-10-20);
+    # anything else in that slot is not.
+    r = base(); r["results"]["f0"] = {"filled": False, "detail": "obscured (TimeoutError)", "reason": "obscured"}
+    stops(check, r, "'First Name *': filling it failed (obscured)", "a failed fill names its category")
+    r = base(); r["results"]["f0"] = {"filled": False, "detail": "x", "reason": "click_check_refused:submits"}
+    stops(check, r, "filling it failed (click_check_refused:submits)", "a two-part category too")
+    for bad in ("SENTINEL VALUE", "<script>alert(1)</script>", "timeout; 'Secret'", 7, None):
+        r = base(); r["results"]["f0"] = {"filled": False, "detail": "x", "reason": bad}
+        v = stops(check, r, "'First Name *': filling it failed", f"a reason of the wrong shape still stops ({bad!r})")
+        check(not any(str(bad) in reason for reason in v["content_reasons"] if bad not in (None, 7)),
+              f"and is not repeated ({bad!r})")
     r = base(); r["plan"]["f0"].update(needs_review=True, review_reasons=["approximate_option"])
     stops(check, r, "needs review (approximate_option)", "an approximate option match")
     r = base(); r["plan"]["f0"]["confidence"] = "medium"

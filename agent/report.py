@@ -139,8 +139,9 @@ def build(*, url: str, ats_name: str, report_rows: list[dict],
             notes.append(row.get("note") or "Drafted by AI — read it before you send it.")
         items.append((row["label"], " ".join(notes)))
     for row in failed:
+        why = f" ({row['reason']})" if row.get("reason") else ""
         items.append((row["label"],
-                      f"Could not be filled: {row.get('detail','')}. Enter it by hand."))
+                      f"Could not be filled{why}: {row.get('detail','')}. Enter it by hand."))
 
     checklist_html = ""
     if items:

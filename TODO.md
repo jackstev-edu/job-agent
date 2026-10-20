@@ -1706,3 +1706,18 @@ pursue, seek, qualify, apply, receive, would, could, can), with a
 negative per word. Verified by the reviewer: the change adds only a
 human return before any fill; nothing narrowed.
 
+## Round of 2026-10-20 (third set: fill reasons, snapshot, password store, Workday plan)
+
+Item 0 (fill-failure reasons): `filler.reason_for` turns fill_one's fixed
+phrase into a short category (skipped_no_value, password_refused,
+click_check_refused:terms / question_changed / submits / outside_group /
+submits_or_agrees, file_separate, not_taken, focus_lost, no_option_match,
+ambiguous_option, click_failed, not_kept, not_registered,
+read_back_mismatch, read_back_unreadable); an exception becomes obscured,
+not_visible, not_editable, detached, timeout or exception:<Class>, with
+Playwright's message read only to pick it and no longer kept in the row
+(it could quote an option label). The row, the record's results, the
+redacted gate_runs field (fill_reason), the gate's "filling it failed
+(<reason>)" (so the GUI row shows it), the report and `fill`'s terminal
+line carry it.
+

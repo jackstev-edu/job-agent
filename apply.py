@@ -940,7 +940,8 @@ def _print_summary(rows, flags) -> None:
         shown = "" if row.get("value") is None else str(row["value"])[:45]
         print(f"  {mark} {str(row['label'])[:52]:<54} {DIM}{shown}{OFF}")
         if not row["filled"] and row["detail"] != "skipped — no value":
-            print(f"         {RED}{row['detail']}{OFF}")
+            why = f"[{row['reason']}] " if row.get("reason") else ""
+            print(f"         {RED}{why}{row['detail']}{OFF}")
     _print_flags(flags)
 
 

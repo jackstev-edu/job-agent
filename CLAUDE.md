@@ -191,6 +191,44 @@ Added by Jack on 2026-10-20 (second set):
   tests are split off by a single marker. The "stop and report" threshold
   for the full suite is 30 minutes.
 
+Added by Jack on 2026-10-20 (third set, after the General Motors,
+Caterpillar and Divergent run):
+
+- Optional fields left empty do not stop the gate: a non-required field
+  the agent left blank (any category, including unknown) and an optional
+  checkbox left unticked are listed in the report but are not stop
+  reasons. Required fields, legal / EEO / pay questions the profile can't
+  answer, flagged and unconfirmed fields still stop.
+- Workday prompt search boxes: the agent may press Enter inside a Workday
+  prompt search input (identified by Workday's data-automation-id, e.g.
+  searchBox / multiselectInputContainer) to run the search, only after
+  checking the input cannot submit the form. It still chooses only an
+  option whose text exactly equals the profile value after normalisation;
+  no exact match = left blank and said so. Enter stays forbidden
+  everywhere else.
+- Repeating sections: the agent may click a section's own "Add" control
+  (Work Experience, Education, Languages, Websites on Workday) once per
+  entry it has a profile entry for, and never more. No delete / remove
+  clicks.
+- Past employers: a new profile line `work_history.past_employers` (a
+  list Jack fills). A "have you worked for <company>" question is
+  answered "No" only when the company named by the job's own URL host /
+  tenant (not page text) does not loosely match any listed employer; any
+  match, or any doubt, goes to Jack.
+- Fill-failure reasons: when the filler fails a field it records WHY as a
+  short fixed category (not_editable, click_check_refused:<which check>,
+  read_back_mismatch, timeout, detached, no_option_match, ...), never a
+  value; shown in the GUI row and the report.
+- Passwords (same day): the agent may store the password it generates for
+  a portal account, and a password Jack pastes after a reset, in Windows
+  Credential Manager via the keyring library, keyed by the portal's host
+  (tenant), never in a file, the repo, ~/.job-agent, logs, reports, the
+  DB, gate_runs, the GUI or any model input. On a later sign-in to the
+  same host it reads that stored password and types it once into the
+  page's password box. It still never reads a password from a page.
+- The Workday adapter itself is plan-first: `docs/PLAN-workday.md`, then
+  Jack's go.
+
 ## Design rules — do not relax these
 
 - The model never answers legal questions. Eligibility, EEO and compensation
@@ -292,7 +330,13 @@ How the code keeps them, and rules of its own:
   profile value once case, punctuation and spacing are set aside; never the
   first or the closest row; with no such row it is left blank and the
   report says so (Jack, 2026-10-20). A radio option is checked with no click-time
-  re-check. It has no code path that clicks Submit, accepts
+  re-check. When a fill fails, the row carries a fixed reason category
+  (`filler.reason_for`: not_taken, no_option_match, click_check_refused:
+  <check>, obscured, not_editable, detached, timeout, ...), read off the
+  filler's own fixed phrase or the exception's class, never a value; a
+  Playwright message is read only to pick the category and is not kept.
+  The gate repeats the category in its reason only when it has that fixed
+  shape. It has no code path that clicks Submit, accepts
   terms or signs anything. It must stay that way.
 - The submit gate: a pure function of the record and the profile. It never
   clicks, ticks or submits itself; `submit.py` (milestone 5) acts on its
