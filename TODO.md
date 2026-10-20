@@ -1855,3 +1855,27 @@ item 8 defines "loose match" (token containment either way, or the
 employer's initials), the doubt cases, the guard kind and the gate's
 per_company admission; item 9 is marked not asked for and names
 submit.find_submit; fixtures from snapshots are scanned before commit.
+
+Commit 9061554 (the second snapshot fold): VERDICT FLAG, 4 low, logged
+(residual, local gitignored file only; decision for Jack whether to
+keep hardening the dump): `classes` is dumped for every element, so a
+custom radio marked chosen by a state class (is-checked, selected)
+would carry the choice (fix: no classes on radio / checkbox / switch /
+option / tab roles and on radio / checkbox inputs); aria-activedescendant
+is kept and may name a chosen option by an id built from its value
+(fix: drop it); an aria-labelledby target that is a plain span holding
+the displayed choice is copied whole (the bare-button gap, same class);
+the slider check is a guard, not a fails-before test.
+
+Commit 1cfe608 (the plan amendment): VERDICT FLAG, 7 FLAGs on the
+text, folded into the plan in the next commit: item 6 reframed (the
+gate's consent policy has no page condition today; would_tick counts
+as filled, only submit.py ticks, so mid-wizard the wizard presses Next
+with the box unticked; the decision is whether the wizard may tick
+under the policy or the gate counts would_tick as filled only on the
+submit page); item 8 adds a fail-only rule that the label's company
+phrase must itself match the tenant, keeps contractor / consultant /
+supplier wordings Jack's, defines the token rule and scopes the item to
+Workday tenants; item 1 says nothing is waived on a sensitive field
+and names the one census reason waived; item 5 defines the remainder.
+
