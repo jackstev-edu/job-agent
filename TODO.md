@@ -1604,3 +1604,18 @@ approval; decision for Jack: record it); the Avature mock's hidden file
 input and onclick are unverified portal behaviour, and no wizard run
 drives the Ashby page (is_chooser is True there; the wizard's fill_page
 is what keeps it off the chooser).
+
+
+Item 6 (the test split): tests/conftest.py marks a test `browser` when
+its own source, or a function or class it calls (from its own module or
+imported from another test module, followed to a fixpoint), names a
+browser token (mock_page, sync_playwright, _headless, run_fill,
+_fill_run, launch_persistent, chromium.launch); pytest.ini registers
+the marker. Checked by running `-m "not browser"` with
+PLAYWRIGHT_BROWSERS_PATH pointed at an empty folder: 93 tests pass in
+21 s with no Chromium to launch (the first cut missed five tests in
+test_resume_final.py that launch through a helper imported from
+test_resume.py; that run caught it); 250 tests carry the marker. CLAUDE.md's Working rules now carry Jack's test-run rule
+(per commit: changed test files plus `-m "not browser"`; the full suite
+before each push) and the 30-minute threshold.
+\n

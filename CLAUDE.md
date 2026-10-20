@@ -427,7 +427,11 @@ How the code keeps them, and rules of its own:
 
 ## Working rules
 
-- One commit per item; tests pass before each commit.
+- One commit per item; tests pass before each commit. Per commit that
+  means the new or changed test files plus the non-browser tests
+  (`-m "not browser"`; tests/conftest.py marks every test that launches
+  Chromium `browser`); the full suite once before each push (Jack,
+  2026-10-20, second set).
 - Before each commit, run git status and confirm nothing from
   ~/.job-agent is staged.
 - Run Python as .venv/Scripts/python.exe (use -m pip, never pip.exe).
@@ -446,8 +450,8 @@ How the code keeps them, and rules of its own:
   pass without Jack's explicit approval. False positives there are
   acceptable; if a negative test conflicts with a pattern, report it
   instead of narrowing.
-- If a full test run takes over 20 minutes, stop and report which test
-  hung; do not just rerun.
+- If a full test run takes over 30 minutes (Jack, 2026-10-20, second
+  set; it was 20), stop and report which test hung; do not just rerun.
 - Big features are plan-first: propose and wait for Jack's go.
 - Report: table hash | summary | tests | reviewer verdict | full-run
   time; each reviewer output unedited; a separate "not asked for" list;

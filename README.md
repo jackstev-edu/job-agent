@@ -541,8 +541,13 @@ a throwaway `JOB_AGENT_HOME`, so `~/.job-agent` is never touched.
 
 ```powershell
 .venv\Scripts\python.exe -m pip install -r requirements-dev.txt   # once
-.venv\Scripts\python.exe -m pytest tests/
+.venv\Scripts\python.exe -m pytest tests/                       # everything, 15-20 minutes
+.venv\Scripts\python.exe -m pytest tests/ -m "not browser"       # the code-only tests, under a minute
 ```
+
+`tests/conftest.py` marks every test that launches Chromium `browser`, read
+off the test's own source and the helpers it calls, so there is no list to
+keep up.
 
 Every file also runs on its own as a script (`python tests/test_captcha.py`),
 printing each check as it goes.
