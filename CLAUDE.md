@@ -524,4 +524,5 @@ How the code keeps them, and rules of its own:
 ## Current work
 
 The autonomy run of 2026-10-18: `docs/PLAN-autonomy.md` (milestones 0-7)
-and `TODO.md`. A new session resumes from those two files.
+and `TODO.md`. The Workday adapter: `docs/PLAN-workday.md` (2026-10-20),
+waiting for Jack's go. A new session resumes from those files.

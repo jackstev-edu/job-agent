@@ -1786,3 +1786,10 @@ safe direction): a 3+ character profile value such as "None" or a title
 redacts every string containing it; values under 3 characters are never
 stripped.
 
+The Workday adapter plan is docs/PLAN-workday.md (nine items: the gate's
+optional-empties decision first, then text boxes from the root cause,
+button-dropdowns, prompt search boxes, repeating sections, resume /
+disclosures / self-id, Save and Continue + Review + Submit, past
+employers, Divergent's Greenhouse submit control). Stopped there for
+Jack's go. Jack's snapshot commands are in the round's report.
+
