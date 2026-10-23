@@ -1976,3 +1976,18 @@ the terminal gate print, the wizard's log and the redacted gate_runs
 record. Recommendation: leave the sheet as it is (it lists unfilled
 rows under "Left for you" already) unless Jack wants the gate's
 verdict on it.
+
+
+Commit 48af673 (the mid-wizard terms box): VERDICT FLAG, 3 low, all
+folded in the next commit: `tick_allowed` ran outside the activity
+listener's agent flag, so its click left a touch mark that read as
+Jack's (no path turned it into a review today; now it runs under
+`self.activity.filling`, like the filler); the one positive test
+reached the tick only through the post-pause branch (a first-pass
+variant with an optional City is added: no pause, one consent_tick
+event, submitted); a planned tick the helper refused (label changed
+since the scan, box hidden, not one native checkbox) returned the first
+verdict unchanged and Next was pressed with the box unticked (now a
+fixed log line and the page judged again on a fresh read, so the
+changed label stops it there; the refusal itself has no wizard test,
+submit.py's relabel test covers the helper).

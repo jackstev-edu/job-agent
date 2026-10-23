@@ -378,9 +378,20 @@ class Wizard:
             return result
         if not find_next(self.page, self.portal).get("chosen"):
             return result
-        ticked = submit_mod.tick_allowed(self.page, result, self.prof, self.out.log)
+        # Under the activity listener's agent flag, like the filler: the
+        # helper's own click must never leave a touch mark that reads as
+        # Jack's (a mark new since before a pause counts as his review).
+        with self.activity.filling(self.page):
+            ticked = submit_mod.tick_allowed(self.page, result, self.prof, self.out.log)
         if not ticked:
-            return result
+            # The helper refused every planned box (the label re-read on the
+            # element no longer passes, the box is hidden, or it isn't one
+            # native checkbox). Said so, and judged again on a fresh read,
+            # so a label that changed since the scan stops the page here
+            # rather than at a Next that won't move.
+            self.out.log.append("planned consent tick not made: the box no longer passes at tick time")
+            return gate.decide(self._page_record(fill, page_events), self.prof,
+                               agent_submissions_today=self.agent_submissions_today)
         ev = {"kind": "consent_tick", "detail": f"{len(ticked)} required terms / privacy box(es)",
               "handled": "agent"}
         self.out.events.append(ev)

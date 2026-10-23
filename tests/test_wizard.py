@@ -405,6 +405,20 @@ def test_a_required_terms_box_mid_wizard_is_ticked_and_the_page_moves_on():
     check.done()
 
 
+def test_a_required_terms_box_mid_wizard_is_ticked_on_the_first_pass():
+    # The same tick on the first-pass branch (no pause on the page: the
+    # City is optional and listed, not stopped on), which is also the
+    # GUI-resume path. A guard for that branch: it passes on ea7493a too.
+    check = Checks()
+    out, jack, clicks, ticks, url = _run(_site(box_on_2=TOS2, city_optional=True), "/apply", act=None)
+    check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
+          f"ticked on the first pass, moved on, submitted ({out.status}, {out.reason}, {clicks})")
+    check(jack.bodies == [], f"no pause at all ({jack.bodies})")
+    ev = [e for e in out.events if e["kind"] == "consent_tick"]
+    check(len(ev) == 1 and ev[0].get("handled") == "agent", f"one consent_tick event, the agent's ({ev})")
+    check.done()
+
+
 def test_an_optional_terms_box_mid_wizard_is_left_alone():
     # The gate plans "leave" for an optional terms box, so nothing is
     # ticked; page two's Next is gated on the box, so the run parks there,
