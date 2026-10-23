@@ -1935,3 +1935,21 @@ keep): a per-company checkbox left unticked is never waived, since an
 unticked box asserts "No" to "have you worked for us", unlike a blank
 text box; and an optional checkbox field is waived only when its census
 box vouches for it on every reading.
+
+The mid-wizard terms box (plan item 6's decision, built ahead of item
+2): `wizard._tick_required_consent` runs after a page's gate says
+would_submit with a would_tick planned (the gate plans one only for a
+required checkbox field handed over as consent whose census label
+passes the consent policy or the exact allowlist), and only on a page
+with a Next control (the final page stays submit.py's, which ticks
+there after the gate on the full record). It calls submit.py's own
+`tick_allowed` (which re-reads the label on the element and ticks only
+a visible native box the policy or the allowlist allows), logs a
+consent_tick event as the agent's, reads the page back and judges it
+again; a stop after the tick pauses like any other. Nothing is ticked
+on a stop, nothing in filler.py or the plan-driven fill. Tests: a
+required terms box on page two whose Next refuses to move until it is
+ticked (parked on ee72f8a, submitted now); an optional terms box is
+left alone (the gate plans "leave"); a required newsletter box is never
+ticked (the gate stops, the job parks). CLAUDE.md carries Jack's
+amended owner-decision line and his five decisions of 2026-10-23.

@@ -13,7 +13,10 @@ pressed only after the gate says yes, and the thank-you page is read as
 the confirmation. Then: a pause that times out parks the job with the
 reason and nothing more is pressed; a final page with a pre-ticked
 marketing box stops the gate and Submit is never pressed; a page-filled
-legal field without a trusted input is not taken as Jack's answer.
+legal field without a trusted input is not taken as Jack's answer. A
+required terms box mid-wizard (page two, with a Next that refuses to move
+until it is ticked) is ticked through submit.py's helper and the run goes
+on; an optional one and a required marketing box are never ticked.
 WHY IT MATTERS: This is the unattended path end to end: the order of
 checks, the one Next press per page, the one Submit press behind the gate.
 
@@ -86,10 +89,25 @@ CITY = '<label for="city">City</label><input id="city" name="city" required>'
 OPTIONAL_CITY = '<label for="city">City</label><input id="city" name="city">'
 
 
-def _site(marketing="", email_on_2=False, city_on_3=False, city_optional=False):
+# A terms box on page two whose Next refuses to move until it is ticked
+# (Workday's Voluntary Disclosures page behaves this way), and its
+# variants: optional, or a required marketing box in its place.
+TOS2 = ('<input type="checkbox" id="tos2" required><label for="tos2">'
+        'I have read and agree to the Terms of Service and Privacy Policy</label>')
+TOS2_OPTIONAL = TOS2.replace(" required", "")
+NEWS2 = ('<input type="checkbox" id="news2" required><label for="news2">'
+         'Send me the newsletter and job alerts</label>')
+NEXT2 = '<button type="button" onclick="location.href=\'/apply/3\'">Next</button>'
+GATED_NEXT2 = ('<button type="button" onclick="if (document.querySelector(\'#tos2, #news2\').checked) '
+               'location.href=\'/apply/3\'">Next</button>')
+
+
+def _site(marketing="", email_on_2=False, city_on_3=False, city_optional=False, box_on_2=""):
     page2 = PAGE2.replace('<label for="city">City</label><input id="city" name="city" required>',
                           ((OPTIONAL_CITY if city_optional else CITY) if not city_on_3 else "")
-                          + (EMAIL2 if email_on_2 else ""))
+                          + (EMAIL2 if email_on_2 else "") + box_on_2)
+    if box_on_2:
+        page2 = page2.replace(NEXT2, GATED_NEXT2)
     page3 = PAGE3.replace("MARKETING", marketing + (CITY if city_on_3 else ""))
     return {"/apply": PAGE1, "/apply/2": page2, "/apply/3": page3,
             "/thanks": THANKS, "/legal": LEGAL_PAGE}
@@ -345,6 +363,65 @@ def test_a_pause_on_the_final_page_still_lets_the_terms_box_be_ticked():
     check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
           f"submitted after a pause on the final page ({out.status}, {out.reason}, {clicks})")
     check(len(jack.bodies) == 1 and "City" in jack.bodies[0], f"one pause, for the city ({jack.bodies})")
+    check.done()
+
+
+def test_a_required_terms_box_mid_wizard_is_ticked_and_the_page_moves_on():
+    # Jack's decision of 2026-10-23: a required terms / privacy box on a
+    # page the wizard presses Next on is ticked through submit.py's helper
+    # after the page's gate says would_submit, and the page is judged
+    # again. Page two's Next refuses to move until the box is ticked, so on
+    # 5e15d84 the run parked on "the page didn't move on after 'Next'".
+    check = Checks()
+
+    def jack_types_the_city(page, body):
+        if "City" in body:
+            page.fill("#city", "Springfield")
+    out, jack, clicks, ticks, url = _run(_site(box_on_2=TOS2), "/apply", jack_types_the_city)
+    print(out.status, out.reason, out.log)
+    check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
+          f"ticked, moved on, submitted ({out.status}, {out.reason}, {clicks})")
+    check(len(jack.bodies) == 1 and "City" in jack.bodies[0], f"the one pause is the city's ({jack.bodies})")
+    check(sum(1 for line in out.log if line.startswith("ticked 'I have read and agree")) == 2,
+          f"one tick on page two and one on page three, each logged ({out.log})")
+    ev = [e for e in out.events if e["kind"] == "consent_tick"]
+    check(len(ev) == 1 and ev[0].get("handled") == "agent" and ev[0]["detail"].startswith("1 required"),
+          f"one consent_tick event, the agent's ({ev})")
+    check(out.gate_result and out.gate_result["content_verdict"] == "would_submit",
+          "the final gate on the full record said would_submit")
+    check.done()
+
+
+def test_an_optional_terms_box_mid_wizard_is_left_alone():
+    # The gate plans "leave" for an optional terms box, so nothing is
+    # ticked; page two's Next is gated on the box, so the run parks there,
+    # which is the point: no tick that wasn't planned. (The City is
+    # optional here so the gated Next is the only obstacle.) A guard: it
+    # passes on ee72f8a too.
+    check = Checks()
+    out, jack, clicks, ticks, url = _run(_site(box_on_2=TOS2_OPTIONAL, city_optional=True), "/apply", act=None)
+    check(out.status == "needs_you" and "didn't move on" in out.reason,
+          f"parked on the page that wouldn't move ({out.status}, {out.reason})")
+    check(not any(line.startswith("ticked") for line in out.log)
+          and not any(e["kind"] == "consent_tick" for e in out.events),
+          f"nothing ticked, no consent_tick event ({out.log})")
+    check(url.endswith("/apply/2"), f"still on page two ({url})")
+    check.done()
+
+
+def test_a_required_marketing_box_mid_wizard_is_never_ticked():
+    # A required newsletter box is no terms box: the gate stops on it
+    # (handed to Jack, required but empty), the pause times out, the job
+    # parks with the box unticked and Next never pressed on that page. A
+    # guard: it passes on ee72f8a too.
+    check = Checks()
+    out, jack, clicks, ticks, url = _run(_site(box_on_2=NEWS2, city_optional=True), "/apply", act=None)
+    check(out.status == "needs_you" and "newsletter" in out.reason.lower(),
+          f"parked on the newsletter box ({out.status}, {out.reason})")
+    check(clicks == ["Next"] and url.endswith("/apply/2"), f"Next pressed on page one only ({clicks}, {url})")
+    check(not any(line.startswith("ticked") for line in out.log)
+          and not any(e["kind"] == "consent_tick" for e in out.events),
+          f"nothing ticked ({out.log})")
     check.done()
 
 

@@ -73,7 +73,11 @@ option text can carry prefilled values), as the push rule says.
    account creation and the final page), or the gate counts would_tick as
    filled only on the page submit.py acts on, so the run pauses there on
    the required-but-empty stop; the gate change goes in item 1 with a
-   negative test.
+   negative test. DECIDED (Jack, 2026-10-23): the first. Built ahead of
+   item 2: `wizard._tick_required_consent` (gate, submit.py's
+   `tick_allowed`, gate again; required boxes only, on a page with a
+   Next; the final page stays submit.py's); the owner-decision line in
+   CLAUDE.md is amended in Jack's words.
 7. **Review and Submit** — `bottom-navigation-next-button` is already
    Next (adapters.py, wizard.py; the Submit-wording exclusion stays, since
    Workday's Review-page Submit shares the id); what is missing: the Review

@@ -68,8 +68,10 @@ run as `python apply.py <command>` (no make).
   the hosts; `--forget <host>` / `--forget-all` delete. On Workday the Sign In / Create Account submits and
   links are pressed by data-automation-id through the click_filter overlay.
 - `agent/wizard.py` — the unattended loop: CAPTCHA pauses, account pages to
-  accounts.py, each page filled and gated, Next pressed, the final page to
-  submit.py. Caps: 25 pages, 60 minutes.
+  accounts.py, each page filled and gated, a required terms / privacy box
+  the gate planned ticked through submit.py's helper and the page gated
+  again (Jack, 2026-10-23), Next pressed, the final page to submit.py.
+  Caps: 25 pages, 60 minutes.
 - `agent/chooser.py` — "choose how to apply" pages: Workday's Apply
   Manually, Avature's From Device (the resume through the page's file
   input) or Without Resume, by whole label; LinkedIn, Indeed, paste and a
@@ -123,9 +125,11 @@ Jack's own prompt; the plan is `docs/PLAN-autonomy.md`.
   page's password field. Tests prove no password reaches any log, file, DB
   row or model input. (Superseded in part on 2026-10-20: it may be stored
   in Windows Credential Manager, see the third set.)
-- The agent MAY tick terms-of-service / privacy-policy consent during account
-  creation and on the final submit page. Never marketing, newsletters, SMS or
-  talent-community opt-ins.
+- The agent MAY tick a required terms-of-service / privacy-policy consent
+  box during account creation, on any application page, and on the final
+  submit page. Never marketing, newsletters, SMS or talent-community
+  opt-ins. (Amended by Jack on 2026-10-23; it read "during account
+  creation and on the final submit page".)
 - Auto-submit is enabled on all portals from day one, behind the gate. No
   daily cap.
 - Pauses: verification codes / links, CAPTCHAs, legal / EEO / compensation
@@ -243,6 +247,23 @@ Caterpillar and Divergent run):
   page's password box. It still never reads a password from a page.
 - The Workday adapter itself is plan-first: `docs/PLAN-workday.md`, then
   Jack's go.
+
+Added by Jack on 2026-10-23 (the go on `docs/PLAN-workday.md`):
+
+- Mid-wizard terms box: yes. The wizard may tick a REQUIRED terms /
+  privacy box on any page under the existing consent policy, through
+  submit.py's tick helper (gate, tick, gate again), never filler.py or
+  the plan-driven fill path. The owner-decision line above is amended in
+  Jack's words.
+- A stored password that fails, and a sign-up landing on "please sign
+  in": accepted as they are (no retry of the browser-saved attempt; no
+  store on that landing).
+- Snapshot residuals: all four accepted; no further snapshot work. Every
+  fixture built from a snapshot is scanned for personal data before
+  commit.
+- The optional-empties wording in CLAUDE.md (third set) is Jack's as
+  written.
+- Divergent (plan item 9) stays last.
 
 ## Design rules — do not relax these
 

@@ -6,9 +6,12 @@ CAPTCHA pauses for Jack; an account, sign-in or verification page goes to
 accounts.py; any other page on the application's own site is filled by the
 shared pipeline, read back and judged by the gate; a stop pauses for Jack
 and is judged again once he has acted (a field he touched in the tab, a
-value he approved in the GUI that the page still holds); then Next is
-pressed and the page must change; a page with Submit and no Next is the
-final page, which submit.py handles. In the terminal a pause blocks; in
+value he approved in the GUI that the page still holds); on a page the
+wizard will press Next on, a required terms / privacy box the gate
+planned as would_tick is ticked through submit.py's own helper and the
+page judged again (Jack, 2026-10-23); then Next is pressed and the page
+must change; a page with Submit and no Next is the final page, which
+submit.py handles. In the terminal a pause blocks; in
 GUI mode it is deferred: the wizard keeps its place, returns "waiting",
 and `resume` picks up where it stopped when Jack presses Continue. Caps:
 25 pages, 60 minutes of the agent's own time (waiting doesn't count).
@@ -342,15 +345,60 @@ class Wizard:
                              agent_submissions_today=self.agent_submissions_today)
         self._log_waived(result)
         if result["content_verdict"] == gate.WOULD_SUBMIT:
-            return
+            result = self._tick_required_consent(fill, result, page_events)
+            if result["content_verdict"] == gate.WOULD_SUBMIT:
+                return
         self._pause_and_review(fill, result, page_events)
         # Terminal mode from here: GUI mode deferred above.
         result = gate.decide(self._page_record(fill, page_events), self.prof,
                              agent_submissions_today=self.agent_submissions_today)
+        if result["content_verdict"] == gate.WOULD_SUBMIT:
+            result = self._tick_required_consent(fill, result, page_events)
         if result["content_verdict"] != gate.WOULD_SUBMIT:
             self.out.gate_result = result
             raise _Parked("this page needs you: "
                           + "; ".join(_clean(r) for r in result["content_reasons"][:6]))
+
+    def _tick_required_consent(self, fill: pipeline.PageFill, result: dict,
+                               page_events: list[dict]) -> dict:
+        """
+        Jack's decision of 2026-10-23: a REQUIRED terms / privacy box on a
+        page the wizard will press Next on may be ticked under the consent
+        policy, through submit.py's own helper (which re-reads the label
+        on the element and ticks only a visible native box the policy or
+        the exact allowlist allows), after the page's gate said
+        would_submit with that tick planned (would_tick: the gate plans it
+        only for a required box); then the page is read back and judged
+        again. The final page (Submit, no Next) is submit.py's: it ticks
+        there itself, after the gate on the full record. Returns the
+        verdict to act on; with nothing ticked, `result` unchanged.
+        """
+        actions = result.get("consent_actions") or {}
+        if not any(a == "would_tick" for a in actions.values()):
+            return result
+        if not find_next(self.page, self.portal).get("chosen"):
+            return result
+        ticked = submit_mod.tick_allowed(self.page, result, self.prof, self.out.log)
+        if not ticked:
+            return result
+        ev = {"kind": "consent_tick", "detail": f"{len(ticked)} required terms / privacy box(es)",
+              "handled": "agent"}
+        self.out.events.append(ev)
+        page_events.append(ev)
+        try:
+            fill.snapshot = extract.snapshot(self.page, fill.fields)
+            self.snapshots.update(fill.snapshot)
+        except Exception:
+            pass                        # the record's own read-back decides
+        try:
+            boxes = extract.checkbox_census(self.page)
+        except Exception:
+            boxes = None
+        if isinstance(boxes, list):
+            fill.census = boxes
+            self.census.update({b["ref"]: b for b in boxes if isinstance(b, dict) and b.get("ref")})
+        return gate.decide(self._page_record(fill, page_events), self.prof,
+                           agent_submissions_today=self.agent_submissions_today)
 
     def _log_waived(self, result: dict) -> None:
         """The optional empties the gate listed instead of stopping on (version 8), once each."""
