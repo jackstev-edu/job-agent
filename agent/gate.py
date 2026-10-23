@@ -48,8 +48,9 @@ from . import sensitive
 #    a CAPTCHA only when Jack handled it; more than one step is fine when
 #    the record says it is a wizard run.
 # 8: optional empties (Jack, 2026-10-20, third set; built 2026-10-23). On
-#    a field that is not required, that the gate's sensitive test doesn't
-#    flag, and that the page reads back empty, these reasons are listed
+#    a field the scan marks optional (required exactly False; a missing
+#    key counts as required; no trailing *), that the gate's sensitive
+#    test doesn't flag, and that the page reads back empty, these reasons are listed
 #    under "waived" instead of stopping: "left blank", "not answered", an
 #    unanswered per-company question (not a checkbox: unticked asserts
 #    "No"), a field (no checkbox) handed over only because its category
@@ -449,11 +450,18 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
                            or "legal" in kinds or sensitive.legal_guard(f) is not None
                            or bool(f.get("raw_stop") or f.get("raw_legal")))
         # 8. the waiver's ground: an optional, non-sensitive, non-secret
-        # field that holds nothing. Every waiver below needs this too.
-        optional_empty = (not sensitive_field and not _is_required(f)
-                          and not f.get("secret") and (f.get("type") or "").lower() != "password"
-                          and reads_empty(ref))
+        # field that holds nothing. "Optional" is the scan's required key
+        # being exactly False (a missing key, None, 0 or "" counts as
+        # required: the gate defaults to stopping on anything missing)
+        # and no trailing * on the label. A checkbox field is optional only
+        # when its census box vouches for it too (_optional_box). Every
+        # waiver below needs this.
         is_box = (f.get("type") or "").lower() == "checkbox"
+        optional_empty = (not sensitive_field and f.get("required") is False
+                          and not str(f.get("label") or "").rstrip().endswith("*")
+                          and not f.get("secret") and (f.get("type") or "").lower() != "password"
+                          and reads_empty(ref)
+                          and (not is_box or _optional_box(census_by_ref.get(ref))))
 
         if ref in reviewed:
             # Jack's own answer: traced as his, never judged on content. The
@@ -529,16 +537,14 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             if not sensitive_field:
                 text = f"{name}: left for you" + (f" ({reason[:100]})" if reason else "")
                 # 8. Two hand-offs the decision lists instead: an optional
-                # checkbox left unticked, when its census box is one the
-                # waiver may cover (_optional_box: optional on every
-                # reading, visible, unticked, plainly labelled, no
-                # question); and a field that is no checkbox, handed over
-                # only because its category is unknown (no stop kind, no
-                # raw flag: those made it sensitive above). Any other
-                # flag still stops.
+                # checkbox left unticked (optional_empty already needs its
+                # census box to vouch for it: optional on every reading,
+                # visible, unticked, plainly labelled, no question); and a
+                # field that is no checkbox, handed over only because its
+                # category is unknown (no stop kind, no raw flag: those
+                # made it sensitive above). Any other flag still stops.
                 plain = optional_empty and not kinds
-                if plain and (_optional_box(census_by_ref.get(ref)) if is_box
-                              else category == "unknown"):
+                if plain and (is_box or category == "unknown"):
                     waived.append(text)
                 else:
                     content.append(text)

@@ -102,10 +102,14 @@ GATED_NEXT2 = ('<button type="button" onclick="if (document.querySelector(\'#tos
                'location.href=\'/apply/3\'">Next</button>')
 
 
-def _site(marketing="", email_on_2=False, city_on_3=False, city_optional=False, box_on_2=""):
+POSTAL = '<label for="pc">Postal code</label><input id="pc" name="postal_code" required>'
+
+
+def _site(marketing="", email_on_2=False, city_on_3=False, city_optional=False, box_on_2="",
+          postal_on_2=False):
     page2 = PAGE2.replace('<label for="city">City</label><input id="city" name="city" required>',
                           ((OPTIONAL_CITY if city_optional else CITY) if not city_on_3 else "")
-                          + (EMAIL2 if email_on_2 else "") + box_on_2)
+                          + (EMAIL2 if email_on_2 else "") + (POSTAL if postal_on_2 else "") + box_on_2)
     if box_on_2:
         page2 = page2.replace(NEXT2, GATED_NEXT2)
     page3 = PAGE3.replace("MARKETING", marketing + (CITY if city_on_3 else ""))
@@ -238,17 +242,26 @@ def _medium_confidence_mapper(fields, profile, page_text=""):
 
 
 def test_a_field_left_empty_at_a_pause_is_not_reviewed():
-    # Jack's narrowing (2026-10-19): the required City the mapper left blank
-    # stops the gate; Jack presses Enter without typing. Continue alone
-    # approves nothing: it stays stopped and the job parks. (Until gate
-    # version 8 this ran on an optional City; an optional empty is now
-    # listed, not stopped on, see the next test.)
+    # Jack's narrowing (2026-10-19): a pause on page two (a required Postal
+    # code the mapper can't answer) ends with Jack pressing Enter without
+    # typing. Continue alone approves nothing: the optional City, empty and
+    # untouched, is not counted as his (the pause reviewed 0 fields), the
+    # stop stays and the job parks. (Until gate version 8 the optional
+    # City itself was the stop; now it is listed, not stopped on, so the
+    # pause comes from another field.)
     check = Checks()
-    out, jack, clicks, ticks, url = _run(_site(), "/apply", act=lambda page, body: None)
-    check(out.status == "needs_you" and "City" in out.reason and "required, but empty" in out.reason,
+    out, jack, clicks, ticks, url = _run(_site(city_optional=True, postal_on_2=True), "/apply",
+                                         act=lambda page, body: None)
+    check(out.status == "needs_you" and "Postal code" in out.reason and "required, but empty" in out.reason,
           f"an untouched empty required field keeps its stop ({out.status}, {out.reason})")
     check(clicks == ["Next"] and url.endswith("/apply/2"), f"nothing pressed after the stop ({clicks})")
-    check(len(jack.bodies) == 1 and "City" in jack.bodies[0], "one pause, for the city")
+    check(len(jack.bodies) == 1 and "Postal code" in jack.bodies[0], f"one pause ({jack.bodies})")
+    pauses = [e for e in out.events if e["kind"] == "gate_pause"]
+    check(pauses and all(e.get("handled") == "jack" and str(e.get("detail", "")).startswith("0 field(s) touched by Jack")
+                         for e in pauses),
+          f"the pause was Jack's, but it reviewed nothing: the empty City is not his ({pauses})")
+    check(any("optional, left empty" in line and "City" in line for line in out.log),
+          f"the City is listed as an optional empty, not reviewed ({out.log})")
     check.done()
 
 

@@ -1953,3 +1953,26 @@ ticked (parked on ee72f8a, submitted now); an optional terms box is
 left alone (the gate plans "leave"); a required newsletter box is never
 ticked (the gate stops, the job parks). CLAUDE.md carries Jack's
 amended owner-decision line and his five decisions of 2026-10-23.
+
+Commit ee72f8a (item 1): VERDICT BLOCK, 1 BLOCK, 3 FLAGs. The BLOCK
+(fixed in the next commit): `optional_empty` used `not _is_required(f)`,
+so a record field with no `required` key (or None, 0, "") read as
+optional and, empty, was waived to would_submit; the gate defaults to
+stopping on anything missing. Now a field is optional only on
+`required` exactly False and no trailing *, with a negative test for
+each missing or non-boolean value. Folded in the same fix (a submit
+risk on a record whose census lacks the box): an unflagged checkbox
+field (the mapper's, unanswered or null) was waived on "not answered" /
+"left blank" without its census box; `optional_empty` now needs
+`_optional_box` for any checkbox field, flagged or not, with the
+negative tests. Also fixed: the rewritten pause test no longer proved
+its name (a required City stops on required-but-empty, which no review
+ever skips); it now pauses on a required Postal code with the City
+optional and empty, and proves the pause reviewed 0 fields and the
+City is listed as an optional empty, not counted as Jack's. Logged
+(decision for Jack): the HTML review sheet (agent/report.py) shows no
+gate reasons at all and does not list the waived fields; they are in
+the terminal gate print, the wizard's log and the redacted gate_runs
+record. Recommendation: leave the sheet as it is (it lists unfilled
+rows under "Left for you" already) unless Jack wants the gate's
+verdict on it.

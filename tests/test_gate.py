@@ -593,7 +593,7 @@ def test_8_optional_empties_are_listed_not_stopped_on():
         return v
 
     def opt(ref, label, **f):
-        return {"ref": ref, "type": "text", "label": label, **f}
+        return {"ref": ref, "type": "text", "label": label, "required": False, **f}
 
     # The five waived reasons, each on an optional field read back empty.
     r = base(); r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
@@ -608,7 +608,7 @@ def test_8_optional_empties_are_listed_not_stopped_on():
     r["flags"] = [{"ref": "f12", "label": "Nickname", "category": "unknown", "reason": "unknown kind"}]
     waived(r, "'Nickname': left for you", "a field handed over only because its category is unknown")
     talent = "Add me to the talent community"
-    r = base(); r["fields"].append({"ref": "f13", "type": "checkbox", "label": talent})
+    r = base(); r["fields"].append({"ref": "f13", "type": "checkbox", "label": talent, "required": False})
     r["categories"]["f13"] = "consent"; r["snapshot"]["f13"] = False
     r["flags"] = [{"ref": "f13", "label": talent, "category": "consent", "reason": "marketing opt-in"}]
     r["census"].append(box(talent, ref="f13", required=False))
@@ -639,6 +639,32 @@ def test_8_optional_empties_are_listed_not_stopped_on():
     r = base(); r["fields"].append(opt("f7", "Middle name *")); r["categories"]["f7"] = "personal_fact"
     r["plan"]["f7"] = {"value": None, "source": "model", "confidence": "low"}; r["snapshot"]["f7"] = ""
     stops(check, r, "'Middle name *': left blank", "a '*' label counts as required")
+    # Only an explicit False is optional: a record field with no required
+    # key (or None, 0, "") is unknown, and the gate stops on anything
+    # missing. Fix of ee72f8a's BLOCK.
+    for req in ("missing", None, 0, "", "false", "no"):
+        r = base(); r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
+        if req == "missing":
+            del r["fields"][-1]["required"]
+        else:
+            r["fields"][-1]["required"] = req
+        r["plan"]["f7"] = {"value": None, "source": "model", "confidence": "low"}; r["snapshot"]["f7"] = ""
+        v = stops(check, r, "'Middle name': left blank", f"required={req!r} on the field is not optional")
+        check(v["waived"] == [], f"  ...and nothing is listed as waived ({v['waived']})")
+    # An unflagged checkbox field (the mapper's, unanswered) needs its
+    # census box to vouch for it like a flagged one. Fold of ee72f8a's FLAG.
+    r = base(); r["fields"].append({"ref": "f22", "type": "checkbox", "label": "Remote work only",
+                                    "required": False})
+    r["categories"]["f22"] = "personal_fact"; r["snapshot"]["f22"] = False
+    stops(check, r, "'Remote work only': not answered", "an unanswered optional checkbox with no census entry")
+    r["census"].append(box("Remote work only", ref="f22"))
+    stops(check, r, "'Remote work only': not answered", "  ...or whose box has no required key")
+    r["census"][-1]["required"] = False
+    waived(r, "'Remote work only': not answered", "  ...and is listed once the box vouches for it")
+    r["plan"]["f22"] = {"value": None, "source": "model", "confidence": "low"}
+    waived(r, "'Remote work only': left blank", "  ...the same for one answered null")
+    del r["census"][-1]
+    stops(check, r, "'Remote work only': left blank", "  ...and not without the box")
     r = base(); r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
     r["plan"]["f7"] = {"value": None, "source": "model", "confidence": "low"}
     stops(check, r, "'Middle name': left blank", "a field the read-back left out is unknown, not empty")
@@ -666,20 +692,20 @@ def test_8_optional_empties_are_listed_not_stopped_on():
     r["categories"]["f12"] = "personal_fact"
     r["flags"] = [{"ref": "f12", "label": "Nickname", "category": "personal_fact", "reason": "no profile line"}]
     stops(check, r, "'Nickname': left for you (no profile line)", "a flag for any other reason")
-    r = base(); r["fields"].append({"ref": "f13", "type": "checkbox", "label": talent})
+    r = base(); r["fields"].append({"ref": "f13", "type": "checkbox", "label": talent, "required": False})
     r["categories"]["f13"] = "consent"; r["snapshot"]["f13"] = False
     r["flags"] = [{"ref": "f13", "label": talent, "category": "consent", "reason": "marketing opt-in"}]
     stops(check, r, f"'{talent}': left for you", "an optional checkbox field with no census box to vouch for it")
     r["census"].append(box(talent, ref="f13"))
     stops(check, r, f"'{talent}': left for you", "  ...or whose box has no required key")
-    r = base(); r["fields"].append({"ref": "f13", "type": "checkbox", "label": talent})
+    r = base(); r["fields"].append({"ref": "f13", "type": "checkbox", "label": talent, "required": False})
     r["categories"]["f13"] = "unknown"; r["snapshot"]["f13"] = False
     r["flags"] = [{"ref": "f13", "label": talent, "category": "unknown", "reason": "?"}]
     stops(check, r, f"'{talent}': left for you", "an unknown-category checkbox needs its box too")
     r["census"].append(box(talent, ref="f13", required=False))
     waived(r, f"'{talent}': left for you", "  ...and is listed once the box vouches for it")
     worked = "I have previously worked at Acme"
-    r = base(); r["fields"].append({"ref": "f21", "type": "checkbox", "label": worked})
+    r = base(); r["fields"].append({"ref": "f21", "type": "checkbox", "label": worked, "required": False})
     r["categories"]["f21"] = "per_company"; r["snapshot"]["f21"] = False
     r["census"].append(box(worked, ref="f21", required=False))
     stops(check, r, gate.PER_COMPANY_REASON, "a per-company checkbox: unticked asserts No, never waived")
@@ -708,7 +734,8 @@ def test_8_optional_empties_are_listed_not_stopped_on():
     r["plan"]["f7"] = {"value": "M", "source": "model", "confidence": "medium"}
     r["snapshot"]["f7"] = ""; r["results"]["f7"] = {"filled": True, "detail": "typed", "unconfirmed": False}
     stops(check, r, "'Middle name': model confidence is medium", "a medium-confidence answer on an optional field")
-    r = base(); r["fields"].append({"ref": "f20", "type": "checkbox", "label": "I certify my answers are true"})
+    r = base(); r["fields"].append({"ref": "f20", "type": "checkbox", "label": "I certify my answers are true",
+                                    "required": False})
     r["categories"]["f20"] = "consent"; r["snapshot"]["f20"] = False
     r["flags"] = [{"ref": "f20", "label": "I certify my answers are true", "category": "consent", "reason": "legal"}]
     stops(check, r, "'I certify my answers are true': legal/eligibility/EEO/pay",
