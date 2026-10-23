@@ -1985,9 +1985,46 @@ Jack's (no path turned it into a review today; now it runs under
 `self.activity.filling`, like the filler); the one positive test
 reached the tick only through the post-pause branch (a first-pass
 variant with an optional City is added: no pause, one consent_tick
-event, submitted); a planned tick the helper refused (label changed
+event, submitted; a guard relative to 48af673, not ea7493a as its
+comment first said); a planned tick the helper refused (label changed
 since the scan, box hidden, not one native checkbox) returned the first
 verdict unchanged and Next was pressed with the box unticked (now a
 fixed log line and the page judged again on a fresh read, so the
 changed label stops it there; the refusal itself has no wizard test,
 submit.py's relabel test covers the helper).
+
+Commit ea7493a (the BLOCK fix): VERDICT FLAG, 2 low, logged: of the
+required-value negatives, "missing", None, 0 and "" fail on 48af673
+(bool() of each was False, so they were waived); "false" and "no"
+already stopped there (bool() of a non-empty string is True) and are
+guards, not new failures. GATE_VERSION stays 8 while the version-8
+waiver was tightened (a missing required key, an unflagged checkbox
+field without its box); gate_runs rows written under ee72f8a or
+48af673 would carry version 8 with the looser rule. No run was made
+between those commits (snapshots were not taken, no GUI run), so no
+such row exists; logged for the case it did.
+
+
+Commit 32a613c (the fold): VERDICT FLAG, 4 low. Folded in the next
+commit (a submit risk on a portal page): the refused-tick branch only
+stopped the page when the label had changed; for any other refusal
+(not one native checkbox, hidden, a click that raised) the re-judged
+page still said would_submit, since the gate counts a planned tick as
+filled, Next was pressed with the required box unticked, and the
+full-record gate never stopped on it either (submit.py's helper skips
+a stale ref). Now, after the tick attempt, any would_tick ref whose
+box the fresh census doesn't read as ticked turns the verdict to
+would_stop with a fixed reason naming the box, in the wizard, and the
+page pauses there. Also folded: the first-pass test's provenance
+comment named ea7493a instead of 48af673; the agent-flag change had no
+test (the first-pass test now reads the ticked box's touch mark through
+the wizard's own check and finds none); the refused-tick path had no
+wizard test (added, with the helper patched to refuse).
+Seen while proving the touch-mark test on 48af673 (logged, not
+changed): submit.py's own final-page tick in submit_application still
+runs outside the activity listener's agent flag, so it leaves a touch
+mark on the terms box; it is never counted as Jack's today because
+`_submit` reads `marked_before` after that tick, so the mark is never
+new since before a pause. Same shape as the folded finding; fix when
+submit.py is next touched (run the tick under the wizard's agent
+flag, or have submit.py take an activity guard).

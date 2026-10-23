@@ -22,13 +22,14 @@ checks, the one Next press per page, the one Submit press behind the gate.
 
 Run from anywhere:  .venv/Scripts/python.exe tests/test_wizard.py
 """
+import contextlib
 import json
 from pathlib import Path
 from unittest import mock
 
 from _fill_run import PROFILE, classify_by_label, map_from_profile
 from _harness import TEST_HOME, Checks, run_as_script
-from agent import ledger, pause, wizard
+from agent import ledger, pause, submit as submit_mod, wizard
 from agent.profile import Profile
 
 HOST = "https://apply.example-co.com"
@@ -148,7 +149,7 @@ def _profile():
 
 
 def _run(site, start, act=None, portal="generic", method="default", how=pause.TIMED_OUT,
-         mapper=map_from_profile):
+         mapper=map_from_profile, patches=()):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -161,7 +162,9 @@ def _run(site, start, act=None, portal="generic", method="default", how=pause.TI
             page.goto(f"{HOST}{start}")
             jack = _Jack(page, act, how)
             with mock.patch("agent.classify.classify_fields", classify_by_label), \
-                    mock.patch("agent.mapper.map_fields", mapper):
+                    mock.patch("agent.mapper.map_fields", mapper), contextlib.ExitStack() as extra:
+                for target, value in patches:
+                    extra.enter_context(mock.patch(target, value))
                 out = wizard.run_application(page, _profile(), url=f"{HOST}{start}", portal=portal,
                                              portal_method=method, company="Example Co",
                                              role="Engineer", resume=None, posting_text="",
@@ -408,14 +411,50 @@ def test_a_required_terms_box_mid_wizard_is_ticked_and_the_page_moves_on():
 def test_a_required_terms_box_mid_wizard_is_ticked_on_the_first_pass():
     # The same tick on the first-pass branch (no pause on the page: the
     # City is optional and listed, not stopped on), which is also the
-    # GUI-resume path. A guard for that branch: it passes on ea7493a too.
+    # GUI-resume path. A guard for that branch relative to 48af673 (the
+    # tick itself; on ea7493a there was none and the run parked). The
+    # touch-mark check fails on 48af673: there the helper's click ran
+    # outside the agent flag and left a mark that read as Jack's.
     check = Checks()
-    out, jack, clicks, ticks, url = _run(_site(box_on_2=TOS2, city_optional=True), "/apply", act=None)
+    marks = []
+    real_tick = submit_mod.tick_allowed
+
+    def tick_and_read_marks(page, result, prof, steps):
+        ticked = real_tick(page, result, prof, steps)
+        marks.append(page.evaluate(wizard._TOUCHED_JS, [ticked, ledger.TOUCH_ATTR]))
+        return ticked
+    out, jack, clicks, ticks, url = _run(_site(box_on_2=TOS2, city_optional=True), "/apply", act=None,
+                                         patches=(("agent.submit.tick_allowed", tick_and_read_marks),))
     check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
           f"ticked on the first pass, moved on, submitted ({out.status}, {out.reason}, {clicks})")
     check(jack.bodies == [], f"no pause at all ({jack.bodies})")
     ev = [e for e in out.events if e["kind"] == "consent_tick"]
     check(len(ev) == 1 and ev[0].get("handled") == "agent", f"one consent_tick event, the agent's ({ev})")
+    check(marks and marks[0] == [], f"the ticked box carries no touch mark of Jack's ({marks})")
+    check.done()
+
+
+def test_a_planned_tick_the_helper_refused_stops_the_page():
+    # The helper ticked nothing (patched to refuse, as it does for a hidden
+    # box, a relabelled one or a click that raised): the page is judged
+    # again and stops with a fixed reason naming the box, Next is not
+    # pressed with it unticked, no consent_tick event. On 32a613c the
+    # re-judged page still said would_submit (the gate counts a planned
+    # tick as filled), Next was pressed and the run parked on "didn't
+    # move on" instead.
+    check = Checks()
+    out, jack, clicks, ticks, url = _run(_site(box_on_2=TOS2, city_optional=True), "/apply", act=None,
+                                         patches=(("agent.submit.tick_allowed", lambda *a, **k: []),))
+    check(out.status == "needs_you" and "required consent box planned but not ticked" in out.reason
+          and "Terms of Service" in out.reason,
+          f"parked on the box the helper refused ({out.status}, {out.reason})")
+    check(clicks == ["Next"] and url.endswith("/apply/2"), f"Next not pressed on page two ({clicks}, {url})")
+    check(dict(ticks).get("tos2") is False, f"the box is unticked ({ticks})")
+    check(any(line.startswith("planned consent tick not made") for line in out.log)
+          and not any(e["kind"] == "consent_tick" for e in out.events),
+          f"the fixed log line, no consent_tick event ({out.log})")
+    check(len(jack.bodies) == 1 and "planned but not ticked" in jack.bodies[0],
+          f"one pause, naming the reason ({jack.bodies})")
     check.done()
 
 

@@ -383,19 +383,11 @@ class Wizard:
         # Jack's (a mark new since before a pause counts as his review).
         with self.activity.filling(self.page):
             ticked = submit_mod.tick_allowed(self.page, result, self.prof, self.out.log)
-        if not ticked:
-            # The helper refused every planned box (the label re-read on the
-            # element no longer passes, the box is hidden, or it isn't one
-            # native checkbox). Said so, and judged again on a fresh read,
-            # so a label that changed since the scan stops the page here
-            # rather than at a Next that won't move.
-            self.out.log.append("planned consent tick not made: the box no longer passes at tick time")
-            return gate.decide(self._page_record(fill, page_events), self.prof,
-                               agent_submissions_today=self.agent_submissions_today)
-        ev = {"kind": "consent_tick", "detail": f"{len(ticked)} required terms / privacy box(es)",
-              "handled": "agent"}
-        self.out.events.append(ev)
-        page_events.append(ev)
+        if ticked:
+            ev = {"kind": "consent_tick", "detail": f"{len(ticked)} required terms / privacy box(es)",
+                  "handled": "agent"}
+            self.out.events.append(ev)
+            page_events.append(ev)
         try:
             fill.snapshot = extract.snapshot(self.page, fill.fields)
             self.snapshots.update(fill.snapshot)
@@ -408,8 +400,25 @@ class Wizard:
         if isinstance(boxes, list):
             fill.census = boxes
             self.census.update({b["ref"]: b for b in boxes if isinstance(b, dict) and b.get("ref")})
-        return gate.decide(self._page_record(fill, page_events), self.prof,
-                           agent_submissions_today=self.agent_submissions_today)
+        record = self._page_record(fill, page_events)
+        fresh = gate.decide(record, self.prof, agent_submissions_today=self.agent_submissions_today)
+        # A planned tick that isn't on the page now stops the page here, in
+        # the stop direction: the gate counts a would_tick box as filled,
+        # so without this a required box the helper refused (hidden, not
+        # one native checkbox, a click that raised) would be left unticked
+        # behind a Next press and never stop the full-record gate either.
+        # Only a box the fresh census reads as ticked counts as done.
+        boxes_now = {b.get("ref"): b for b in record.get("census") or [] if isinstance(b, dict)}
+        labels = {f.get("ref"): f.get("label") or f.get("name") or "(unlabelled)" for f in fill.fields}
+        missed = [ref for ref, a in (fresh.get("consent_actions") or {}).items()
+                  if a == "would_tick" and (boxes_now.get(ref) or {}).get("checked") is not True]
+        if missed:
+            self.out.log.append("planned consent tick not made: the box isn't read as ticked")
+            fresh["content_verdict"] = gate.WOULD_STOP
+            fresh["content_reasons"] = list(fresh.get("content_reasons") or []) + [
+                f"'{str(labels.get(ref, '(unlabelled)'))[:80]}': required consent box planned but not ticked"
+                for ref in missed]
+        return fresh
 
     def _log_waived(self, result: dict) -> None:
         """The optional empties the gate listed instead of stopping on (version 8), once each."""
