@@ -2028,3 +2028,14 @@ mark on the terms box; it is never counted as Jack's today because
 new since before a pause. Same shape as the folded finding; fix when
 submit.py is next touched (run the tick under the wizard's agent
 flag, or have submit.py take an activity guard).
+
+Commit df4e988 (the second fold): VERDICT FLAG, 2 low, logged, no
+change asked: the first-pass test's patch on `agent.submit.tick_allowed`
+also wraps submit.py's final-page tick, so `marks` holds a second entry
+from page three that the test does not assert (the residual above);
+once that tick runs under the agent flag, assert `marks == [[], []]`
+so the residual gets its guard. `ActivityGuard.filling` swallows a
+failed `page.evaluate` of the agent flag, so if the flag cannot be set
+the helper's click leaves a touch mark (pre-existing, the filler has
+the same shape; it can only count as Jack's if new since a later
+`marked_before`, which the order of reads prevents).
