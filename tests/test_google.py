@@ -539,7 +539,8 @@ def test_the_wizard_hands_a_same_tab_google_page_to_accounts_and_resumes():
             out = w.continue_from({})
         # The job went on: the portal's form was filled and its gate paused on
         # the required City (a gate pause now, not the Google one).
-        check(out.status == wizard.WAITING and "City" in out.reason and "never touches" not in out.reason
+        check(out.status == wizard.WAITING and "City" in out.reason and "required, but empty" in out.reason
+              and "never touches" not in out.reason
               and "resumed after a account pause" in out.log and w.pending and w.pending.get("kind") == "gate",
               f"Continue resumes the job on the portal's form ({out.status}, {out.reason}, {out.log[-3:]})")
     check.done()

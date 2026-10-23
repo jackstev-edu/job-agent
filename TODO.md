@@ -2055,3 +2055,8 @@ occurrence, this time with the machine going to standby mid-run:
 capture "polled", hooked=True, events=['final_read_off_form'], both
 fields unreadable, the same shape as before; still unconfirmed, logged
 as its comment asks.
+
+Commit 451577d (the Google test repair): VERDICT FLAG, 1 low, taken in
+the next commit: the repaired test asserted only that the stop named
+City, so any City stop would pass; it now asserts "required, but
+empty" too, the path the repair depends on.
