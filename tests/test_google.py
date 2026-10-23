@@ -85,7 +85,9 @@ def _portal_register(target):
 <script>document.getElementById('f').addEventListener('submit', e => {{ e.preventDefault(); location.href = '/form?pw=1'; }});</script>""")
 
 
-FORM = _doc("Application", """<h1>Application</h1><form><label for="city">City</label><input id="city" name="city">
+# The City is required: since gate version 8 an optional empty is listed,
+# not stopped on, and these tests need the portal's gate to pause.
+FORM = _doc("Application", """<h1>Application</h1><form><label for="city">City</label><input id="city" name="city" required>
 <button type="submit">Submit application</button></form>""")
 
 FINISH_JS = f"""<script>function finish() {{
@@ -536,7 +538,7 @@ def test_the_wizard_hands_a_same_tab_google_page_to_accounts_and_resumes():
                 mock.patch("agent.mapper.map_fields", map_from_profile), redirect_stdout(io.StringIO()):
             out = w.continue_from({})
         # The job went on: the portal's form was filled and its gate paused on
-        # City (a gate pause now, not the Google one).
+        # the required City (a gate pause now, not the Google one).
         check(out.status == wizard.WAITING and "City" in out.reason and "never touches" not in out.reason
               and "resumed after a account pause" in out.log and w.pending and w.pending.get("kind") == "gate",
               f"Continue resumes the job on the portal's form ({out.status}, {out.reason}, {out.log[-3:]})")

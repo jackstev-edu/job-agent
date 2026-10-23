@@ -2039,3 +2039,19 @@ failed `page.evaluate` of the agent flag, so if the flag cannot be set
 the helper's click leaves a touch mark (pre-existing, the filler has
 the same shape; it can only count as Jack's if new since a later
 `marked_before`, which the order of reads prevents).
+
+Full suite before the push (worktree, 02:19 on 2026-10-23): 2 failed,
+356 passed, wall time 8h42m because the laptop entered Modern Standby
+two minutes in, hit critical battery at 02:51, slept, and resumed at
+11:01 (the System log's Kernel-Power events); no test hung. The two
+failures: tests/test_google.py's wizard-resume test used a mock form
+with an optional City, which gate version 8 lists instead of stopping
+on, so the run pressed Submit on the mock (no confirmation page) where
+the test expected a gate pause; fixed by making the mock's City
+required (a repaired test, not a new one; it failed on aaef251 as the
+suite shows). And the known follow-mode flake
+(test_your_submit_in_follow_mode_is_captured_exactly), third
+occurrence, this time with the machine going to standby mid-run:
+capture "polled", hooked=True, events=['final_read_off_form'], both
+fields unreadable, the same shape as before; still unconfirmed, logged
+as its comment asks.
