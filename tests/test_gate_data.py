@@ -52,7 +52,18 @@ def test_checkbox_census():
     group_field = next((f for f in fields if f.get("widget") == "buttons"), {})
     check(pair and pair["group_ref"] == group_field.get("ref"),
           "an Ashby pair's checkbox points at its question's ref in the plan")
-    check(len(census) == 8, f"8 checkboxes counted (got {len(census)})")
+    check(len(census) == 11, f"11 checkboxes counted (got {len(census)})")
+    # Required as the page states it (gate version 8 waives nothing on a
+    # box read as required): the attribute, aria-required, a trailing *.
+    check(sms.get("required") is False, "a plain box with no required sign reads required=False")
+    check(by_text.get("I agree to the Terms of Service", {}).get("required") is True,
+          "the required attribute reads True")
+    check(by_text.get("I accept the Privacy Policy", {}).get("required") is True,
+          "aria-required=true on a custom box reads True")
+    check(by_text.get("Keep me posted *", {}).get("required") is True,
+          "a trailing * on the label reads True")
+    check(all(isinstance(c.get("required"), bool) for c in census),
+          "every box carries a boolean required key")
     check(frames == [{"src": "about:blank", "visible": True}], "the embedded frame is listed")
     check.done()
 

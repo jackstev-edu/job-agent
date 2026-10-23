@@ -220,17 +220,37 @@ def _medium_confidence_mapper(fields, profile, page_text=""):
 
 
 def test_a_field_left_empty_at_a_pause_is_not_reviewed():
-    # Jack's narrowing (2026-10-19): an optional City the mapper left blank
-    # stops the gate ("left blank"); Jack presses Enter without typing. The
-    # old waiver counted the empty field as his and submitted; now it stays
-    # stopped and the job parks. Fails on a9d125d (status was submitted).
+    # Jack's narrowing (2026-10-19): the required City the mapper left blank
+    # stops the gate; Jack presses Enter without typing. Continue alone
+    # approves nothing: it stays stopped and the job parks. (Until gate
+    # version 8 this ran on an optional City; an optional empty is now
+    # listed, not stopped on, see the next test.)
     check = Checks()
-    out, jack, clicks, ticks, url = _run(_site(city_optional=True), "/apply",
-                                         act=lambda page, body: None)
-    check(out.status == "needs_you" and "City" in out.reason and "left blank" in out.reason,
-          f"an untouched empty field keeps its stop ({out.status}, {out.reason})")
+    out, jack, clicks, ticks, url = _run(_site(), "/apply", act=lambda page, body: None)
+    check(out.status == "needs_you" and "City" in out.reason and "required, but empty" in out.reason,
+          f"an untouched empty required field keeps its stop ({out.status}, {out.reason})")
     check(clicks == ["Next"] and url.endswith("/apply/2"), f"nothing pressed after the stop ({clicks})")
     check(len(jack.bodies) == 1 and "City" in jack.bodies[0], "one pause, for the city")
+    check.done()
+
+
+def test_an_optional_field_left_blank_is_listed_and_the_run_goes_on():
+    # Gate version 8 (Jack, 2026-10-20, third set): the optional City the
+    # mapper left blank is listed, not stopped on: no pause, Next pressed,
+    # the application submitted with the box empty. Fails on 5e15d84 (the
+    # run parked on "'City': left blank").
+    check = Checks()
+    out, jack, clicks, ticks, url = _run(_site(city_optional=True), "/apply", act=None)
+    check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
+          f"no stop on the optional empty field; the run submits ({out.status}, {out.reason}, {clicks})")
+    check(jack.bodies == [], f"no pause at all ({jack.bodies})")
+    check(any("optional, left empty" in line and "City" in line for line in out.log),
+          f"the log lists the waived field ({out.log})")
+    by_label = {f["label"]: f["ref"] for st in out.steps for f in st["fields"]}
+    check(by_label.get("City") not in (out.record or {}).get("human_reviewed", []),
+          "the city is not counted as Jack's")
+    check(any("'City': left blank" in w for w in (out.gate_result or {}).get("waived", [])),
+          f"the final gate lists it under waived ({(out.gate_result or {}).get('waived')})")
     check.done()
 
 
@@ -254,16 +274,16 @@ def test_a_field_the_filler_filled_is_not_reviewed_at_a_pause():
 
 
 def test_a_field_jack_touched_at_a_pause_is_still_reviewed():
-    # The one case kept: the optional City the mapper left blank, which Jack
+    # The one case kept: the required City the mapper left blank, which Jack
     # types during the pause (a trusted input, a new mark), is his, and the
-    # run goes on to submit. Passes on a9d125d too: a regression guard, not
-    # a change.
+    # run goes on to submit. A regression guard, not a change (it ran on an
+    # optional City until gate version 8, which no longer pauses on one).
     check = Checks()
 
     def jack_types_the_city(page, body):
         if "City" in body:
             page.fill("#city", "Springfield")
-    out, jack, clicks, ticks, url = _run(_site(city_optional=True), "/apply", jack_types_the_city)
+    out, jack, clicks, ticks, url = _run(_site(), "/apply", jack_types_the_city)
     check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
           f"the touched field is waived and the run submits ({out.status}, {out.reason}, {clicks})")
     by_label = {f["label"]: f["ref"] for st in out.steps for f in st["fields"]}

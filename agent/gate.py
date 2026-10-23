@@ -47,7 +47,24 @@ from . import sensitive
 #    sign-in, a Next press) or by Jack (a CAPTCHA, a pause) doesn't stop,
 #    a CAPTCHA only when Jack handled it; more than one step is fine when
 #    the record says it is a wizard run.
-GATE_VERSION = 7
+# 8: optional empties (Jack, 2026-10-20, third set; built 2026-10-23). On
+#    a field that is not required, that the gate's sensitive test doesn't
+#    flag, and that the page reads back empty, these reasons are listed
+#    under "waived" instead of stopping: "left blank", "not answered", an
+#    unanswered per-company question (not a checkbox: unticked asserts
+#    "No"), a field (no checkbox) handed over only because its category
+#    is unknown, and an optional checkbox left unticked whose census box
+#    the waiver may cover. A census box is waived only on its allowlist
+#    reason, only when it is visible, unticked, plainly labelled (a
+#    <label> or aria-label, the same rendered as written, no fine print),
+#    its label is no question, has no trailing * and its required key is
+#    exactly False (no key, or any other value, counts as required; the
+#    census reads the attribute, aria-required and a trailing *).
+#    Required fields, legal / EEO /
+#    pay questions, every other flag, failed, unconfirmed and
+#    low-confidence fills still stop. "Required" is page data (the
+#    attribute, aria-required, a trailing *), accepted as such.
+GATE_VERSION = 8
 
 WOULD_SUBMIT, WOULD_STOP = "would_submit", "would_stop"
 
@@ -103,6 +120,46 @@ def _sensitive_line(f: dict) -> str | None:
 
 def _is_required(f: dict) -> bool:
     return bool(f.get("required")) or str(f.get("label") or "").rstrip().endswith("*")
+
+
+def _box_sensitive(box: dict) -> bool:
+    """
+    Is this census box's label itself a question (a HARD_STOPS kind, the
+    per-company one included; a LEGAL_GUARD or PROFILE_PATHS match) on
+    any reading of its rendered or written text? Such a box answers by
+    being ticked, and unticked it asserts "No", so the optional-empties
+    waiver never covers it.
+    """
+    label = f"{box.get('label_inner') or ''} {box.get('label_content') or ''}"
+    return bool(sensitive.stop_kinds(label)
+                or sensitive.sensitive_line(label, SENSITIVE_PREFIXES) is not None
+                or sensitive.legal_guard({"label": label}) is not None
+                or sensitive.all_profile_lines(label))
+
+
+def _optional_box(box: dict | None) -> bool:
+    """
+    A census box the optional-empties waiver (version 8) may cover: the
+    page marks it optional on every reading (required exactly False, no
+    trailing *), it is visible and read unticked, not a button pair's,
+    its label comes from a <label> or aria-label and reads the same
+    rendered as written with no fine print, and that label is no
+    question. A missing box, key or reading fails.
+    """
+    if not isinstance(box, dict):
+        return False
+    return (box.get("required") is False and box.get("checked") is False
+            and box.get("visible") is True and not box.get("in_button_group")
+            and not box.get("group_ref")
+            and box.get("label_source") in ALLOWLIST_LABEL_SOURCES
+            and _same_text(box.get("label_inner"), box.get("label_content"))
+            and not box.get("described") and not _starred(box) and not _box_sensitive(box))
+
+
+def _starred(box: dict) -> bool:
+    """A census label ending in '*' marks the box required, whatever its key says."""
+    return any(str(box.get(k) or "").rstrip().endswith("*")
+               for k in ("label_inner", "label_content"))
 
 
 def _present(value: Any) -> bool:
@@ -341,7 +398,8 @@ def decide(record: dict, profile, *, agent_submissions_today: int | None = 0) ->
         return {"gate_version": GATE_VERSION, "content_verdict": WOULD_STOP,
                 "content_reasons": [f"gate error: {type(e).__name__}"],
                 "enablement": {"portal_allowlisted": False, "cap_remaining": None},
-                "enablement_reasons": ["gate error"], "trace": [], "consent_actions": {}}
+                "enablement_reasons": ["gate error"], "trace": [], "consent_actions": {},
+                "waived": []}
 
 
 def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
@@ -368,6 +426,15 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
     # since before it; the wizard writes this list; a missing key waives
     # nothing).
     reviewed = {r for r in (record.get("human_reviewed") or []) if isinstance(r, str)}
+    # Reasons the optional-empties decision lists instead of stopping on.
+    waived: list[str] = []
+
+    def reads_empty(ref: str) -> bool:
+        # What the page holds, as read back; on a dry run, the plan. A ref
+        # the read-back left out is unknown, never empty.
+        if dry:
+            return not _present((plan.get(ref) or {}).get("value"))
+        return ref in snapshot and not _present(snapshot.get(ref))
 
     for f in fields:
         ref, label = f.get("ref"), f.get("label") or f.get("name") or "(unlabelled)"
@@ -381,6 +448,12 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         sensitive_field = (category in SENSITIVE_CATEGORIES or line is not None
                            or "legal" in kinds or sensitive.legal_guard(f) is not None
                            or bool(f.get("raw_stop") or f.get("raw_legal")))
+        # 8. the waiver's ground: an optional, non-sensitive, non-secret
+        # field that holds nothing. Every waiver below needs this too.
+        optional_empty = (not sensitive_field and not _is_required(f)
+                          and not f.get("secret") and (f.get("type") or "").lower() != "password"
+                          and reads_empty(ref))
+        is_box = (f.get("type") or "").lower() == "checkbox"
 
         if ref in reviewed:
             # Jack's own answer: traced as his, never judged on content. The
@@ -391,8 +464,15 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             continue
 
         # 5. per-company questions are never answered from the profile yet.
+        # An optional one nobody answered is listed, not stopped on (8).
         if category == "per_company" or "per_company" in kinds:
-            content.append(f"{name}: {PER_COMPANY_REASON}")
+            reason = f"{name}: {PER_COMPANY_REASON}"
+            # Not a checkbox: unticked, one asserts "No" to the question.
+            if (optional_empty and not is_box
+                    and (decision is None or decision.get("value") is None)):
+                waived.append(reason)
+            else:
+                content.append(reason)
             continue
 
         # An allowlisted consent checkbox: your exact entry in consent_allowlist
@@ -447,13 +527,27 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         if ref in flags:
             reason = (flags[ref].get("reason") or "") if not sensitive_field else ""
             if not sensitive_field:
-                content.append(f"{name}: left for you" + (f" ({reason[:100]})" if reason else ""))
+                text = f"{name}: left for you" + (f" ({reason[:100]})" if reason else "")
+                # 8. Two hand-offs the decision lists instead: an optional
+                # checkbox left unticked, when its census box is one the
+                # waiver may cover (_optional_box: optional on every
+                # reading, visible, unticked, plainly labelled, no
+                # question); and a field that is no checkbox, handed over
+                # only because its category is unknown (no stop kind, no
+                # raw flag: those made it sensitive above). Any other
+                # flag still stops.
+                plain = optional_empty and not kinds
+                if plain and (_optional_box(census_by_ref.get(ref)) if is_box
+                              else category == "unknown"):
+                    waived.append(text)
+                else:
+                    content.append(text)
             continue
         if decision is None:
-            content.append(f"{name}: not answered")
+            (waived if optional_empty else content).append(f"{name}: not answered")
             continue
         if decision.get("value") is None:
-            content.append(f"{name}: left blank")
+            (waived if optional_empty else content).append(f"{name}: left blank")
             continue
         if results is not None:
             res = results.get(ref)
@@ -536,7 +630,14 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             content.append(f"{name}: has fine print attached")
         elif (normalize_label(box.get("label_inner")) not in allow
               and not consent_box_ok(box)):
-            content.append(f"{name}: not on consent_allowlist, and not a terms / privacy consent")
+            reason = f"{name}: not on consent_allowlist, and not a terms / privacy consent"
+            # 8. An optional box left unticked is listed, not stopped on
+            # (_optional_box: required exactly False, no trailing *, visible,
+            # read unticked, not a pair's, plainly labelled, no question).
+            if _optional_box(box):
+                waived.append(reason)
+            else:
+                content.append(reason)
 
     # 9. nothing unexpected along the way. An event the agent handled under
     # the owner decisions (a sign-in, an account, a Next press) or Jack
@@ -569,4 +670,5 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             "enablement": ena,
             "enablement_reasons": enablement_reasons,
             "trace": trace,
-            "consent_actions": consent_actions}
+            "consent_actions": consent_actions,
+            "waived": list(dict.fromkeys(waived))}

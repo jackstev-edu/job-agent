@@ -1008,6 +1008,12 @@ _CHECKBOX_CENSUS_JS = r"""
         // The Ashby button group's field ref is its first button's, as stamped
         // by the scan, so the gate can find that question in the plan.
         group_ref: group?.querySelector('button')?.getAttribute('data-ja-ref') || null,
+        // Required as the page states it (the attribute, aria-required, a
+        // trailing * on the label): true on any such sign, so the gate's
+        // optional-empties waiver (version 8) can only apply to a box the
+        // page itself marks as optional on every reading.
+        required: el.required === true || el.getAttribute('aria-required') === 'true'
+                  || /\*\s*$/.test(lab.content || '') || /\*\s*$/.test(lab.inner || ''),
       };
     });
 }

@@ -798,6 +798,9 @@ def _shadow_gate(record, prof, url, portal, detected_by, *,
         print(f"  · {reason}")
     if len(result["content_reasons"]) > 15:
         print(f"  {DIM}…and {len(result['content_reasons']) - 15} more{OFF}")
+    # Optional fields left empty (Jack, 2026-10-20): listed, not stopped on.
+    for reason in (result.get("waived") or [])[:15]:
+        print(f"  {DIM}· optional, left empty (not a stop): {reason}{OFF}")
     ena = result["enablement"]
     print(f"{DIM}  enablement: portal allowlisted {'yes' if ena['portal_allowlisted'] else 'no'}"
           f" · cap remaining: {gate.cap_text(ena, result['enablement_reasons'])}{OFF}")

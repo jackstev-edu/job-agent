@@ -1894,3 +1894,44 @@ never filler.py or the plan-driven fill), with the owner-decision line
 amended in his words; item 8's template comment should tell Jack to
 list every brand, parent and former name he worked under, since the
 match is lexical.
+
+## Round of 2026-10-23 (Jack's go on the Workday plan)
+
+Jack's decisions (recorded in CLAUDE.md with the terms-box commit): the
+wizard may tick a REQUIRED terms / privacy box on any page through
+submit.py's tick helper; a stored password that fails and a sign-up that
+lands on "please sign in" stay as they are; the four snapshot residuals
+are accepted and no further snapshot work is done; the optional-empties
+wording is his as written; Divergent stays last. Snapshots were not
+taken (snapshots/ holds one empty dump of about:blank from 00:43), so
+items 1 and the terms box were built first, with no real page.
+
+Plan item 1 (gate version 8, optional empties): `gate.decide` returns a
+`waived` list beside `content_reasons`. On a field that is not required
+(attribute or trailing *), that the gate's sensitive test doesn't flag,
+that is no secret or password box, and that the read-back holds empty
+(a ref the read-back left out is unknown, never empty; on a dry run the
+plan decides), these are listed instead of stopping: "left blank", "not
+answered", an unanswered per-company question (not a checkbox: unticked
+asserts "No"), a non-checkbox field handed over only because its
+category is unknown, and an optional checkbox field left unticked whose
+census box the waiver may cover. A census box is waived only on the
+allowlist reason and only when `gate._optional_box` holds: required
+exactly False (the census now reads `required` from the attribute,
+aria-required and a trailing *; a missing or non-boolean key counts as
+required), no trailing *, visible, read unticked, not a pair's, label
+from a <label> / aria-label reading the same rendered as written, no
+fine print, and a label that is no question (any HARD_STOPS kind,
+per-company included, LEGAL_GUARD or PROFILE_PATHS match). Every other
+stop stays, with a negative test each. The redacted gate_runs record
+carries `waived` and each census box's `required`; the terminal gate
+print and the wizard's log list the waived fields. Two wizard tests
+moved from an optional City to the required one (the pause tests still
+prove Continue alone approves nothing); a new one proves an optional
+empty City pauses nothing and is listed.
+
+Tightened beyond the plan's words (decision for Jack, recommendation
+keep): a per-company checkbox left unticked is never waived, since an
+unticked box asserts "No" to "have you worked for us", unlike a blank
+text box; and an optional checkbox field is waived only when its census
+box vouches for it on every reading.

@@ -5,7 +5,8 @@ WHAT THIS DOES: Starts from a record that passes every condition, breaks
 exactly one thing per check, and asserts the gate stops and names why. Covers
 each condition (including an arbitration box, a substring trap, an injected
 instruction and a missing EEO profile line), the free-text waiver, Ashby
-button pairs, the content/enablement split, and stopping on errors.
+button pairs, the content/enablement split, stopping on errors, and the
+optional empties listed instead of stopped on (version 8).
 WHY IT MATTERS: The gate decides what would be sent without you. Every way it
 can say yes has to be the one you meant.
 
@@ -396,7 +397,7 @@ def test_6_free_text_only_canned_verbatim():
 def test_7_owner_decisions_consent_policy_reviewed_fields_and_handled_events():
     # Gate version 7 (owner decisions of 2026-10-18). Each fails on version 6.
     check = Checks()
-    check(gate.GATE_VERSION == 7, "gate version 7")
+    check(gate.GATE_VERSION >= 7, "gate version 7 or later")
     tos = "I have read and agree to the Terms of Service and Privacy Policy"
     # A terms / privacy box passes the census check without an allowlist entry...
     r = base(); r["census"].append(box(tos, checked=True))
@@ -573,6 +574,182 @@ def test_hidden_iframes_are_logged_not_stopped_on():
     check = Checks()
     r = base(); r["events"] = [{"kind": "hidden_iframe", "detail": "tracker.example.com"}]
     check(run(r)["content_verdict"] == "would_submit", "a hidden_iframe event doesn't stop the run")
+    check.done()
+
+
+def test_8_optional_empties_are_listed_not_stopped_on():
+    # Gate version 8 (Jack, 2026-10-20, third set): an optional field that
+    # nothing sensitive applies to, read back empty, is listed under
+    # "waived" instead of stopping. Each positive case fails on version 7.
+    check = Checks()
+    check(gate.GATE_VERSION == 8, "gate version 8")
+
+    def waived(rec, needle, what, prof=None):
+        v = run(rec, prof)
+        hit = [w for w in v.get("waived", []) if needle in w]
+        check(v["content_verdict"] == "would_submit" and hit
+              and not any(needle in r for r in v["content_reasons"]),
+              f"{what} -> listed, would_submit ({hit or v['content_reasons']})")
+        return v
+
+    def opt(ref, label, **f):
+        return {"ref": ref, "type": "text", "label": label, **f}
+
+    # The five waived reasons, each on an optional field read back empty.
+    r = base(); r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
+    r["plan"]["f7"] = {"value": None, "source": "model", "confidence": "low"}; r["snapshot"]["f7"] = ""
+    waived(r, "'Middle name': left blank", "an optional field answered null, read back empty")
+    r = base(); r["fields"].append(opt("f8", "Website")); r["snapshot"]["f8"] = "  "
+    waived(r, "'Website': not answered", "an optional field the mapper never answered, read back blank")
+    r = base(); r["fields"].append(opt("f11", "How did you hear about us?"))
+    r["categories"]["f11"] = "per_company"; r["snapshot"]["f11"] = ""
+    waived(r, gate.PER_COMPANY_REASON, "an optional per-company question nobody answered")
+    r = base(); r["fields"].append(opt("f12", "Nickname")); r["snapshot"]["f12"] = ""
+    r["flags"] = [{"ref": "f12", "label": "Nickname", "category": "unknown", "reason": "unknown kind"}]
+    waived(r, "'Nickname': left for you", "a field handed over only because its category is unknown")
+    talent = "Add me to the talent community"
+    r = base(); r["fields"].append({"ref": "f13", "type": "checkbox", "label": talent})
+    r["categories"]["f13"] = "consent"; r["snapshot"]["f13"] = False
+    r["flags"] = [{"ref": "f13", "label": talent, "category": "consent", "reason": "marketing opt-in"}]
+    r["census"].append(box(talent, ref="f13", required=False))
+    v = waived(r, f"'{talent}': left for you", "an optional checkbox field left unticked")
+    check(any(f"checkbox '{talent}': not on consent_allowlist" in w for w in v["waived"]),
+          "  ...and its census box is listed on the allowlist reason only")
+    check(v["consent_actions"] == {}, "  ...with no tick planned for it")
+    # A dry run judges the plan: null there is empty.
+    r = base(); r["dry_run"] = True; r["results"] = None; r["snapshot"] = {}
+    r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
+    r["plan"]["f7"] = {"value": None, "source": "model", "confidence": "low"}
+    waived(r, "'Middle name': left blank", "on a dry run, an optional field planned null")
+    # Listed once, in a list of its own.
+    r = base(); r["fields"] += [opt("f8", "Website"), opt("f8", "Website")]; r["snapshot"]["f8"] = ""
+    v = run(r)
+    check(v["waived"].count("'Website': not answered") == 1 and v["content_reasons"] == [],
+          "the same waived reason is listed once")
+    check("waived" in gate.decide({"errors": ["boom"]}, profile()) and
+          gate.decide({"errors": ["boom"]}, profile())["waived"] == [],
+          "a stopped or failed verdict still carries an empty waived list")
+
+    # What is never waived. Each reads back empty on an optional field, so
+    # only the condition named keeps the stop.
+    r = base(); r["fields"].append(opt("f7", "Middle name", required=True)); r["categories"]["f7"] = "personal_fact"
+    r["plan"]["f7"] = {"value": None, "source": "model", "confidence": "low"}; r["snapshot"]["f7"] = ""
+    v = stops(check, r, "'Middle name': left blank", "a required field left blank")
+    check(any("required, but empty" in x for x in v["content_reasons"]), "  ...and required-but-empty too")
+    r = base(); r["fields"].append(opt("f7", "Middle name *")); r["categories"]["f7"] = "personal_fact"
+    r["plan"]["f7"] = {"value": None, "source": "model", "confidence": "low"}; r["snapshot"]["f7"] = ""
+    stops(check, r, "'Middle name *': left blank", "a '*' label counts as required")
+    r = base(); r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
+    r["plan"]["f7"] = {"value": None, "source": "model", "confidence": "low"}
+    stops(check, r, "'Middle name': left blank", "a field the read-back left out is unknown, not empty")
+    r = base(); r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
+    r["plan"]["f7"] = {"value": None, "source": "model", "confidence": "low"}; r["snapshot"]["f7"] = "Q"
+    stops(check, r, "'Middle name': left blank", "a null answer whose box holds something anyway")
+    r = base(); r["fields"].append(opt("f8", "Website")); r["snapshot"]["f8"] = None
+    waived(r, "'Website': not answered", "a read-back of None is empty")
+    r = base(); r["fields"].append(opt("f14", "Gender")); r["snapshot"]["f14"] = ""
+    stops(check, r, "'Gender': legal/eligibility/EEO/pay answer not traced",
+          "an optional EEO field with no profile answer")
+    r = base(); r["fields"].append(opt("f14", "Gender")); r["categories"]["f14"] = "eeo"; r["snapshot"]["f14"] = ""
+    r["flags"] = [{"ref": "f14", "label": "Gender", "category": "eeo", "reason": f"'{SENTINEL_EEO}'"}]
+    v = stops(check, r, "'Gender': legal/eligibility/EEO/pay answer not traced", "an optional EEO field handed over")
+    check(SENTINEL_EEO not in json.dumps(v), "  ...with no value in the verdict")
+    r = base(); r["fields"].append(opt("f15", "Expected salary")); r["snapshot"]["f15"] = ""
+    stops(check, r, "'Expected salary': legal/eligibility/EEO/pay", "an optional pay question")
+    r = base(); r["fields"].append(opt("f16", "Security question", secret=True)); r["snapshot"]["f16"] = ""
+    r["flags"] = [{"ref": "f16", "label": "Security question", "category": "unknown", "reason": "credential"}]
+    stops(check, r, "'Security question': left for you", "a credential field, whatever its category")
+    r = base(); r["fields"].append(opt("f17", "Nickname", type="password")); r["snapshot"]["f17"] = ""
+    r["flags"] = [{"ref": "f17", "label": "Nickname", "category": "unknown", "reason": "x"}]
+    stops(check, r, "'Nickname': left for you", "a password box, whatever its label")
+    r = base(); r["fields"].append(opt("f12", "Nickname")); r["snapshot"]["f12"] = ""
+    r["categories"]["f12"] = "personal_fact"
+    r["flags"] = [{"ref": "f12", "label": "Nickname", "category": "personal_fact", "reason": "no profile line"}]
+    stops(check, r, "'Nickname': left for you (no profile line)", "a flag for any other reason")
+    r = base(); r["fields"].append({"ref": "f13", "type": "checkbox", "label": talent})
+    r["categories"]["f13"] = "consent"; r["snapshot"]["f13"] = False
+    r["flags"] = [{"ref": "f13", "label": talent, "category": "consent", "reason": "marketing opt-in"}]
+    stops(check, r, f"'{talent}': left for you", "an optional checkbox field with no census box to vouch for it")
+    r["census"].append(box(talent, ref="f13"))
+    stops(check, r, f"'{talent}': left for you", "  ...or whose box has no required key")
+    r = base(); r["fields"].append({"ref": "f13", "type": "checkbox", "label": talent})
+    r["categories"]["f13"] = "unknown"; r["snapshot"]["f13"] = False
+    r["flags"] = [{"ref": "f13", "label": talent, "category": "unknown", "reason": "?"}]
+    stops(check, r, f"'{talent}': left for you", "an unknown-category checkbox needs its box too")
+    r["census"].append(box(talent, ref="f13", required=False))
+    waived(r, f"'{talent}': left for you", "  ...and is listed once the box vouches for it")
+    worked = "I have previously worked at Acme"
+    r = base(); r["fields"].append({"ref": "f21", "type": "checkbox", "label": worked})
+    r["categories"]["f21"] = "per_company"; r["snapshot"]["f21"] = False
+    r["census"].append(box(worked, ref="f21", required=False))
+    stops(check, r, gate.PER_COMPANY_REASON, "a per-company checkbox: unticked asserts No, never waived")
+    r = base(); r["fields"].append(opt("f18", "Have you previously worked at Acme?"))
+    r["categories"]["f18"] = "personal_fact"; r["snapshot"]["f18"] = ""
+    r["plan"]["f18"] = {"value": "No", "source": "model", "confidence": "high"}
+    stops(check, r, gate.PER_COMPANY_REASON, "a per-company question the model answered, read back empty")
+    r = base(); r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
+    r["plan"]["f7"] = {"value": "M", "source": "model", "confidence": "high"}; r["snapshot"]["f7"] = ""
+    r["results"]["f7"] = {"filled": False, "detail": "x", "reason": "not_editable"}
+    stops(check, r, "'Middle name': filling it failed (not_editable)", "a fill that failed on an optional field")
+    r = base(); r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
+    r["plan"]["f7"] = {"value": "M", "source": "model", "confidence": "high"}; r["snapshot"]["f7"] = ""
+    r["results"]["f7"] = {"filled": True, "detail": "typed", "unconfirmed": True}
+    stops(check, r, "'Middle name': the page couldn't confirm", "an unconfirmed fill on an optional field")
+    r = base(); r["fields"].append(opt("f19", "Anything else?", type="textarea")); r["categories"]["f19"] = "free_text"
+    r["plan"]["f19"] = {"value": "Hi", "source": "model", "confidence": "high"}; r["snapshot"]["f19"] = ""
+    r["results"]["f19"] = {"filled": True, "detail": "typed", "unconfirmed": False}
+    stops(check, r, "'Anything else?': free text isn't one of your canned answers", "free text on an optional field")
+    r = base(); r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
+    r["plan"]["f7"] = {"value": "M", "source": "model", "confidence": "high", "needs_review": True,
+                       "review_reasons": ["approximate_option"]}
+    r["snapshot"]["f7"] = ""; r["results"]["f7"] = {"filled": True, "detail": "typed", "unconfirmed": False}
+    stops(check, r, "'Middle name': needs review (approximate_option)", "a review flag on an optional field")
+    r = base(); r["fields"].append(opt("f7", "Middle name")); r["categories"]["f7"] = "personal_fact"
+    r["plan"]["f7"] = {"value": "M", "source": "model", "confidence": "medium"}
+    r["snapshot"]["f7"] = ""; r["results"]["f7"] = {"filled": True, "detail": "typed", "unconfirmed": False}
+    stops(check, r, "'Middle name': model confidence is medium", "a medium-confidence answer on an optional field")
+    r = base(); r["fields"].append({"ref": "f20", "type": "checkbox", "label": "I certify my answers are true"})
+    r["categories"]["f20"] = "consent"; r["snapshot"]["f20"] = False
+    r["flags"] = [{"ref": "f20", "label": "I certify my answers are true", "category": "consent", "reason": "legal"}]
+    stops(check, r, "'I certify my answers are true': legal/eligibility/EEO/pay",
+          "an optional checkbox whose label is a certification")
+
+    # Census boxes: only the allowlist reason is waived, only on a box the
+    # page marks optional on every reading, visible and unticked.
+    arb = "I agree to resolve disputes through binding arbitration"
+    r = base(); r["census"].append(box(arb, required=False))
+    waived(r, f"checkbox '{arb}': not on consent_allowlist", "an optional unticked box off the allowlist")
+    r = base(); r["census"].append(box(arb))
+    stops(check, r, f"checkbox '{arb}': not on consent_allowlist", "a box with no required key counts as required")
+    for req in (True, None, "false", 0, ""):
+        r = base(); r["census"].append(box(arb, required=req))
+        stops(check, r, f"checkbox '{arb}': not on consent_allowlist", f"required={req!r} is not optional")
+    r = base(); r["census"].append(box(arb, required=False, checked=True))
+    stops(check, r, "not on consent_allowlist", "a ticked optional box")
+    r = base(); r["census"].append(box(arb, required=False, visible=False))
+    stops(check, r, "not on consent_allowlist", "a hidden optional box")
+    r = base(); r["census"].append(box(arb, required=False)); del r["census"][-1]["checked"]
+    stops(check, r, "not on consent_allowlist", "an optional box whose tick wasn't read")
+    r = base(); r["census"].append(box(arb + " *", required=False))
+    stops(check, r, "not on consent_allowlist", "a '*' on the label marks it required")
+    r = base(); r["census"].append(box(arb, required=False, label_content=arb + " *"))
+    stops(check, r, "label contains hidden text", "a '*' in the written text alone still stops")
+    r = base(); r["census"].append(box(arb, required=False, label_source="aria-labelledby"))
+    stops(check, r, "label not explicit (aria-labelledby)", "the not-explicit-label reason stays")
+    r = base(); r["census"].append(box(arb, required=False, label_content=arb + " and more"))
+    stops(check, r, "label contains hidden text", "the hidden-text reason stays")
+    r = base(); r["census"].append(box(arb, required=False, described="fine print"))
+    stops(check, r, "has fine print attached", "the fine-print reason stays")
+    r = base(); r["census"].append(box(arb, required=False, in_button_group=True, group_ref="g1"))
+    stops(check, r, "not on consent_allowlist", "a button pair's box is never waived")
+    for legal in ("I consent to a background check", "I am a protected veteran",
+                  "I am legally authorized to work in the United States", "I certify the above is true"):
+        r = base(); r["census"].append(box(legal, required=False))
+        stops(check, r, "not on consent_allowlist", f"a box whose label is a question ({legal[:30]})")
+    r = base(); r["census"].append(box("I have previously worked at Acme", required=False))
+    stops(check, r, "not on consent_allowlist", "a per-company box: unticked asserts No, never waived")
+    r = base(); r["census"].append(box("How did you hear about us? Referral", required=False))
+    stops(check, r, "not on consent_allowlist", "a referral-source box likewise")
     check.done()
 
 

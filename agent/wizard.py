@@ -340,6 +340,7 @@ class Wizard:
         """
         result = gate.decide(self._page_record(fill, page_events), self.prof,
                              agent_submissions_today=self.agent_submissions_today)
+        self._log_waived(result)
         if result["content_verdict"] == gate.WOULD_SUBMIT:
             return
         self._pause_and_review(fill, result, page_events)
@@ -350,6 +351,13 @@ class Wizard:
             self.out.gate_result = result
             raise _Parked("this page needs you: "
                           + "; ".join(_clean(r) for r in result["content_reasons"][:6]))
+
+    def _log_waived(self, result: dict) -> None:
+        """The optional empties the gate listed instead of stopping on (version 8), once each."""
+        for reason in result.get("waived") or []:
+            line = f"optional, left empty (listed, not a stop): {_clean(reason)}"
+            if line not in self.out.log:
+                self.out.log.append(line)
 
     def _pause_and_review(self, fill: pipeline.PageFill, result: dict,
                           page_events: list[dict] | None = None) -> None:

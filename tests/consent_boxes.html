@@ -30,6 +30,11 @@
 <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title">Are you willing to relocate?</label>
 <div class="ashby-application-form-input-yesno"><button aria-pressed="false">Yes</button><button aria-pressed="false">No</button><input type="checkbox" tabindex="-1" name="q-reloc" style="position:absolute;width:0;height:0;opacity:0"></div></div>
 
+<!-- 10: required three ways: the attribute, aria-required, a trailing * -->
+<input type="checkbox" id="req" required><label for="req">I agree to the Terms of Service</label><br>
+<div role="checkbox" aria-checked="false" aria-required="true" tabindex="0" id="areq">I accept the Privacy Policy</div>
+<input type="checkbox" id="star"><label for="star">Keep me posted *</label><br>
+
 <!-- 9: an embedded frame the gate can't see into -->
 <iframe src="about:blank" width="200" height="40" title="embedded"></iframe>
 </body></html>

@@ -155,7 +155,7 @@ _SENSITIVE_PREFIXES = ("eligibility.", "eeo.", "compensation.")
 
 def _redacted_box(box: dict, traced: dict) -> dict:
     out = {k: box.get(k) for k in ("checked", "visible", "label_source", "label_inner",
-                                   "in_button_group", "group_ref")}
+                                   "in_button_group", "group_ref", "required")}
     out["hidden_text"] = box.get("label_inner") != box.get("label_content")
     out["fine_print"] = bool(box.get("described"))
     # A checkbox that IS an EEO or eligibility question ("I identify as a
@@ -231,4 +231,7 @@ def redacted(record: dict, result: dict) -> dict:
                    for fr in record.get("frames") or []],
         "events": record.get("events"),
         "errors": record.get("errors"),
+        # The optional empties the gate listed instead of stopping on
+        # (version 8): labels and fixed phrases, the same shape as reasons.
+        "waived": list(result.get("waived") or []),
     }
