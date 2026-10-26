@@ -2145,3 +2145,18 @@ Jack opens the form in the tab scans, fills and submits on the same
 address; a park after a fill resumes at Submit with one fill; a
 LinkedIn refusal from intake waits with Continue and, resumed, refuses
 again and waits again.
+
+Commit 07113ca (the first fix of item 1's BLOCK): VERDICT BLOCK again
+(the second on item 1), 1 high, 2 low, fixed in the next commit: the
+address check covered a move but not a page that re-rendered at the
+same address, so a sign-in dialog or a CAPTCHA drawn during the wait
+was still scanned on the shell's verdict. Now any wait that polled
+before the form appeared returns False too, and the loop makes every
+check again from the top (the next pass finds the form at its first
+probe, so nothing spins); the address the checks were made on is read
+at the top of the pass, before the CAPTCHA check (the low finding);
+FORM_RECHECK_CAP = 3 passes in a row that end in the wait park the job
+with a fixed reason instead of spinning to the 60-minute cap (the
+other low finding). Tests: a form drawn with an hCaptcha frame at the
+same address is caught by the CAPTCHA check before any scan; a page
+whose address ticks parks after the cap.

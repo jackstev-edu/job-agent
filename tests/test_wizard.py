@@ -413,8 +413,8 @@ def test_a_form_that_renders_late_is_scanned_once_it_appears():
     print(out.status, out.reason, out.log)
     check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
           f"the late form was scanned, filled and the run went on ({out.status}, {out.reason}, {clicks})")
-    check(any(line.startswith("waited ") and "for the form to render" in line for line in out.log),
-          f"the wait is logged ({out.log})")
+    check(any(line.startswith("the form rendered after ") and "checked again" in line for line in out.log),
+          f"the wait, and the second pass of the checks, are logged ({out.log})")
     check.done()
 
 
@@ -445,6 +445,52 @@ ELSEWHERE = f"""<!doctype html><html><head><title>Sign in</title></head><body>
 GOOGLE_LOGIN = f"""<!doctype html><html><head><title>Sign in - Google Accounts</title></head><body>
 <form><label for="id">Email or phone</label><input id="id" name="identifier" type="email">
 <button type="button">Next</button></form>{CLICKS_JS}</body></html>"""
+
+
+CAPTCHA_LATE1 = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<h1>Step 1 of 3</h1><div id="app"><p>Loading…</p></div>
+<script>setTimeout(() => {{ document.getElementById('app').innerHTML = {_FORM1!r}
+  + '<iframe src="https://hcaptcha.example/challenge" title="hCaptcha" width="300" height="80"></iframe>'; }}, 800);</script>
+{CLICKS_JS}</body></html>"""
+TICKING1 = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<h1>Step 1 of 3</h1><div id="app"><p>Loading…</p></div>
+<script>setInterval(() => {{ location.hash = String(Date.now()); }}, 150);</script>{CLICKS_JS}</body></html>"""
+
+
+def test_a_form_drawn_with_a_captcha_at_the_same_address_is_checked_before_any_scan():
+    # Fix of 07113ca's BLOCK: the CAPTCHA and page-kind checks ran on the
+    # empty shell; a page that draws its form, and a CAPTCHA, at the same
+    # address during the wait must meet them again before anything is
+    # scanned. The run pauses for the CAPTCHA (the pause times out, so it
+    # parks) with nothing scanned, filled or pressed. On 07113ca the form
+    # was filled and Next pressed.
+    check = Checks()
+    site = _site(); site["/apply"] = CAPTCHA_LATE1
+    with mock.patch.object(wizard, "FORM_WAIT_S", 5):
+        out, jack, clicks, ticks, url = _run(site, "/apply", act=None)
+    print(out.status, out.reason, out.log)
+    check(out.status == "needs_you" and "CAPTCHA" in out.reason,
+          f"parked on the CAPTCHA the second pass found ({out.status}, {out.reason})")
+    check(out.pages_filled == 0 and not out.steps and clicks == [] and url.endswith("/apply"),
+          f"nothing scanned, filled or pressed ({out.pages_filled}, {clicks}, {url})")
+    check(any(line.startswith("the form rendered after ") for line in out.log), f"the second pass is logged ({out.log})")
+    check.done()
+
+
+def test_a_page_that_keeps_changing_parks_after_the_recheck_cap():
+    # A page whose address ticks every 150 ms ends every pass in the wait;
+    # after FORM_RECHECK_CAP passes in a row the job parks instead of
+    # spinning to the 60-minute cap. On 07113ca this spun.
+    check = Checks()
+    site = _site(); site["/apply"] = TICKING1
+    with mock.patch.object(wizard, "FORM_WAIT_S", 5):
+        out, jack, clicks, ticks, url = _run(site, "/apply", act=None)
+    check(out.status == "needs_you" and out.reason == "the page kept changing while the form was awaited",
+          f"parked with the fixed reason ({out.status}, {out.reason})")
+    check(out.pages_filled == 0 and clicks == []
+          and sum(1 for line in out.log if "checked again" in line) == wizard.FORM_RECHECK_CAP,
+          f"after exactly the cap's passes, nothing filled or pressed ({out.log})")
+    check.done()
 
 
 def test_a_page_that_moves_during_the_wait_is_checked_again_not_scanned():

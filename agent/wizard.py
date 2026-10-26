@@ -52,6 +52,10 @@ TIME_CAP_S = 60 * 60
 # never changes what the scan finds, and it clicks nothing.
 FORM_WAIT_S = 20
 FORM_POLL_MS = 500
+# A pass of the loop that ends in the wait (the page moved, or drew its
+# form after a poll) is made again from the top, every check included;
+# this many in a row with no scan means the page keeps changing: park.
+FORM_RECHECK_CAP = 3
 
 WAITING = "waiting"
 
@@ -289,24 +293,25 @@ class Wizard:
             raise _Parked("a CAPTCHA wasn't solved (or the page couldn't be read)")
         ev["handled"] = "jack"
 
-    def _await_form(self) -> bool:
+    def _await_form(self, here: str) -> bool:
         """
         Give the page up to FORM_WAIT_S to show a fillable control before
         the scan runs (Jack, 2026-10-26): polled, bounded, no click, no
-        navigation. A probe that fails (the page mid-navigation) counts as
-        "not yet". Returns False the moment the tab's address is no longer
-        the one the page checks (CAPTCHA, Google, host and page kind) were
-        made on, so the loop makes them again on the page actually there
-        and nothing is scanned on a page those checks never saw (fix of
-        403c058's BLOCK). On timeout the scan runs anyway and parks as
-        before.
+        navigation. `here` is the address the page checks (CAPTCHA, Google,
+        host and page kind) were made on. Returns True only when a fillable
+        control is there at the first probe (the checks saw this page) or
+        when the wait timed out (the scan runs and parks as before). It
+        returns False, and the loop makes every check again from the top,
+        the moment the address differs from `here` or as soon as the form
+        appears after a poll: a page that drew a sign-in dialog or a
+        CAPTCHA at the same address while the wait ran is a page the checks
+        never saw (fixes of 403c058's and 07113ca's BLOCKs). The next pass
+        finds the form at its first probe, so nothing is scanned on an
+        unchecked page and nothing spins; FORM_RECHECK_CAP bounds a page
+        that keeps changing.
         """
         start = time.monotonic()
         waited = 0
-        try:
-            here = self.page.url
-        except Exception:
-            return False
         while True:
             try:
                 if self.page.url != here:
@@ -314,7 +319,9 @@ class Wizard:
                     return False
                 if self.page.evaluate(_HAS_FIELDS_JS):
                     if waited:
-                        self.out.log.append(f"waited {time.monotonic() - start:.1f}s for the form to render")
+                        self.out.log.append(f"the form rendered after {time.monotonic() - start:.1f}s: "
+                                            f"checked again")
+                        return False
                     return True
             except Exception:
                 pass
@@ -708,6 +715,7 @@ class Wizard:
         info, self.resume_info = self.resume_info or {}, None
         fill: pipeline.PageFill | None = None
         skip_fill = False
+        rechecks = 0            # passes in a row that ended in the form wait
         if pending:
             kind = pending.get("kind")
             self.out.log.append(f"resumed after a {kind} pause")
@@ -756,6 +764,10 @@ class Wizard:
             if page.is_closed():
                 raise _Parked("the tab closed")
             if not skip_fill:
+                try:
+                    here = page.url     # the address every check below is made on
+                except Exception:
+                    raise _Parked("the page couldn't be read")
                 self._captcha()
                 if google.is_google_host(page.url):
                     # A same-tab Google sign-in: walked by structure, or a
@@ -784,8 +796,12 @@ class Wizard:
                         raise _Parked(res.reason)
                     browser_mod.settle(page, 800)
                     continue
-                if not self._await_form():
-                    continue            # the page moved: every check above, again
+                if not self._await_form(here):
+                    rechecks += 1
+                    if rechecks >= FORM_RECHECK_CAP:
+                        raise _Parked("the page kept changing while the form was awaited")
+                    continue            # the page moved or drew its form: every check above, again
+                rechecks = 0
                 with self.activity.filling(page):
                     fill = pipeline.fill_page(page, self.prof, guard=self.guard,
                                               resume=None if self.resume_done else self.resume,
