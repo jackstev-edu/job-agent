@@ -259,15 +259,16 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
     fill, read back. None when the page has no fields. Clicks nothing but
     what the filler clicks (rows, option buttons, checkboxes it is allowed).
     With `protect_held` (the wizard's fresh scan of a page after a park,
-    Jack, 2026-10-26), a field that already holds a value, whoever put it
-    there, is kept from the classifier, the mapper and the plan and listed
-    in `held`, so a box Jack may have corrected in the tab is never typed
-    over and nothing of it reaches a model; it is never counted as his
-    (nothing says who wrote it), so the gate judges it like any other box.
-    Touch marks are not used: the filler's own clear leaves one. The
-    resume upload is skipped on such a scan (the page was filled before).
-    A page whose values can't be read raises Unreadable: the fill must
-    not run on it.
+    Jack, 2026-10-26), only a box that was read and reads empty is filled;
+    every other box (one that holds a value, whoever put it there, or one
+    the read left out) is kept from the classifier, the mapper, the router
+    and the plan, listed in `held` and flagged with a fixed reason, so a
+    box Jack may have corrected in the tab is never typed over and nothing
+    of it reaches a model; it is never counted as his (nothing says who
+    wrote it), so the gate stops on it for him. Touch marks are not used:
+    the filler's own clear leaves one. The resume upload is skipped on
+    such a scan (the page was filled before). A read that fails or comes
+    back empty raises Unreadable: the fill must not run on it.
     """
     fields = extract.extract_fields(page, guard)
     if not fields:
@@ -279,11 +280,19 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
     new_after_upload: set[str] = set()
     marked: set[str] = set()
     if protect_held:
+        plain = [f for f in fields if f.get("type") != "file"]
         try:
-            now = extract.snapshot(page, [f for f in fields if f.get("type") != "file"])
+            now = extract.snapshot(page, plain)
         except Exception as e:
             raise Unreadable(f"the page's values couldn't be read ({type(e).__name__})")
-        marked = {ref for ref, value in (now or {}).items() if _holds(value)}
+        if plain and not now:
+            # The read came back with nothing (a password box on the page
+            # makes the whole read refuse): no box is known empty.
+            raise Unreadable("the page's values couldn't be read (nothing came back)")
+        # Held by default: a box is filled only when it was read and reads
+        # empty. One the read left out (no stable identity, a partly read
+        # group) is held, never filled over (fix of c5b13bc's BLOCK).
+        marked = {f["ref"] for f in plain if not (f["ref"] in now and not _holds(now[f["ref"]]))}
     box = resume_box(fields) if resume and not protect_held else None
     if box is not None:
         before_fields = fields
@@ -304,13 +313,17 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
     else:
         categories = classify.classify_fields([f for f in fields if f.get("type") != "file"
                                                and f["ref"] not in marked])
-    plan, flags, for_model = route(fields, categories, prof, new_after_upload)
+    plan, flags, for_model = route([f for f in fields if f["ref"] not in marked], categories, prof,
+                                   new_after_upload)
     held: list[str] = []
     for f in fields:
         if f["ref"] in marked:
-            plan.pop(f["ref"], None)
             held.append(f["ref"])
-            lines.append(f"left as it is (already holds a value): '{(f.get('label') or f.get('name') or '')[:60]}'")
+            categories[f["ref"]] = "held"
+            flags.append({"ref": f["ref"], "label": f.get("label") or f.get("name") or "", "category": "held",
+                          "reason": "holds a value from before this scan (or couldn't be read); left as it is"})
+            lines.append(f"left as it is (holds a value, or couldn't be read): "
+                         f"'{(f.get('label') or f.get('name') or '')[:60]}'")
     for_model = [f for f in for_model if f["ref"] not in marked]
     ask_mapper(for_model, prof, posting_text, new_after_upload, plan)
     prefill = prefill_census(page)

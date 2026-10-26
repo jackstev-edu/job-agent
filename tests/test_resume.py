@@ -384,7 +384,7 @@ def test_a_fresh_scan_after_a_park_leaves_boxes_that_hold_a_value_alone():
     check(out.status == wizard.WAITING and "the page changed since the park: scanned afresh" in out.log,
           f"scanned afresh ({out.status}, {out.reason}, {out.log})")
     check(value == "Jacques", f"Jack's correction was not typed over ({value!r})")
-    check(any(line.startswith("left as it is (already holds a value): 'First Name'") for line in out.log),
+    check(any(line.startswith("left as it is (holds a value, or couldn't be read): 'First Name'") for line in out.log),
           f"the protected box is logged ({out.log})")
     check(out.pages_filled == 2 and w.human_reviewed == [],
           f"the box is not counted as his ({out.pages_filled}, {w.human_reviewed})")
@@ -392,6 +392,94 @@ def test_a_fresh_scan_after_a_park_leaves_boxes_that_hold_a_value_alone():
           f"the held boxes reached no classifier call ({new_refs}, {classified})")
     check(view["pause"] and view["pause"]["kind"] == "gate" and _field(view, "First Name"),
           f"the gate then stops for him on the held box ({view['pause']})")
+    check.done()
+
+
+# The first box has no name, no aria-label and no <label>: the scan names
+# it from the text beside it, but the value read has no stable identity
+# for it and leaves it out.
+NO_IDENTITY = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<form><div><span>First Name</span> <input id="fn" placeholder="First Name" required></div>
+<div><label for="em">Email</label> <input id="em" name="email" type="email" required></div></form>
+{CLICKS_JS}</body></html>"""
+
+
+def test_a_box_the_value_read_leaves_out_is_held_not_filled_over():
+    # Fix of c5b13bc's BLOCK: on a protected fill, a box the value read
+    # leaves out (no name, no aria-label, no <label>: no stable identity)
+    # is held like one that holds a value, never filled over, never sent
+    # to a model, and flagged with the fixed reason; a box that was read
+    # and reads empty is filled. The pipeline is called directly on the
+    # page, as the wizard calls it after a fresh scan. On c5b13bc the
+    # nameless box counted as empty and "Jacques" was typed over.
+    from agent import extract, pipeline
+    check = Checks()
+    site = _gui_site(); site["/noid"] = NO_IDENTITY
+    classified: dict = {"refs": set()}
+
+    def classify_and_record(fields):
+        classified["refs"] |= {f["ref"] for f in fields}
+        return classify_by_label(fields)
+    p, browser, ctx = _open(site)
+    try:
+        page = ctx.new_page(); page.goto(f"{HOST}/noid")
+        page.fill("#fn", "Jacques")                  # Jack's correction, before the fresh fill
+        with mock.patch("agent.classify.classify_fields", classify_and_record), \
+                mock.patch("agent.mapper.map_fields", map_from_profile):
+            fill = pipeline.fill_page(page, _profile(), guard=extract.ReadGuard(), resume=None,
+                                      posting_text="", protect_held=True)
+        fn, em = page.input_value("#fn"), page.input_value("#em")
+    finally:
+        browser.close(); p.stop()
+    check(fill is not None and fn == "Jacques" and em == "test@example.invalid",
+          f"the nameless box kept Jack's value; the readable empty box was filled ({fn!r}, {em!r})")
+    fn_ref = fill.fields[0]["ref"] if fill else None
+    check(fill and fill.held == [fn_ref] and fn_ref not in classified["refs"] and fn_ref not in fill.plan,
+          f"held, no classifier call, no plan ({fill and fill.held}, {classified}, {fn_ref})")
+    flag = next((f for f in (fill.flags if fill else []) if f.get("ref") == fn_ref), None)
+    check(flag and flag.get("category") == "held" and "left as it is" in flag.get("reason", "")
+          and (fill.categories.get(fn_ref) == "held"),
+          f"flagged with the fixed reason and the held category ({flag})")
+    check.done()
+
+
+def test_the_hold_survives_a_pass_that_fills_nothing():
+    # Fix of c5b13bc's second BLOCK: the protection order is consumed only
+    # by a fill, so a resumed pass that ends in the form wait (the page
+    # mid-render) keeps it for the fill that follows. Jack's "Jacques"
+    # survives; on c5b13bc the wait pass consumed the order and the next
+    # pass typed over it.
+    check = Checks()
+    site = _gui_site(); site["/nobuttons"] = NO_BUTTONS
+    real_wait = wizard.Wizard._await_form
+    waits = {"n": 0}
+
+    def wait_once_then_real(self, here):
+        waits["n"] += 1
+        if waits["n"] == 2:            # the resumed pass: the form "renders late" once
+            self.out.log.append("the form rendered after 0.0s: checked again")
+            return False
+        return real_wait(self, here)
+    with mock.patch("agent.follow.read_shape", lambda target: None), \
+            mock.patch.object(wizard.Wizard, "_await_form", wait_once_then_real):
+        p, browser, ctx = _open(site)
+        try:
+            page = ctx.new_page(); page.goto(f"{HOST}/nobuttons")
+            state = gui.State(); [job_id] = state.start([f"{HOST}/nobuttons"], dry=False)
+            w = _wizard(page, state, job_id, "/nobuttons")
+            with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                    mock.patch("agent.mapper.map_fields", map_from_profile):
+                out = w.run()
+                page.fill("#fn", "Jacques")
+                state.request_continue(job_id)
+                out = w.continue_from(state.take_resume(job_id))
+            value = page.input_value("#fn")
+        finally:
+            browser.close(); p.stop()
+    check(out.status == wizard.WAITING and "the page changed since the park: scanned afresh" in out.log
+          and waits["n"] >= 3, f"scanned afresh after a wait pass ({out.status}, {out.reason}, {waits})")
+    check(value == "Jacques" and out.pages_filled == 2,
+          f"Jack's correction survived the fill after the wait pass ({value!r}, {out.pages_filled})")
     check.done()
 
 

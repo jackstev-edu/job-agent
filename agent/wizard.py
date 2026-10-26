@@ -811,10 +811,13 @@ class Wizard:
                     if pending.get("fill") is not None:
                         fill, skip_fill, carried_events = self._resume_fill(pending, info)
                 elif pending.get("fill") is not None:
-                    # Still a CAPTCHA (or unreadable): the pause comes again
-                    # from the top without the fill; whatever fill follows
-                    # then must leave boxes that hold a value alone.
+                    # Still a CAPTCHA: pause again with the fill in hand, so
+                    # solving it resumes at the gate for that fill. Unreadable
+                    # (no CAPTCHA seen): whatever fill follows leaves boxes
+                    # that hold a value alone.
                     self._protect_held = True
+                    if browser_mod.detect_captcha(page):
+                        self._captcha(pending.get("fill"), pending.get("page_events") or [])
         while True:
             page_events: list[dict] = carried_events if skip_fill else []
             carried_events = []
@@ -842,9 +845,6 @@ class Wizard:
             verdict = None if on_google else pages.fill_allowed(page, self.url, None)
             if verdict in (pages.LINKEDIN, pages.OFF_HOST):
                 raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
-            # The one fill pass after a fresh scan was ordered leaves boxes
-            # that hold a value alone; the order never carries to a later page.
-            protect, self._protect_held = self._protect_held, False
             if not skip_fill:
                 if on_google:
                     # A same-tab Google sign-in: walked by structure, or a
@@ -863,8 +863,7 @@ class Wizard:
                     browser_mod.settle(page, 800)
                     continue
                 if verdict in (pages.ACCOUNT, pages.SIGN_IN, pages.VERIFICATION):
-                    with self.activity.filling(page):
-                        res = accounts.handle(page, verdict, self.prof, self.pauser)
+                    res = accounts.handle(page, verdict, self.prof, self.pauser)
                     self.out.events += res.events
                     self.out.log += res.steps
                     if res.status == accounts.PARKED:
@@ -877,6 +876,11 @@ class Wizard:
                         raise _Parked("the page kept changing while the form was awaited")
                     continue            # the page moved or drew its form: every check above, again
                 rechecks = 0
+                # The one fill pass after a fresh scan was ordered leaves
+                # boxes that hold a value alone; the order is consumed by
+                # a fill, never by a pass that fills nothing (a form wait,
+                # an account page), and never carries to a later page.
+                protect, self._protect_held = self._protect_held, False
                 with self.activity.filling(page):
                     try:
                         fill = pipeline.fill_page(page, self.prof, guard=self.guard,

@@ -2327,3 +2327,26 @@ agent's own fill. Options: have the filler clear a box another way
 (select-all + insertText, no Delete key), or drop the Delete special
 case from the listener, or compare values as well as marks; each is a
 change to the review rule, so it waits for Jack.
+
+Commit c5b13bc (the fix of 8185f17's BLOCK): VERDICT BLOCK, 2 BLOCKs, 5
+FLAGs. Fixed in the next commit: the value rule failed open twice: a
+box the value read left out (no stable identity, a partly read group,
+or the whole read refusing because a password box is on the page)
+counted as empty and was filled over, so now a box is filled only when
+it was read and reads empty, everything else is held, and a read that
+comes back empty raises Unreadable; and the hold was consumed by any
+pass that ended in a `continue` (a form wait, an account page), so the
+next fill pass filled over everything: it is consumed only by a fill
+now. Taken: held boxes are not routed at all; each carries a fixed
+flag ("holds a value from before this scan (or couldn't be read); left
+as it is") and the category "held", so the GUI row says why; a
+CAPTCHA still shown on a resumed pass pauses again with the fill in
+hand; `accounts.handle` no longer runs under the agent flag (its own
+pauses ask Jack to act, and the banner and the while-filling exception
+would have covered them); the chooser test change was never run until
+this round (said so). Test: a nameless box Jack corrected survives a
+fresh scan that first ends in a form wait, reaches no classifier call,
+and the gate stops on it with the fixed reason (on c5b13bc it was
+typed over). Logged: accounts.py's own presses still run outside the
+agent flag and can leave touch marks (pre-existing); the CAPTCHA-on-a-
+resumed-pass path is still untested.
