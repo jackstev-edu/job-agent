@@ -2350,3 +2350,15 @@ and the gate stops on it with the fixed reason (on c5b13bc it was
 typed over). Logged: accounts.py's own presses still run outside the
 agent flag and can leave touch marks (pre-existing); the CAPTCHA-on-a-
 resumed-pass path is still untested.
+
+Commit 152d64b (the fix of c5b13bc's BLOCKs): VERDICT FLAG, 3 FLAGs, 1
+minor, no category 1 or 2 finding. Taken in the next commit: the hold
+ordered by a CAPTCHA pass could outlive a same-page resume and reach
+the next page's fill (safe direction: a spurious stop and a skipped
+resume upload); `_resume_fill` clears it on the same-page branch. The
+pipeline test now also proves the gate stops on the held box and
+waives nothing of it. Logged: accounts.py's typing and presses leave
+touch marks and identity records that read as Jack's (no path turns
+them into a review, since every baseline is taken after accounts ran;
+pre-existing); the CAPTCHA-still-shown-on-a-resumed-pass branch is
+untested; the redundant for_model filter stays.

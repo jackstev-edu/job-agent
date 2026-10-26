@@ -440,6 +440,18 @@ def test_a_box_the_value_read_leaves_out_is_held_not_filled_over():
     check(flag and flag.get("category") == "held" and "left as it is" in flag.get("reason", "")
           and (fill.categories.get(fn_ref) == "held"),
           f"flagged with the fixed reason and the held category ({flag})")
+    # And the gate stops on it: a held box is never a pass (its record has
+    # no decision, and its read-back is missing, so it is never "empty").
+    from agent import gate, shadow
+    record = {"url": f"{HOST}/noid", "portal": "generic", "portal_method": "default", "wizard": True, "steps": 1,
+              "fields": fill.fields, "categories": fill.categories, "plan": fill.plan, "flags": fill.flags,
+              "results": fill.step.get("results"), "snapshot": fill.snapshot, "census": fill.census,
+              "frames": [], "events": [], "errors": []}
+    verdict = gate.decide(record, _profile())
+    check(verdict["content_verdict"] == "would_stop"
+          and any(r.startswith("'First Name': left for you") for r in verdict["content_reasons"])
+          and not any("First Name" in w for w in verdict.get("waived", [])),
+          f"the gate stops on the held box and waives nothing of it ({verdict['content_reasons']}, {verdict.get('waived')})")
     check.done()
 
 

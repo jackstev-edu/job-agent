@@ -742,6 +742,9 @@ class Wizard:
             self.out.log.append("the page changed since the park: scanned afresh")
             self._protect_held = True
             return None, False, []
+        # The same page, judged again: no fresh scan follows, so a hold
+        # ordered earlier (a CAPTCHA pass) must not reach the next page.
+        self._protect_held = False
         self._remap(fill, pending, info)
         carried = list(pending.get("page_events") or [])
         self._gate_page(fill, carried)
