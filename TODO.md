@@ -2105,3 +2105,43 @@ inferred from the symptom of the GM run and this fix is unverified
 against the real page until Jack's next run; the code cause (no wait
 between fill_allowed and fill_page; the account-pause resume settles
 nothing) is read off 473ef65.
+
+Item 2 (Continue on every park). Why the no-fields park had none: a
+`_Parked` raised anywhere in the loop was caught in `Wizard.run`, which
+set `out.wizard = None` and returned needs_you with no pause; the GUI
+draws Continue only inside a row's pause (gui.py's `if (j.pause)`), and
+the queue loop keeps a Wizard to resume only from `on_wait`, which only
+a "waiting" outcome reaches. Every other park kind lacked it the same
+way: in wizard.py the CAPTCHA not solved, the two terminal gate parks,
+the 60-minute and 25-page caps, the tab closed, Google's site on an
+address the agent won't drive, an accounts.py PARKED result (sign-in,
+account, verification, Google), the page leaving the application's
+site (LinkedIn / off-host), a disabled Next, a Next that couldn't be
+pressed, a page that didn't move on after Next, a Submit control with
+nothing filled, a chooser refusal (LinkedIn / Indeed / paste / a
+previous application / nothing allowed), the no-fields park and "no
+Next or Submit after filling"; and in apply.py's run_one every intake
+park (the link didn't open, the MyGreenhouse way back failed, Apply
+stays on the job board, Apply didn't lead anywhere, couldn't click
+Apply, no Apply that leaves the site, more than one way to apply, the
+application stays on the job board, LinkedIn refused). A crash is
+"failed", not needs-you, and stays so.
+
+Fix: in GUI mode `Wizard.run` turns a `_Parked` into a pause of kind
+"parked" (`park_for_continue`: the row shows the reason and Continue;
+the tab stays open; nothing is clicked or navigated). Continue
+re-enters the loop at the top of the page, a fresh scan of what the tab
+shows now; when the stop came after the page was filled (`_advance`),
+the resume goes back to Next / Submit for that same fill (remapped),
+never a second fill. `run_one` gives an intake park with a tab the same
+pause through a Wizard on that tab; a link that didn't open has no tab
+and keeps the plain park (no Continue; listed). The terminal `run`
+command is unchanged. A cap park (60 minutes, 25 pages) and a closed
+tab resume into the same check and park again (decision for Jack
+below). Tests: any `_Parked` in GUI mode becomes a parked pause with
+the wizard kept; the real no-fields park offers Continue and Continue
+alone re-scans and parks again with nothing pressed; Continue after
+Jack opens the form in the tab scans, fills and submits on the same
+address; a park after a fill resumes at Submit with one fill; a
+LinkedIn refusal from intake waits with Continue and, resumed, refuses
+again and waits again.

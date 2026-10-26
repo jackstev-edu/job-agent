@@ -19,7 +19,8 @@ and `resume` picks up where it stopped when Jack presses Continue. Caps:
 WHY IT MATTERS: This is the one place Next is pressed and the order of
 every check is decided. Nothing here submits; submit.py does, after the
 gate. A job that needs Jack never fails and never closes (Jack,
-2026-10-19).
+2026-10-19); in the GUI every park waits in its tab with Continue, which
+reads the page again (Jack, 2026-10-26).
 """
 
 from __future__ import annotations
@@ -168,7 +169,15 @@ def _same(a, b) -> bool:
 
 
 class _Parked(Exception):
-    """A terminal-mode pause that didn't end with Jack's Enter, or a refusal."""
+    """
+    A stop the loop can't get past on its own: a refusal, a page it can't
+    read or move, a pause that didn't end with Jack's Enter. In the
+    terminal the job is parked as needs-you; in the GUI it waits in its
+    tab with Continue (Jack, 2026-10-26). `after_fill` is the page's
+    PageFill when the stop came after this page was filled, so a resume
+    goes back to Next / Submit instead of filling the page again.
+    """
+    after_fill: "pipeline.PageFill | None" = None
 
 
 class Wizard:
@@ -539,6 +548,8 @@ class Wizard:
         try:
             return self._loop()
         except _Parked as e:
+            if getattr(self.pauser, "deferring", False):
+                return self.park_for_continue(str(e), after_fill=e.after_fill)
             self.out.wizard = None
             return self._parked(str(e))
         except pause_mod.Deferred as e:
@@ -547,15 +558,37 @@ class Wizard:
                 self.pending = {"kind": "account", "wants_code": e.wants_code}
             info = e.info or {"kind": self.pending["kind"], "message": e.body,
                               "wants_code": e.wants_code, "fields": []}
-            self.out.status, self.out.reason = WAITING, e.body
-            self.out.events.append({"kind": "pause", "detail": info["kind"], "handled": None})
-            if self.on_pause is not None:
-                try:
-                    self.on_pause(info)
-                except Exception:
-                    pass
-            self.active_s += self.clock() - (self._tick or self.clock())
-            return self.out
+            return self._wait(info, e.body)
+
+    def _wait(self, info: dict, reason: str) -> Outcome:
+        """Hand a deferred pause to the GUI and return "waiting"; `pending` says where to resume."""
+        self.out.status, self.out.reason = WAITING, reason
+        self.out.events.append({"kind": "pause", "detail": info["kind"], "handled": None})
+        if self.on_pause is not None:
+            try:
+                self.on_pause(info)
+            except Exception:
+                pass
+        self.active_s += self.clock() - (self._tick or self.clock())
+        return self.out
+
+    def park_for_continue(self, reason: str, *, after_fill=None) -> Outcome:
+        """
+        GUI mode (Jack, 2026-10-26): a park is a pause like any other. The
+        row shows the reason with Continue; the tab stays open; nothing is
+        clicked or navigated. Continue re-enters the loop at the top of
+        the page (a fresh scan of what the tab shows now), or, when the
+        page had been filled before the stop, at Next / Submit for that
+        same fill. Also used by intake for a link it parked before the
+        wizard started, on the tab it left.
+        """
+        if self._tick is None:
+            self._tick = self.clock()
+        self.pending = {"kind": "parked", "fill": after_fill, "reason": reason}
+        info = {"kind": "parked", "wants_code": False, "fields": [],
+                "message": f"{reason}. Fix it in the tab yourself, then press Continue: the page "
+                           f"is read again from where it stopped (no click, no navigation)."}
+        return self._wait(info, reason)
 
     def continue_from(self, info: dict | None) -> Outcome:
         """Jack pressed Continue: carry on from the pending pause with what he gave."""
@@ -699,6 +732,15 @@ class Wizard:
                     # judges the page again before anything is pressed.
                     self._handled_by_jack("gate_pause", "final page")
                 skip_fill = True
+            elif kind == "parked":
+                fill = pending.get("fill")
+                if fill is not None:
+                    # The page was filled before the stop: back to Next /
+                    # Submit for that fill, never a second fill of it.
+                    self._remap(fill, pending, info)
+                    skip_fill = True
+                # Otherwise the top of the loop: the page as the tab shows
+                # it now, scanned afresh.
             elif kind == "captcha":
                 # Only once the page can be read and shows no CAPTCHA;
                 # otherwise the top of the loop pauses again and the event
@@ -774,7 +816,11 @@ class Wizard:
                     self.results.update(fill.step.get("results") or {})
                     self._gate_page(fill, page_events)
             skip_fill = False
-            outcome = self._advance(fill)
+            try:
+                outcome = self._advance(fill)
+            except _Parked as e:
+                e.after_fill = fill         # a resume goes back to Next / Submit, not a refill
+                raise
             if outcome is not None:
                 return outcome
 

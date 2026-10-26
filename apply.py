@@ -1146,6 +1146,20 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
         report_to({"company": company, "role": role, "portal": ats,
                    "final_url": landing.url if page is not None else ""})
     if landing.parked:
+        if on_wait is not None and page is not None:
+            # GUI mode (Jack, 2026-10-26): the park waits in its tab with
+            # Continue, which starts the wizard on whatever the tab shows
+            # then (a form Jack opened himself, or the same refusal again).
+            # A link that didn't open has no tab, so nothing to resume.
+            portal, _, method = adapters.detect_with_method(page.url, page)
+            finish = {"url": url, "company": company, "role": role, "ats": ats,
+                      "portal": portal, "portal_method": method,
+                      "resume": str(prof.resume_path(args.resume) or "")}
+            w = wizard.Wizard(page, prof, url=url, portal=portal, portal_method=method,
+                              company=company, role=role, resume=prof.resume_path(args.resume),
+                              posting_text=extract.page_text(page, 6000), pauser=pauser, echo=print,
+                              reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause)
+            return finish_outcome(w.park_for_continue(landing.parked), finish, on_wait=on_wait)
         _park(url, landing.parked, company=company, role=role, ats=ats)
         return NEEDS_YOU, landing.parked
     print(f"  {BOLD}{ats}{OFF} {DIM}({landing.portal_method}) at {landing.url[:90]}{OFF}")

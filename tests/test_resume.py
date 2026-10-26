@@ -122,6 +122,138 @@ def _field(view, label):
     return next((f for f in (view["pause"] or {}).get("fields", []) if f["label"] == label), None)
 
 
+NOTHING = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<h1>Step 1</h1><div id="app"><p>Loading…</p></div>{CLICKS_JS}</body></html>"""
+NO_BUTTONS = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<form><label for="fn">First Name</label><input id="fn" name="first_name" required>
+<label for="em">Email</label><input id="em" name="email" type="email" required></form>
+{CLICKS_JS}</body></html>"""
+SINGLE_FORM = SINGLE.split("<body>", 1)[1].split(CLICKS_JS, 1)[0]
+
+
+def test_every_park_offers_continue_in_the_gui():
+    # Jack, 2026-10-26: a park (a refusal, a page the wizard can't read or
+    # move, a stop it can't get past) is a pause like any other in the GUI:
+    # the row shows the reason with Continue, the tab stays open, nothing
+    # is pressed. On 473ef65 a park returned needs_you with no pause, so
+    # the row had no Continue and the job could never resume.
+    check = Checks()
+    # The mechanism, for every _Parked the loop can raise.
+    p, browser, ctx = _open(_gui_site())
+    page = ctx.new_page(); page.goto(f"{HOST}/apply")
+    state = gui.State(); [job_id] = state.start([f"{HOST}/apply"], dry=False)
+    w = _wizard(page, state, job_id, "/apply")
+    with mock.patch.object(wizard.Wizard, "_loop", lambda self: (_ for _ in ()).throw(wizard._Parked("the tab closed"))):
+        out = w.run()
+    view = state.snapshot()["jobs"][0]
+    check(out.status == wizard.WAITING and out.wizard is w and out.reason == "the tab closed",
+          f"a park comes back as waiting, with the wizard kept ({out.status}, {out.reason})")
+    check(view["status"] == "needs_you" and view["pause"] and view["pause"]["kind"] == "parked"
+          and view["pause"]["message"].startswith("the tab closed. ")
+          and "press Continue" in view["pause"]["message"] and view["pause"]["fields"] == [],
+          f"the row carries a parked pause (so Continue is drawn) with the reason ({view['pause']})")
+    check(w.pending == {"kind": "parked", "fill": None, "reason": "the tab closed"},
+          f"the resume point is the top of the page ({w.pending})")
+    browser.close(); p.stop()
+    # The real no-fields park: a page with no form, no Next, no Submit.
+    site = _gui_site(); site["/nothing"] = NOTHING
+    with mock.patch.object(wizard, "FORM_WAIT_S", 1):
+        out, pauses, url, clicks, w = _drive(site, "/nothing", [lambda page, state, job_id: None], max_pauses=1)
+    check(pauses and pauses[0]["pause"]["kind"] == "parked"
+          and pauses[0]["pause"]["message"].startswith("a page with no fields, no Next and no Submit. "),
+          f"the no-fields park offers Continue ({pauses and pauses[0]['pause']})")
+    check(out.status == wizard.WAITING and clicks == [] and url.endswith("/nothing"),
+          f"Continue alone re-scans and parks again: nothing pressed, same page ({out.status}, {clicks}, {url})")
+    check(any(e["kind"] == "pause" and e["detail"] == "parked" and e.get("handled") == "jack"
+              for e in out.events), f"the first parked pause is Jack's once he pressed Continue ({out.events})")
+    check.done()
+
+
+def test_continue_on_a_no_fields_park_rescans_without_a_click():
+    # Jack, 2026-10-26: Continue on a no-fields park re-enters the loop at
+    # the top: the page as the tab shows it now, scanned afresh, no click,
+    # no navigation. Jack opens the form in the tab himself (here: injected
+    # by script); Continue fills and submits it on the same address.
+    check = Checks()
+    site = _gui_site(); site["/nothing"] = NOTHING
+
+    def jack_opens_the_form(page, state, job_id):
+        # The form's markup only (a script set through innerHTML never runs),
+        # then the submit handler, attached by hand.
+        page.evaluate("(html) => { document.getElementById('app').innerHTML = html; }",
+                      SINGLE_FORM.split("<script>", 1)[0])
+        page.evaluate("() => document.getElementById('f').addEventListener('submit', "
+                      "e => { e.preventDefault(); location.href = '/thanks'; })")
+    with mock.patch.object(wizard, "FORM_WAIT_S", 1):
+        out, pauses, url, clicks, w = _drive(site, "/nothing", [jack_opens_the_form])
+    check(len(pauses) == 1 and pauses[0]["pause"]["kind"] == "parked", f"one parked pause ({pauses})")
+    check(out.status == "submitted" and clicks == ["Submit application"] and out.pages_filled == 1,
+          f"after Continue the form was scanned, filled and submitted ({out.status}, {out.reason}, {clicks})")
+    check("resumed after a parked pause" in out.log, f"the resume is logged ({out.log})")
+    check.done()
+
+
+def test_a_park_after_a_fill_resumes_at_next_not_at_a_second_fill():
+    # A page filled and then stuck (no Next, no Submit) resumes at Next /
+    # Submit for that same fill once Jack has fixed the page: no second
+    # fill of the boxes, one Submit press.
+    check = Checks()
+    site = _gui_site(); site["/nobuttons"] = NO_BUTTONS
+
+    def jack_adds_the_button(page, state, job_id):
+        page.evaluate("""() => { const b = document.createElement('button'); b.type = 'submit';
+          b.textContent = 'Submit application'; document.querySelector('form').appendChild(b);
+          document.querySelector('form').addEventListener('submit', e => { e.preventDefault(); location.href = '/thanks'; }); }""")
+    out, pauses, url, clicks, w = _drive(site, "/nobuttons", [jack_adds_the_button])
+    check(len(pauses) == 1 and pauses[0]["pause"]["kind"] == "parked"
+          and pauses[0]["pause"]["message"].startswith("no Next or Submit control found after filling the page. "),
+          f"the after-fill park offers Continue ({pauses and pauses[0]['pause']})")
+    check(out.status == "submitted" and clicks == ["Submit application"] and out.pages_filled == 1
+          and len(out.steps) == 1, f"resumed at Submit for the one fill ({out.status}, {out.reason}, {clicks}, {out.pages_filled})")
+    check.done()
+
+
+def test_an_intake_park_waits_in_its_tab_with_continue():
+    # A link intake refuses (LinkedIn Easy Apply) is a needs-you row with
+    # Continue in GUI mode; Continue starts the wizard on the tab, which
+    # refuses the same page again and waits again. On 473ef65 the row had
+    # no pause and nothing to resume.
+    import apply
+    check = Checks()
+    profile_path = TEST_HOME / "resume-profile2.yaml"
+    profile_path.write_text(PROFILE, encoding="utf-8")
+    easy = "https://www.linkedin.com/jobs/view/5"
+    state = gui.State()
+    [a] = state.start([easy], dry=False)
+    waiting: dict = {}
+    args = Namespace(profile=str(profile_path), resume=None, dry=False)
+    quiet = pause.Pauser(notify_fn=lambda t, body, echo=print: None, echo=lambda *x, **k: None)
+    site = _gui_site()
+    with _headless(_routes(site)) as ctx:
+        ctx.route("https://www.linkedin.com/**", lambda route: route.fulfill(
+            status=200, content_type="text/html",
+            body="<!doctype html><html><body><h1>Engineer</h1><button>Easy Apply</button></body></html>"))
+        with mock.patch.object(apply.classify, "classify_fields", classify_by_label), \
+                mock.patch.object(apply.mapper, "map_fields", map_from_profile), \
+                redirect_stdout(io.StringIO()):
+            apply.gui_loop(ctx, state, apply.Profile.load(profile_path), args, quiet,
+                           idle_limit_s=1.0, waiting=waiting)
+            job = state.snapshot()["jobs"][0]
+            check(job["status"] == "needs_you" and job["pause"] and job["pause"]["kind"] == "parked"
+                  and "linkedin" in job["pause"]["message"].lower() and "press Continue" in job["pause"]["message"]
+                  and a in waiting,
+                  f"the refused link waits with Continue ({job['status']}, {job['pause']})")
+            state.request_continue(a)
+            apply.gui_loop(ctx, state, apply.Profile.load(profile_path), args, quiet,
+                           idle_limit_s=1.0, waiting=waiting)
+            job = state.snapshot()["jobs"][0]
+            tabs = [p.url for p in ctx.pages if "linkedin" in p.url]
+    check(job["status"] == "needs_you" and job["pause"] and job["pause"]["kind"] == "parked"
+          and "linkedin" in job["pause"]["message"].lower() and a in waiting and len(tabs) == 1,
+          f"Continue read the page again, refused it again, and still waits ({job['status']}, {job['pause']})")
+    check.done()
+
+
 def test_a_stop_waits_in_its_tab_until_jack_types_and_continues():
     check = Checks()
 
