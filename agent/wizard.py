@@ -95,21 +95,23 @@ _FIND_NEXT_JS = r"""
 }
 """
 
-# Is at least one fillable control on the page now: visible, enabled, not a
-# button-like input. The same shape the scan reads (extract._SCAN_JS), as a
-# yes/no, stamping nothing.
+# Is at least one fillable control on the page now: a visible, enabled,
+# writable input / select / textarea (the scan's own skips: button-like
+# types, disabled, readOnly, the aria-hidden tabindex=-1 validation input)
+# or a combobox / listbox the scan enriches. A yes/no that stamps nothing;
+# the scan itself still decides what is a field.
 _HAS_FIELDS_JS = r"""
 () => {
   const vis = el => {
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
-  const sel = 'input, select, textarea, [role=combobox], [role=listbox], [role=radio], '
-            + '[role=checkbox], [role=switch], [contenteditable=true], [contenteditable=""]';
-  return [...document.querySelectorAll(sel)].some(el => {
+  return [...document.querySelectorAll('input, select, textarea, [role=combobox], [role=listbox]')].some(el => {
     const type = (el.type || '').toLowerCase();
     if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type)) return false;
-    return !el.disabled && vis(el);
+    if (el.disabled || el.readOnly) return false;
+    if (el.getAttribute('aria-hidden') === 'true' && el.tabIndex === -1) return false;
+    return vis(el);
   });
 }
 """
@@ -278,31 +280,43 @@ class Wizard:
             raise _Parked("a CAPTCHA wasn't solved (or the page couldn't be read)")
         ev["handled"] = "jack"
 
-    def _await_form(self) -> None:
+    def _await_form(self) -> bool:
         """
         Give the page up to FORM_WAIT_S to show a fillable control before
         the scan runs (Jack, 2026-10-26): polled, bounded, no click, no
         navigation. A probe that fails (the page mid-navigation) counts as
-        "not yet". On timeout the scan runs anyway and parks as before.
+        "not yet". Returns False the moment the tab's address is no longer
+        the one the page checks (CAPTCHA, Google, host and page kind) were
+        made on, so the loop makes them again on the page actually there
+        and nothing is scanned on a page those checks never saw (fix of
+        403c058's BLOCK). On timeout the scan runs anyway and parks as
+        before.
         """
         start = time.monotonic()
         waited = 0
+        try:
+            here = self.page.url
+        except Exception:
+            return False
         while True:
             try:
+                if self.page.url != here:
+                    self.out.log.append("the page moved while the form was awaited: checked again")
+                    return False
                 if self.page.evaluate(_HAS_FIELDS_JS):
                     if waited:
                         self.out.log.append(f"waited {time.monotonic() - start:.1f}s for the form to render")
-                    return
+                    return True
             except Exception:
                 pass
             if time.monotonic() - start >= FORM_WAIT_S:
                 self.out.log.append(f"no form appeared within {FORM_WAIT_S} s")
-                return
+                return True
             waited += 1
             try:
                 self.page.wait_for_timeout(FORM_POLL_MS)
             except Exception:
-                return
+                return False
 
     def _marked(self, refs: list[str]) -> set[str] | None:
         """The refs carrying a touch mark now; None if the page couldn't be read."""
@@ -728,7 +742,8 @@ class Wizard:
                         raise _Parked(res.reason)
                     browser_mod.settle(page, 800)
                     continue
-                self._await_form()
+                if not self._await_form():
+                    continue            # the page moved: every check above, again
                 with self.activity.filling(page):
                     fill = pipeline.fill_page(page, self.prof, guard=self.guard,
                                               resume=None if self.resume_done else self.resume,

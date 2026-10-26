@@ -132,7 +132,12 @@ def _routes(site):
     def handle(route):
         path = route.request.url.split("example-co.com", 1)[-1].split("?")[0]
         route.fulfill(status=200, content_type="text/html", body=site.get(path, "<p>404</p>"))
-    return {f"{HOST}/**": handle}
+    routes = {f"{HOST}/**": handle}
+    # A site key that is a whole address (another host) is served as is.
+    for key, body in site.items():
+        if key.startswith("http"):
+            routes[key] = (lambda b: lambda route: route.fulfill(status=200, content_type="text/html", body=b))(body)
+    return routes
 
 
 class _Jack(pause.Pauser):
@@ -427,6 +432,65 @@ def test_a_form_that_never_renders_still_parks_after_the_wait():
     check("no form appeared within 2 s" in out.log, f"the timeout is logged ({out.log})")
     check(clicks == [] and url.endswith("/apply") and out.pages_filled == 0,
           f"nothing pressed, nothing filled, still on the page ({clicks}, {url})")
+    check.done()
+
+
+BOUNCE_TO = "https://elsewhere.example/signin"
+BOUNCE1 = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<h1>Step 1 of 3</h1><div id="app"><p>Loading…</p></div>
+<script>setTimeout(() => {{ location.href = 'BOUNCE_TO'; }}, 800);</script>{CLICKS_JS}</body></html>"""
+ELSEWHERE = f"""<!doctype html><html><head><title>Sign in</title></head><body>
+<form><label for="em">Email</label><input id="em" name="email" type="email">
+<button type="submit">Next</button></form>{CLICKS_JS}</body></html>"""
+GOOGLE_LOGIN = f"""<!doctype html><html><head><title>Sign in - Google Accounts</title></head><body>
+<form><label for="id">Email or phone</label><input id="id" name="identifier" type="email">
+<button type="button">Next</button></form>{CLICKS_JS}</body></html>"""
+
+
+def test_a_page_that_moves_during_the_wait_is_checked_again_not_scanned():
+    # Fix of 403c058's BLOCK: the host / page-kind checks were made on the
+    # shell; if the tab moves while the form is awaited, the wait ends and
+    # the loop makes every check again on the page now there. A shell that
+    # bounces off-host 0.8 s in is parked as off-host with nothing filled
+    # and nothing pressed; one that bounces to Google's sign-in site is
+    # parked there with nothing typed. On 403c058 the wait returned on the
+    # new page's email box and the scan filled it.
+    check = Checks()
+    for target, body, want in ((BOUNCE_TO, ELSEWHERE, "the page left the application's site"),
+                               ("https://accounts.google.com/signin", GOOGLE_LOGIN, None)):
+        site = _site(); site["/apply"] = BOUNCE1.replace("BOUNCE_TO", target); site[target] = body
+        with mock.patch.object(wizard, "FORM_WAIT_S", 5):
+            out, jack, clicks, ticks, url = _run(site, "/apply", act=None)
+        print(out.status, out.reason, out.log, url)
+        check(out.status == "needs_you" and (want is None or want in out.reason) and url == target,
+              f"parked on the page it moved to, not filled ({out.status}, {out.reason}, {url})")
+        check(out.pages_filled == 0 and not out.steps and clicks == [],
+              f"nothing scanned, filled or pressed there ({out.pages_filled}, {clicks})")
+        check("the page moved while the form was awaited: checked again" in out.log,
+              f"the move is logged ({out.log})")
+    # The typed-nothing proof for Google's page: its email box is empty.
+    site = _site(); site["/apply"] = BOUNCE1.replace("BOUNCE_TO", "https://accounts.google.com/signin")
+    site["https://accounts.google.com/signin"] = GOOGLE_LOGIN
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            ctx = browser.new_context()
+            ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+            for pattern, handler in _routes(site).items():
+                ctx.route(pattern, handler)
+            page = ctx.new_page(); page.goto(f"{HOST}/apply")
+            with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                    mock.patch("agent.mapper.map_fields", map_from_profile), \
+                    mock.patch.object(wizard, "FORM_WAIT_S", 5):
+                out = wizard.run_application(page, _profile(), url=f"{HOST}/apply", portal="generic",
+                                             portal_method="default", company="Example Co", role="Engineer",
+                                             resume=None, posting_text="", pauser=_Jack(page, None),
+                                             echo=lambda *a, **k: None)
+            typed = page.evaluate("document.getElementById('id').value")
+        finally:
+            browser.close()
+    check(out.status == "needs_you" and typed == "", f"nothing typed into Google's box ({out.reason}, {typed!r})")
     check.done()
 
 

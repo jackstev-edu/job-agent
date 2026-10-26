@@ -2085,3 +2085,23 @@ the log says "no form appeared within 20 s". Tests: a mock page that
 draws its form 1.5 s after loading is filled and the run goes on; one
 that never draws it parks with the same reason after the (shortened)
 wait, nothing pressed. Both fail on 473ef65.
+
+Commit 403c058 (item 1): VERDICT BLOCK, 1 high, 2 low, 1 info. The
+BLOCK, fixed in the next commit: the CAPTCHA, Google, host and
+page-kind checks were made before the wait, so a tab that moved during
+it (a client-side bounce to a sign-in page on the same host or to
+Google's site, the very page the wait targets) would have been scanned
+and filled on the stale verdict, the email box typed into. Now
+`_await_form` returns False the moment the tab's address differs from
+the one the checks were made on, and the loop makes every check again
+on the page there; tests bounce the shell off-host and to Google's
+sign-in site during the wait and prove nothing is scanned, filled,
+pressed or typed. Low, taken: the probe mirrors the scan's skips
+(readOnly, the aria-hidden tabindex=-1 validation input) and no longer
+counts role=radio / checkbox / switch or contenteditable, and its
+comment no longer claims the scan's shape. Low, logged: the Workday
+claim (My Information is drawn after the /apply address loads) is
+inferred from the symptom of the GM run and this fix is unverified
+against the real page until Jack's next run; the code cause (no wait
+between fill_allowed and fill_page; the account-pause resume settles
+nothing) is read off 473ef65.
