@@ -3,8 +3,9 @@ wizard.py — an application, page by page, until it is submitted or waits for J
 
 WHAT THIS DOES: Runs the loop the owner decisions allow: on each page, a
 CAPTCHA pauses for Jack; an account, sign-in or verification page goes to
-accounts.py; any other page on the application's own site is filled by the
-shared pipeline, read back and judged by the gate; a stop pauses for Jack
+accounts.py; any other page on the application's own site is given a
+bounded wait to render its form (FORM_WAIT_S; Jack, 2026-10-26), then
+filled by the shared pipeline, read back and judged by the gate; a stop pauses for Jack
 and is judged again once he has acted (a field he touched in the tab, a
 value he approved in the GUI that the page still holds); on a page the
 wizard will press Next on, a required terms / privacy box the gate
@@ -37,6 +38,19 @@ if TYPE_CHECKING:
 
 STEP_CAP = 25
 TIME_CAP_S = 60 * 60
+
+# How long a page gets to render its form before the scan concludes "no
+# fields" (Jack, 2026-10-26). Workday draws My Information client-side
+# after the /apply address has loaded, and after a hand sign-in the tab
+# is on that address with the form still to come, so a scan at once
+# found nothing and the job parked. The probe is polled every
+# FORM_POLL_MS from the moment the page is reached; 20 s covers a slow
+# network several times over (the form appears within a few seconds),
+# while a page that really has no form (a chooser, a dead end) pays the
+# wait once and parks as before. The wait only delays the scan: it
+# never changes what the scan finds, and it clicks nothing.
+FORM_WAIT_S = 20
+FORM_POLL_MS = 500
 
 WAITING = "waiting"
 
@@ -80,6 +94,26 @@ _FIND_NEXT_JS = r"""
   return {found: hits.length, chosen: true, word: text(chosen), disabled: !!chosen.disabled};
 }
 """
+
+# Is at least one fillable control on the page now: visible, enabled, not a
+# button-like input. The same shape the scan reads (extract._SCAN_JS), as a
+# yes/no, stamping nothing.
+_HAS_FIELDS_JS = r"""
+() => {
+  const vis = el => {
+    const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  const sel = 'input, select, textarea, [role=combobox], [role=listbox], [role=radio], '
+            + '[role=checkbox], [role=switch], [contenteditable=true], [contenteditable=""]';
+  return [...document.querySelectorAll(sel)].some(el => {
+    const type = (el.type || '').toLowerCase();
+    if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type)) return false;
+    return !el.disabled && vis(el);
+  });
+}
+"""
+
 
 # Which of these refs carry a trusted-input mark from the activity listener
 # on their own element (TOUCH_ATTR, set only for isTrusted events while the
@@ -243,6 +277,32 @@ class Wizard:
         if not browser_mod.page_readable(self.page) or browser_mod.detect_captcha(self.page):
             raise _Parked("a CAPTCHA wasn't solved (or the page couldn't be read)")
         ev["handled"] = "jack"
+
+    def _await_form(self) -> None:
+        """
+        Give the page up to FORM_WAIT_S to show a fillable control before
+        the scan runs (Jack, 2026-10-26): polled, bounded, no click, no
+        navigation. A probe that fails (the page mid-navigation) counts as
+        "not yet". On timeout the scan runs anyway and parks as before.
+        """
+        start = time.monotonic()
+        waited = 0
+        while True:
+            try:
+                if self.page.evaluate(_HAS_FIELDS_JS):
+                    if waited:
+                        self.out.log.append(f"waited {time.monotonic() - start:.1f}s for the form to render")
+                    return
+            except Exception:
+                pass
+            if time.monotonic() - start >= FORM_WAIT_S:
+                self.out.log.append(f"no form appeared within {FORM_WAIT_S} s")
+                return
+            waited += 1
+            try:
+                self.page.wait_for_timeout(FORM_POLL_MS)
+            except Exception:
+                return
 
     def _marked(self, refs: list[str]) -> set[str] | None:
         """The refs carrying a touch mark now; None if the page couldn't be read."""
@@ -668,6 +728,7 @@ class Wizard:
                         raise _Parked(res.reason)
                     browser_mod.settle(page, 800)
                     continue
+                self._await_form()
                 with self.activity.filling(page):
                     fill = pipeline.fill_page(page, self.prof, guard=self.guard,
                                               resume=None if self.resume_done else self.resume,

@@ -105,6 +105,16 @@ GATED_NEXT2 = ('<button type="button" onclick="if (document.querySelector(\'#tos
 
 POSTAL = '<label for="pc">Postal code</label><input id="pc" name="postal_code" required>'
 
+# A page that draws its form client-side after the address has loaded, as
+# Workday's My Information does; and one that never draws it.
+_FORM1 = PAGE1.split("<h1>Step 1 of 3</h1>", 1)[1].split(CLICKS_JS, 1)[0]
+LATE1 = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<h1>Step 1 of 3</h1><div id="app"><p>Loading…</p></div>
+<script>setTimeout(() => {{ document.getElementById('app').innerHTML = {_FORM1!r}; }}, 1500);</script>
+{CLICKS_JS}</body></html>"""
+NEVER1 = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<h1>Step 1 of 3</h1><div id="app"><p>Loading…</p></div>{CLICKS_JS}</body></html>"""
+
 
 def _site(marketing="", email_on_2=False, city_on_3=False, city_optional=False, box_on_2="",
           postal_on_2=False):
@@ -379,6 +389,44 @@ def test_a_pause_on_the_final_page_still_lets_the_terms_box_be_ticked():
     check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
           f"submitted after a pause on the final page ({out.status}, {out.reason}, {clicks})")
     check(len(jack.bodies) == 1 and "City" in jack.bodies[0], f"one pause, for the city ({jack.bodies})")
+    check.done()
+
+
+def test_a_form_that_renders_late_is_scanned_once_it_appears():
+    # Jack, 2026-10-26: the scan ran before Workday had drawn My Information
+    # and the job parked on "no fields". The wizard now waits, bounded, for
+    # a fillable control. Page one renders its form 1.5 s after loading;
+    # on 473ef65 the run parked at once with "a page with no fields, no
+    # Next and no Submit" and pressed nothing.
+    check = Checks()
+
+    def jack_types_the_city(page, body):
+        if "City" in body:
+            page.fill("#city", "Springfield")
+    site = _site(); site["/apply"] = LATE1
+    out, jack, clicks, ticks, url = _run(site, "/apply", jack_types_the_city)
+    print(out.status, out.reason, out.log)
+    check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
+          f"the late form was scanned, filled and the run went on ({out.status}, {out.reason}, {clicks})")
+    check(any(line.startswith("waited ") and "for the form to render" in line for line in out.log),
+          f"the wait is logged ({out.log})")
+    check.done()
+
+
+def test_a_form_that_never_renders_still_parks_after_the_wait():
+    # The bound: with no fillable control after FORM_WAIT_S the scan runs
+    # and parks with the same reason as before, nothing pressed. The wait
+    # is shortened for the test. On 473ef65 the park came at once with no
+    # "no form appeared" line.
+    check = Checks()
+    site = _site(); site["/apply"] = NEVER1
+    with mock.patch.object(wizard, "FORM_WAIT_S", 2):
+        out, jack, clicks, ticks, url = _run(site, "/apply", act=None)
+    check(out.status == "needs_you" and out.reason == "a page with no fields, no Next and no Submit",
+          f"parked with the same reason ({out.status}, {out.reason})")
+    check("no form appeared within 2 s" in out.log, f"the timeout is logged ({out.log})")
+    check(clicks == [] and url.endswith("/apply") and out.pages_filled == 0,
+          f"nothing pressed, nothing filled, still on the page ({clicks}, {url})")
     check.done()
 
 

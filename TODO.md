@@ -2060,3 +2060,28 @@ Commit 451577d (the Google test repair): VERDICT FLAG, 1 low, taken in
 the next commit: the repaired test asserted only that the stop named
 City, so any City stop would pass; it now asserts "required, but
 empty" too, the path the repair depends on.
+
+## Round of 2026-10-26 (after the General Motors GUI run)
+
+Item 1 (scan timing). Cause, in the code: `wizard._loop` called
+`pipeline.fill_page` the moment `pages.fill_allowed` said the page was
+fillable, with nothing between them that waits for a form; and the
+resume after an account pause (`continue_from` -> `_loop`, pending kind
+"account") settles nothing before the top of the loop. Workday's /apply
+address loads a shell and draws My Information afterwards, so the scan
+found no fields, `fill_page` returned None, `_advance` found no Next
+and no Submit (not drawn yet either), the chooser found nothing, and
+the run parked with "a page with no fields, no Next and no Submit".
+Fix: `wizard._await_form` polls a yes/no probe (one visible, enabled,
+fillable control on the page; the scan's own shape, stamping nothing)
+every 500 ms for up to FORM_WAIT_S = 20 s before the scan, on every
+page the wizard would fill. 20 s because the form appears within a few
+seconds on Workday and the wait covers a slow network several times
+over, while a page with no form (a chooser, a dead end) pays it once;
+the 60-minute cap still bounds the run. The wait only delays the scan:
+it never changes what the scan finds, clicks nothing and navigates
+nowhere; on timeout the scan runs and parks with the same reason, and
+the log says "no form appeared within 20 s". Tests: a mock page that
+draws its form 1.5 s after loading is filled and the run goes on; one
+that never draws it parks with the same reason after the (shortened)
+wait, nothing pressed. Both fail on 473ef65.
