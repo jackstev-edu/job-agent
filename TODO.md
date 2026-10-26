@@ -2362,3 +2362,11 @@ touch marks and identity records that read as Jack's (no path turns
 them into a review, since every baseline is taken after accounts ran;
 pre-existing); the CAPTCHA-still-shown-on-a-resumed-pass branch is
 untested; the redundant for_model filter stays.
+
+Commit 1aeb418 (the takes): VERDICT FLAG, 1 minor, 1 pre-existing
+note, logged: `shadow` is imported unused in the new pipeline test;
+the "moved" pause path (a page that didn't move on after Next) resumes
+with no fill and no hold, so a page the tab shows after that pause is
+scanned and filled with no protection (pre-existing; the same shape
+as the parks before item 2; decision for Jack whether the hold should
+apply there too).
