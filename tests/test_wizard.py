@@ -477,6 +477,54 @@ def test_a_form_drawn_with_a_captcha_at_the_same_address_is_checked_before_any_s
     check.done()
 
 
+class _FakePage:
+    """A page whose probes are scripted: False (no form), True (a form), or "raise"."""
+
+    def __init__(self, probes, url=f"{HOST}/apply"):
+        self.probes, self.url = list(probes), url
+
+    def evaluate(self, js):
+        step = self.probes.pop(0) if self.probes else False
+        if step == "raise":
+            raise RuntimeError("navigating")
+        return step
+
+    def wait_for_timeout(self, ms):
+        import time
+        time.sleep(ms / 1000)
+
+
+def test_the_form_wait_never_ends_in_a_scan_on_a_probe_that_could_not_read_the_page():
+    # Fold of 5a19d68's review: a probe that raised (the page mid-navigation)
+    # in the last poll before the timeout used to fall through to the
+    # timeout's "scan anyway"; now it ends the wait with "check again".
+    # No browser: the probes are scripted. On 5a19d68 the raise case
+    # returned True.
+    check = Checks()
+
+    def wait(probes):
+        w = wizard.Wizard(_FakePage(probes), _profile(), url=f"{HOST}/apply", portal="generic",
+                          portal_method="default", company="", role="", resume=None, posting_text="",
+                          pauser=pause.Pauser(notify_fn=lambda *a, **k: None, echo=lambda *a, **k: None),
+                          echo=lambda *a, **k: None)
+        with mock.patch.object(wizard, "FORM_WAIT_S", 0.5), mock.patch.object(wizard, "FORM_POLL_MS", 200):
+            return w._await_form(f"{HOST}/apply"), w.out.log
+    got, log = wait([False, False, False, "raise"])
+    check(got is False and any("couldn't be read as the form wait ended" in line for line in log),
+          f"a raise on the last probe: check again, not a scan ({got}, {log})")
+    got, log = wait([False, False, False, False])
+    check(got is True and any(line.startswith("no form appeared within") for line in log),
+          f"a readable page with no form at the timeout: the scan runs and parks ({got}, {log})")
+    got, log = wait([False, True])
+    check(got is False and any("rendered after" in line for line in log),
+          f"a form that appeared after a poll: check again ({got}, {log})")
+    got, log = wait([True])
+    check(got is True and log == [], f"a form at the first probe: scan now ({got}, {log})")
+    got, log = wait(["raise", "raise", True])
+    check(got is False, f"an unreadable page, then a form after a poll: check again ({got})")
+    check.done()
+
+
 def test_a_page_that_keeps_changing_parks_after_the_recheck_cap():
     # A page whose address ticks every 150 ms ends every pass in the wait;
     # after FORM_RECHECK_CAP passes in a row the job parks instead of

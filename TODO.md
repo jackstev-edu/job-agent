@@ -2185,3 +2185,24 @@ tests fail on 5a19d68. Note for Jack's next run: his link was the
 /apply address, whose title is the site's; the role will show only
 when Workday titles that page with the job, or from the posting page
 if the link is the posting.
+
+Commit 5a19d68 (the second fix of item 1): VERDICT FLAG, 1 medium, 3
+low (conditional on tests/test_wizard.py + tests/test_resume.py, which
+the reviewer's own run did not finish; the main session's run of that
+set on the same code: 32 passed). Folded in the next commit (a route
+by which the filler could type into a sign-in or Google page): a probe
+that raised in the last poll before the timeout fell through to the
+timeout's "scan anyway"; now a probe that couldn't read the page never
+ends the wait in a scan, and the timeout runs the scan only on a page
+read at `here` with no fillable control (a scripted-page test, no
+browser). Logged, not changed: on a timeout a page that re-rendered at
+the same address with no fillable control (an interstitial) is scanned
+and `_advance` runs find_next / the chooser on it before the CAPTCHA
+check is made again on the next pass, as before item 1 (Jack's "same
+'no fields' park on timeout" constrains the fix); `rechecks` is reset
+only after a scan, not on the Google / accounts passes, so alternating
+passes can reach the cap and park with the "kept changing" reason
+(toward a stop); the fails-on-previous statements are read off the
+prior commits, not run by the reviewer (the main session ran them: the
+CAPTCHA test fails on 16e359e, the ticking test spun there until a
+240 s limit).

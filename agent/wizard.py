@@ -300,7 +300,8 @@ class Wizard:
         navigation. `here` is the address the page checks (CAPTCHA, Google,
         host and page kind) were made on. Returns True only when a fillable
         control is there at the first probe (the checks saw this page) or
-        when the wait timed out (the scan runs and parks as before). It
+        when the wait timed out on a page it could read, at `here`, with no
+        fillable control (the scan runs and parks as before). It
         returns False, and the loop makes every check again from the top,
         the moment the address differs from `here` or as soon as the form
         appears after a poll: a page that drew a sign-in dialog or a
@@ -317,15 +318,22 @@ class Wizard:
                 if self.page.url != here:
                     self.out.log.append("the page moved while the form was awaited: checked again")
                     return False
-                if self.page.evaluate(_HAS_FIELDS_JS):
-                    if waited:
-                        self.out.log.append(f"the form rendered after {time.monotonic() - start:.1f}s: "
-                                            f"checked again")
-                        return False
-                    return True
+                found = bool(self.page.evaluate(_HAS_FIELDS_JS))
             except Exception:
-                pass
+                found = None            # unreadable (mid-navigation): never a scan on this probe
+            if found:
+                if waited:
+                    self.out.log.append(f"the form rendered after {time.monotonic() - start:.1f}s: "
+                                        f"checked again")
+                    return False
+                return True
             if time.monotonic() - start >= FORM_WAIT_S:
+                if found is None:
+                    # The last probe couldn't read the page: the scan must
+                    # not run on whatever the tab lands on. Every check
+                    # again (fold of 5a19d68's review).
+                    self.out.log.append("the page couldn't be read as the form wait ended: checked again")
+                    return False
                 self.out.log.append(f"no form appeared within {FORM_WAIT_S} s")
                 return True
             waited += 1
