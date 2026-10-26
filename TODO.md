@@ -2245,3 +2245,20 @@ advances a fake clock that the wait reads, so the timeout falls on a
 known probe. The residual gap (a page that re-renders at the same
 address with no fillable control between the last probe and the scan)
 stays as logged.
+
+Commit 58d7ab7 (the fix of item 2's BLOCK): VERDICT FLAG, 4 FLAGs, 1
+minor, folded in the next commit: a park whose page shape couldn't be
+read (at the park or at the resume) kept the stale fill (safe only
+because the gate stops on an unreadable record; the comment claimed a
+fresh scan): now scanned afresh; a tab Jack closed during a park made
+the resume raise out of continue_from (the queue loop marked the job
+failed) instead of the "tab closed" park; the CAPTCHA check and the
+job-board refusal now run on every pass, a resumed (skip_fill) pass
+included, so a CAPTCHA drawn on a filled page after its park is seen
+before Next (the Google-host, off-host and page-kind checks stay on
+the fill passes, bounded on a resumed one by the shape comparison);
+a resumed fill's own events ride along to a later park. Logged:
+tests/test_gui.py::test_the_page_and_its_checks failed once in the
+reviewer's non-browser run with ConnectionAbortedError on the loopback
+socket and passed alone; neither file is in this round's diffs; a
+flake to watch.

@@ -301,6 +301,43 @@ def test_a_park_after_a_fill_is_judged_again_before_next_and_rescanned_if_the_pa
     check.done()
 
 
+def test_a_resume_on_a_closed_tab_or_an_unknown_shape_is_safe():
+    # Fold of 58d7ab7's review: a tab Jack closed during a park resumes
+    # into the "tab closed" park, not a crash; a park whose page shape
+    # couldn't be read is scanned afresh rather than advanced on the
+    # stale fill. On 58d7ab7 the first raised out of continue_from and the
+    # second kept the fill.
+    check = Checks()
+    site = _gui_site(); site["/nobuttons"] = NO_BUTTONS
+    p, browser, ctx = _open(site)
+    page = ctx.new_page(); page.goto(f"{HOST}/nobuttons")
+    state = gui.State(); [job_id] = state.start([f"{HOST}/nobuttons"], dry=False)
+    w = _wizard(page, state, job_id, "/nobuttons")
+    with mock.patch("agent.classify.classify_fields", classify_by_label), \
+            mock.patch("agent.mapper.map_fields", map_from_profile):
+        out = w.run()
+        check(out.status == wizard.WAITING and w.pending and w.pending["kind"] == "parked"
+              and w.pending["fill"] is not None, f"parked after the fill ({out.status}, {out.reason})")
+        page.close()
+        state.request_continue(job_id)
+        out = w.continue_from(state.take_resume(job_id))
+    check(out.status == wizard.WAITING and out.reason == "the tab closed"
+          and state.snapshot()["jobs"][0]["pause"]["kind"] == "parked",
+          f"a closed tab parks again, with Continue, no crash ({out.status}, {out.reason})")
+    browser.close(); p.stop()
+
+    def jack_adds_the_button(page, state, job_id):
+        page.evaluate("""() => { const b = document.createElement('button'); b.type = 'submit';
+          b.textContent = 'Submit application'; document.querySelector('form').appendChild(b);
+          document.querySelector('form').addEventListener('submit', e => { e.preventDefault(); location.href = '/thanks'; }); }""")
+    with mock.patch("agent.follow.read_shape", lambda target: None):
+        out, pauses, url, clicks, w = _drive(site, "/nobuttons", [jack_adds_the_button])
+    check(out.status == "submitted" and "the page changed since the park: scanned afresh" in out.log
+          and out.pages_filled == 2,
+          f"an unreadable shape: scanned afresh, then on to Submit ({out.status}, {out.reason}, {out.log})")
+    check.done()
+
+
 def test_an_intake_park_waits_in_its_tab_with_continue():
     # A link intake refuses (LinkedIn Easy Apply) is a needs-you row with
     # Continue in GUI mode; Continue starts the wizard on the tab, which

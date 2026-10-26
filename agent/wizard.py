@@ -729,8 +729,11 @@ class Wizard:
         info, self.resume_info = self.resume_info or {}, None
         fill: pipeline.PageFill | None = None
         skip_fill = False
+        carried_events: list[dict] = []   # a resumed fill's own events
         rechecks = 0            # passes in a row that ended in the form wait
         if pending:
+            if page.is_closed():
+                raise _Parked("the tab closed")
             kind = pending.get("kind")
             self.out.log.append(f"resumed after a {kind} pause")
             if kind == "account" and pending.get("wants_code") and info.get("code"):
@@ -756,18 +759,20 @@ class Wizard:
                 skip_fill = True
             elif kind == "parked":
                 fill = pending.get("fill")
-                if fill is not None and self._moved(pending.get("shape")):
-                    # Jack moved the page on (or its shape is unknown): the
-                    # fill was of another page; this one is scanned afresh.
+                if fill is not None and (pending.get("shape") is None or self._moved(pending["shape"])):
+                    # Jack moved the page on, or its shape at the park (or
+                    # now) couldn't be read: the fill is not vouched for;
+                    # this page is scanned afresh.
                     self.out.log.append("the page changed since the park: scanned afresh")
                     fill = None
                 if fill is not None:
                     # The page was filled before the stop and is still that
                     # page: judged again (Jack may have changed a box), then
                     # back to Next / Submit for that fill, never a second
-                    # fill of it.
+                    # fill of it. Its events ride along for a later park.
                     self._remap(fill, pending, info)
-                    self._gate_page(fill, pending.get("page_events") or [])
+                    carried_events = list(pending.get("page_events") or [])
+                    self._gate_page(fill, carried_events)
                     skip_fill = True
                 # Otherwise the top of the loop: the page as the tab shows
                 # it now, scanned afresh.
@@ -779,19 +784,25 @@ class Wizard:
                 if browser_mod.page_readable(page) and not browser_mod.detect_captcha(page):
                     self._handled_by_jack("captcha", None)
         while True:
-            page_events: list[dict] = []
+            page_events: list[dict] = carried_events if skip_fill else []
+            carried_events = []
             if self._over_time():
                 raise _Parked("over the 60-minute cap of the agent's own time for one application")
             if self.out.pages_filled >= STEP_CAP:
                 raise _Parked(f"over the {STEP_CAP}-page cap")
             if page.is_closed():
                 raise _Parked("the tab closed")
+            try:
+                here = page.url         # the address every check below is made on
+            except Exception:
+                raise _Parked("the page couldn't be read")
+            # On every pass, a resumed one included: a CAPTCHA drawn since
+            # pauses, and a job board's page is never gone on with.
+            self._captcha()
+            board = intake.job_board(page.url)
+            if board:
+                raise _Parked(f"{board}: the application stays on the job board")
             if not skip_fill:
-                try:
-                    here = page.url     # the address every check below is made on
-                except Exception:
-                    raise _Parked("the page couldn't be read")
-                self._captcha()
                 if google.is_google_host(page.url):
                     # A same-tab Google sign-in: walked by structure, or a
                     # pause; never filled, never typed into. Checked by
@@ -811,14 +822,6 @@ class Wizard:
                 verdict = pages.fill_allowed(page, self.url, None)
                 if verdict in (pages.LINKEDIN, pages.OFF_HOST):
                     raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
-                # A job board's own pages are never filled (CLAUDE.md:
-                # LinkedIn Easy Apply and Handshake's built-in applications
-                # are refused); intake refuses them before the wizard, and
-                # a Continue on such a park lands here (fix of 16e359e's
-                # BLOCK).
-                board = intake.job_board(page.url)
-                if board:
-                    raise _Parked(f"{board}: the application stays on the job board")
                 if verdict in (pages.ACCOUNT, pages.SIGN_IN, pages.VERIFICATION):
                     res = accounts.handle(page, verdict, self.prof, self.pauser)
                     self.out.events += res.events
