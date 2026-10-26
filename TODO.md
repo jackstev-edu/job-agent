@@ -2262,3 +2262,21 @@ tests/test_gui.py::test_the_page_and_its_checks failed once in the
 reviewer's non-browser run with ConnectionAbortedError on the loopback
 socket and passed alone; neither file is in this round's diffs; a
 flake to watch.
+
+Commit f0f0e0d (the fold): VERDICT FLAG (conditional on tests the
+reviewer's own run didn't finish; the main session's run of that set on
+the same code: 36 passed, non-browser 101), 3 FLAGs, 2 minor, folded in
+the next commit: a page scanned afresh after a park was filled again
+over any box Jack had corrected in the tab (now `pipeline.fill_page`'s
+`protect_touched`, used by the wizard on that path, leaves every box
+with his touch mark out of the plan and the wizard counts it as his,
+with a test: his "Jacques" survives); a gate or final resume skipped
+the Google-host and off-host / LinkedIn refusals (now the address
+refusals run on every pass, before the fill-only checks; the TODO line
+that claimed the shape comparison covered them was wrong for those two
+kinds); a CAPTCHA pause on a resumed pass dropped the fill in hand (it
+now rides along in the pause, and solving the CAPTCHA resumes at the
+gate for that fill; no test for this path, the CAPTCHA-on-a-resumed-
+page case is hard to stage); `page.url` re-read after `here` (now
+`here` throughout); the closed-tab test's browser leaked on a failed
+check (try / finally).

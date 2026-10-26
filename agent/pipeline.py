@@ -20,7 +20,7 @@ from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import (adapters, browser as browser_mod, classify, extract, filler, mapper, outcome,
+from . import (adapters, browser as browser_mod, classify, extract, filler, ledger, mapper, outcome,
                sensitive, shadow)
 
 if TYPE_CHECKING:
@@ -235,15 +235,21 @@ class PageFill:
     snapshot: dict = dataclass_field(default_factory=dict)   # read-back after filling
     census: list[dict] = dataclass_field(default_factory=list)  # checkboxes after filling
     lines: list[str] = dataclass_field(default_factory=list) # what to print
+    touched: list[str] = dataclass_field(default_factory=list)  # refs left as Jack's (protect_touched)
 
 
 def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | None,
-              posting_text: str, portal: str = "generic") -> PageFill | None:
+              posting_text: str, portal: str = "generic", protect_touched: bool = False) -> PageFill | None:
     """
     Fill the page the agent is on: scan, upload the resume into the one box
     labelled as the resume (if `resume` is given), classify, route, map,
     fill, read back. None when the page has no fields. Clicks nothing but
     what the filler clicks (rows, option buttons, checkboxes it is allowed).
+    With `protect_touched` (the wizard's fresh scan of a page after a
+    park, Jack, 2026-10-26), a field whose element carries a touch mark
+    (a trusted input of Jack's; the filler's own input is marked as the
+    agent's) is left out of the plan and listed in `touched`, so his
+    correction in the tab is never typed over.
     """
     fields = extract.extract_fields(page, guard)
     if not fields:
@@ -276,6 +282,17 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
     ask_mapper(for_model, prof, posting_text, new_after_upload, plan)
     prefill = prefill_census(page)
     plan = fillable_plan(fields, plan)
+    touched: list[str] = []
+    if protect_touched:
+        try:
+            marked = page.evaluate(ledger.TOUCHED_JS, [[f["ref"] for f in fields], ledger.TOUCH_ATTR])
+        except Exception:
+            marked = []
+        for f in fields:
+            if f["ref"] in (marked or []) and f["ref"] in plan:
+                plan.pop(f["ref"])
+                touched.append(f["ref"])
+                lines.append(f"left as yours (touched in the tab): '{(f.get('label') or f.get('name') or '')[:60]}'")
     rows = filler.run_plan(page, fields, plan)
     step = shadow.step_entry(fields, categories, plan, flags, rows, prefill_census=prefill)
     try:
@@ -288,7 +305,7 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
         census = []
     return PageFill(fields=fields, categories=categories, plan=plan, flags=flags, rows=rows,
                     step=step, events=events, uploaded=uploaded, snapshot=snap,
-                    census=census if isinstance(census, list) else [], lines=lines)
+                    census=census if isinstance(census, list) else [], lines=lines, touched=touched)
 
 
 def has_next(page: "Page", portal: str) -> bool:

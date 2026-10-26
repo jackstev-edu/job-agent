@@ -42,6 +42,16 @@ MARK_ATTR = "data-ja-filled"
 # into, change or click, so a field you touched never reaches a model, even
 # once you've cleared it.
 TOUCH_ATTR = "data-ja-touched"
+
+# Which of these refs carry a trusted-input mark on their own element (set
+# only for isTrusted events while the agent isn't filling): Jack's touches.
+# Refs only; nothing of the field is read.
+TOUCHED_JS = r"""
+([refs, attr]) => refs.filter(r => {
+  const el = document.querySelector(`[data-ja-ref="${CSS.escape(r)}"]`);
+  return !!el && el.hasAttribute(attr);
+})
+"""
 # Put on what gets typed in, pasted into or changed (trusted events only)
 # while the agent is filling: that's you, unless the agent then marks the
 # field as filled (MARK_ATTR). The agent's own text sets are untrusted.

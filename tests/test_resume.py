@@ -313,18 +313,20 @@ def test_a_resume_on_a_closed_tab_or_an_unknown_shape_is_safe():
     page = ctx.new_page(); page.goto(f"{HOST}/nobuttons")
     state = gui.State(); [job_id] = state.start([f"{HOST}/nobuttons"], dry=False)
     w = _wizard(page, state, job_id, "/nobuttons")
-    with mock.patch("agent.classify.classify_fields", classify_by_label), \
-            mock.patch("agent.mapper.map_fields", map_from_profile):
-        out = w.run()
-        check(out.status == wizard.WAITING and w.pending and w.pending["kind"] == "parked"
-              and w.pending["fill"] is not None, f"parked after the fill ({out.status}, {out.reason})")
-        page.close()
-        state.request_continue(job_id)
-        out = w.continue_from(state.take_resume(job_id))
-    check(out.status == wizard.WAITING and out.reason == "the tab closed"
-          and state.snapshot()["jobs"][0]["pause"]["kind"] == "parked",
-          f"a closed tab parks again, with Continue, no crash ({out.status}, {out.reason})")
-    browser.close(); p.stop()
+    try:
+        with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                mock.patch("agent.mapper.map_fields", map_from_profile):
+            out = w.run()
+            check(out.status == wizard.WAITING and w.pending and w.pending["kind"] == "parked"
+                  and w.pending["fill"] is not None, f"parked after the fill ({out.status}, {out.reason})")
+            page.close()
+            state.request_continue(job_id)
+            out = w.continue_from(state.take_resume(job_id))
+        check(out.status == wizard.WAITING and out.reason == "the tab closed"
+              and state.snapshot()["jobs"][0]["pause"]["kind"] == "parked",
+              f"a closed tab parks again, with Continue, no crash ({out.status}, {out.reason})")
+    finally:
+        browser.close(); p.stop()
 
     def jack_adds_the_button(page, state, job_id):
         page.evaluate("""() => { const b = document.createElement('button'); b.type = 'submit';
@@ -335,6 +337,45 @@ def test_a_resume_on_a_closed_tab_or_an_unknown_shape_is_safe():
     check(out.status == "submitted" and "the page changed since the park: scanned afresh" in out.log
           and out.pages_filled == 2,
           f"an unreadable shape: scanned afresh, then on to Submit ({out.status}, {out.reason}, {out.log})")
+    check.done()
+
+
+def test_a_fresh_scan_after_a_park_leaves_jacks_touched_boxes_alone():
+    # Fold of f0f0e0d's review: a page scanned afresh after a park (here
+    # its shape couldn't be read) is filled again, and that fill must not
+    # type over a box Jack corrected in the tab; his box is counted as
+    # his. On f0f0e0d the agent's value was typed over his.
+    check = Checks()
+    site = _gui_site(); site["/nobuttons"] = NO_BUTTONS
+
+    def jack_corrects_first_name(page, state, job_id):
+        page.fill("#fn", "Jacques")
+    with mock.patch("agent.follow.read_shape", lambda target: None):
+        p, browser, ctx = _open(site)
+        try:
+            page = ctx.new_page(); page.goto(f"{HOST}/nobuttons")
+            state = gui.State(); [job_id] = state.start([f"{HOST}/nobuttons"], dry=False)
+            w = _wizard(page, state, job_id, "/nobuttons")
+            with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                    mock.patch("agent.mapper.map_fields", map_from_profile):
+                out = w.run()
+                check(out.status == wizard.WAITING and page.input_value("#fn") == "Test",
+                      f"filled, then parked ({out.status}, {out.reason})")
+                jack_corrects_first_name(page, state, job_id)
+                state.request_continue(job_id)
+                out = w.continue_from(state.take_resume(job_id))
+            value = page.input_value("#fn")
+            by_label = {f["label"]: f["ref"] for st in out.steps for f in st["fields"]}
+            new_ref = out.steps[-1]["fields"][0]["ref"] if out.steps else None
+        finally:
+            browser.close(); p.stop()
+    check(out.status == wizard.WAITING and "the page changed since the park: scanned afresh" in out.log,
+          f"scanned afresh, parked again ({out.status}, {out.reason}, {out.log})")
+    check(value == "Jacques", f"Jack's correction was not typed over ({value!r})")
+    check(any(line.startswith("left as yours (touched in the tab): 'First Name'") for line in out.log),
+          f"the protected box is logged ({out.log})")
+    check(out.pages_filled == 2 and new_ref in w.human_reviewed,
+          f"the second fill counts his box as his ({out.pages_filled}, {w.human_reviewed})")
     check.done()
 
 

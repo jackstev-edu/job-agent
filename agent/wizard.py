@@ -127,12 +127,7 @@ _HAS_FIELDS_JS = r"""
 # agent isn't filling). The mark on a wrapper doesn't count here: in follow
 # mode over-marking keeps a field from the model, but here a mark waives a
 # stop, so only the field's own element says anything. Refs only.
-_TOUCHED_JS = r"""
-([refs, attr]) => refs.filter(r => {
-  const el = document.querySelector(`[data-ja-ref="${CSS.escape(r)}"]`);
-  return !!el && el.hasAttribute(attr);
-})
-"""
+_TOUCHED_JS = ledger.TOUCHED_JS
 
 
 @dataclass
@@ -211,6 +206,7 @@ class Wizard:
         self.uploaded: dict | None = {}
         self.resume_done = False
         self.pending: dict | None = None        # where a deferred pause left off
+        self._protect_touched = False           # the next fill leaves Jack's touched boxes alone
         self.resume_info: dict | None = None    # what Jack gave in the GUI for that pause
         self.active_s = 0.0                     # the agent's own time, pauses excluded
         self._tick: float | None = None
@@ -280,16 +276,21 @@ class Wizard:
                 n += 1
         return n
 
-    def _captcha(self) -> None:
+    def _captcha(self, fill: "pipeline.PageFill | None" = None,
+                 page_events: list[dict] | None = None) -> None:
         found = browser_mod.detect_captcha(self.page)
         if not found:
             return
         ev = {"kind": "captcha", "detail": found, "handled": None}
         self.out.events.append(ev)
+        # A fill in hand (a resumed pass) rides along, so solving the
+        # CAPTCHA resumes at the gate for that fill, not at a second fill.
+        extra = ({"fill": fill, "page_events": list(page_events or []),
+                  "shape": follow.read_shape(self.page)} if fill is not None else None)
         self._pause("captcha", f"{found} on the page. Solve it in the browser.",
                     prompt="Press Enter when it's solved: ",
                     until=lambda: browser_mod.page_readable(self.page)
-                    and not browser_mod.detect_captcha(self.page))
+                    and not browser_mod.detect_captcha(self.page), extra=extra)
         if not browser_mod.page_readable(self.page) or browser_mod.detect_captcha(self.page):
             raise _Parked("a CAPTCHA wasn't solved (or the page couldn't be read)")
         ev["handled"] = "jack"
@@ -720,6 +721,30 @@ class Wizard:
         self.out.log.append(f"re-scanned after other jobs ran: {len(pairs)} of {len(fill.fields)} "
                             f"fields matched")
 
+    def _resume_fill(self, pending: dict, info: dict) -> tuple:
+        """
+        Where a pause that held a fill resumes. The page was filled before
+        the stop: if it is still that page (same shape as at the pause),
+        it is judged again (Jack may have changed a box), then the resume
+        goes back to Next / Submit for that fill, never a second fill of
+        it, its events riding along for a later park. If Jack moved the
+        page on, or its shape couldn't be read then or now, the fill is
+        not vouched for: the page is scanned afresh, and that scan leaves
+        every box he touched alone (protect_touched) and counts it as his.
+        Returns (fill or None, skip_fill, carried events).
+        """
+        fill = pending.get("fill")
+        if fill is None:
+            return None, False, []
+        if pending.get("shape") is None or self._moved(pending["shape"]):
+            self.out.log.append("the page changed since the park: scanned afresh")
+            self._protect_touched = True
+            return None, False, []
+        self._remap(fill, pending, info)
+        carried = list(pending.get("page_events") or [])
+        self._gate_page(fill, carried)
+        return fill, True, carried
+
     def _over_time(self) -> bool:
         return self.active_s + (self.clock() - (self._tick or self.clock())) > TIME_CAP_S
 
@@ -758,24 +783,7 @@ class Wizard:
                     self._handled_by_jack("gate_pause", "final page")
                 skip_fill = True
             elif kind == "parked":
-                fill = pending.get("fill")
-                if fill is not None and (pending.get("shape") is None or self._moved(pending["shape"])):
-                    # Jack moved the page on, or its shape at the park (or
-                    # now) couldn't be read: the fill is not vouched for;
-                    # this page is scanned afresh.
-                    self.out.log.append("the page changed since the park: scanned afresh")
-                    fill = None
-                if fill is not None:
-                    # The page was filled before the stop and is still that
-                    # page: judged again (Jack may have changed a box), then
-                    # back to Next / Submit for that fill, never a second
-                    # fill of it. Its events ride along for a later park.
-                    self._remap(fill, pending, info)
-                    carried_events = list(pending.get("page_events") or [])
-                    self._gate_page(fill, carried_events)
-                    skip_fill = True
-                # Otherwise the top of the loop: the page as the tab shows
-                # it now, scanned afresh.
+                fill, skip_fill, carried_events = self._resume_fill(pending, info)
             elif kind == "captcha":
                 # Only once the page can be read and shows no CAPTCHA;
                 # otherwise the top of the loop pauses again and the event
@@ -783,6 +791,8 @@ class Wizard:
                 # detect_captcha, so readability is checked first).
                 if browser_mod.page_readable(page) and not browser_mod.detect_captcha(page):
                     self._handled_by_jack("captcha", None)
+                    if pending.get("fill") is not None:
+                        fill, skip_fill, carried_events = self._resume_fill(pending, info)
         while True:
             page_events: list[dict] = carried_events if skip_fill else []
             carried_events = []
@@ -797,13 +807,21 @@ class Wizard:
             except Exception:
                 raise _Parked("the page couldn't be read")
             # On every pass, a resumed one included: a CAPTCHA drawn since
-            # pauses, and a job board's page is never gone on with.
-            self._captcha()
-            board = intake.job_board(page.url)
+            # pauses (the fill in hand rides along), a job board's page is
+            # never gone on with, and a page that left the application's
+            # site (another host, LinkedIn, Google's) is never advanced.
+            self._captcha(fill if skip_fill else None, page_events)
+            board = intake.job_board(here)
             if board:
                 raise _Parked(f"{board}: the application stays on the job board")
+            on_google = google.is_google_host(here)
+            if on_google and skip_fill:
+                raise _Parked("Google's site: the page left the application's site")
+            verdict = None if on_google else pages.fill_allowed(page, self.url, None)
+            if verdict in (pages.LINKEDIN, pages.OFF_HOST):
+                raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
             if not skip_fill:
-                if google.is_google_host(page.url):
+                if on_google:
                     # A same-tab Google sign-in: walked by structure, or a
                     # pause; never filled, never typed into. Checked by
                     # address before anything else: a link in Google's own
@@ -819,9 +837,6 @@ class Wizard:
                         raise _Parked(res.reason)
                     browser_mod.settle(page, 800)
                     continue
-                verdict = pages.fill_allowed(page, self.url, None)
-                if verdict in (pages.LINKEDIN, pages.OFF_HOST):
-                    raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
                 if verdict in (pages.ACCOUNT, pages.SIGN_IN, pages.VERIFICATION):
                     res = accounts.handle(page, verdict, self.prof, self.pauser)
                     self.out.events += res.events
@@ -836,12 +851,20 @@ class Wizard:
                         raise _Parked("the page kept changing while the form was awaited")
                     continue            # the page moved or drew its form: every check above, again
                 rechecks = 0
+                protect, self._protect_touched = self._protect_touched, False
                 with self.activity.filling(page):
                     fill = pipeline.fill_page(page, self.prof, guard=self.guard,
                                               resume=None if self.resume_done else self.resume,
-                                              posting_text=self.posting_text, portal=self.portal)
+                                              posting_text=self.posting_text, portal=self.portal,
+                                              protect_touched=protect)
                 if fill is not None:
                     self.out.pages_filled += 1
+                    for ref in fill.touched:
+                        # A box with his touch mark on a page the agent filled
+                        # before: his answer, as after a pause (the filler's
+                        # own input never leaves that mark).
+                        if ref not in self.human_reviewed:
+                            self.human_reviewed.append(ref)
                     if fill.uploaded:
                         self.resume_done, self.uploaded = True, fill.uploaded
                     elif fill.uploaded is None:
