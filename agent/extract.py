@@ -628,18 +628,101 @@ def page_text(page: "Page", limit: int = 3000) -> str:
     return "\n".join(lines)[:limit]
 
 
+# A page title that names the site, not a job: never a role or a company
+# (Jack, 2026-10-26: Workday's /apply page is titled "Careers", and the
+# GUI row read "Role: Careers"). Compared as words, whole.
+_GENERIC_TITLES = {"careers", "career", "careers site", "career site", "careers home",
+                   "jobs", "job", "job search", "search jobs", "job opportunities",
+                   "workday", "myworkdayjobs", "home", "apply", "application", "apply now",
+                   "sign in", "log in", "login", "welcome", "untitled", "loading"}
+_TITLE_SEPARATORS = (" - ", " | ", " at ", " \u2013 ")
+# Workday: <tenant>.wd<N>.myworkdayjobs.com / myworkdaysite.com, and a job
+# path /<site>/job/<location>/<title-slug>_<req-id>[/apply].
+_WORKDAY_HOST = re.compile(r"^([a-z0-9][a-z0-9-]*)\.wd\d+\.(myworkdayjobs|myworkdaysite)\.com$", re.I)
+_WORKDAY_JOB_PATH = re.compile(r"/job/[^/]+/([^/]+?)(?:/apply[^/]*)?/?$", re.I)
+_WORKDAY_SLUG_PREFIX = "XMLNAME-"          # Workday's prefix on a slug that starts with a digit
+
+
+def _title_words(text: str) -> str:
+    """NFKC, casefold, every non-alphanumeric run to one space: the words, whole."""
+    t = unicodedata.normalize("NFKC", str(text or "")).casefold()
+    return re.sub(r"[^0-9a-z]+", " ", t).strip()
+
+
+def workday_tenant(url: str) -> str:
+    """The Workday tenant named by the host (the employer's own subdomain), or ''."""
+    try:
+        host = (urlparse(url or "").hostname or "").lower()
+    except Exception:
+        return ""
+    m = _WORKDAY_HOST.match(host)
+    return m.group(1) if m else ""
+
+
+def workday_job_words(url: str) -> str:
+    """
+    The words of a Workday job path's title slug, or ''. The slug is the
+    title with its punctuation collapsed and a request id appended, so it
+    can corroborate a title but never stands in for one.
+    """
+    try:
+        path = urlparse(url or "").path or ""
+    except Exception:
+        return ""
+    m = _WORKDAY_JOB_PATH.search(path)
+    if not m:
+        return ""
+    slug = m.group(1)
+    if slug.startswith(_WORKDAY_SLUG_PREFIX):
+        slug = slug[len(_WORKDAY_SLUG_PREFIX):]
+    if "_" in slug:
+        slug = slug.rsplit("_", 1)[0]          # the trailing _JR-123456 request id
+    return _title_words(slug)
+
+
 def guess_role_and_company(page: "Page") -> tuple[str, str]:
-    """Best-effort read of the job title and employer, for the log."""
+    """
+    The job title and employer, for the log and the GUI row; blank beats
+    wrong (Jack, 2026-10-26). On a Workday host the employer is the tenant
+    the address names, as written, and the role is the page's title (or
+    one segment of it) only when its words equal the job slug's words in
+    the address; a title that names the site ("Careers") is never a role.
+    Elsewhere the title is split on the usual separators as before, and a
+    generic site name is dropped.
+    """
     try:
         title = page.title() or ""
     except Exception:
         return "", ""
+    try:
+        url = str(page.url or "")
+    except Exception:
+        url = ""
+    title = title.strip()
+    tenant = workday_tenant(url)
+    if tenant:
+        wanted = workday_job_words(url)
+        # The title whole, or what is left of it when one separator is cut
+        # at one point (a site name on either side), never a smaller piece.
+        candidates = [title]
+        for sep in _TITLE_SEPARATORS:
+            parts = title.split(sep)
+            for i in range(1, len(parts)):
+                candidates += [sep.join(parts[:i]).strip(), sep.join(parts[i:]).strip()]
+        role = next((c for c in candidates if c and wanted and _title_words(c) == wanted), "")
+        return role, tenant
     # Portal page titles are usually "Job Title - Company" or "Company - Title".
-    for sep in (" - ", " | ", " at ", " – "):
+    role, company = title, ""
+    for sep in _TITLE_SEPARATORS:
         if sep in title:
             left, right = title.split(sep, 1)
-            return left.strip(), right.strip()
-    return title.strip(), ""
+            role, company = left.strip(), right.strip()
+            break
+    if _title_words(role) in _GENERIC_TITLES:
+        role = ""
+    if _title_words(company) in _GENERIC_TITLES:
+        company = ""
+    return role, company
 
 
 # Rows a dropdown shows when it has nothing real to offer yet. Harvesting

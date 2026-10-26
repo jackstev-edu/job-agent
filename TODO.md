@@ -2160,3 +2160,28 @@ with a fixed reason instead of spinning to the 60-minute cap (the
 other low finding). Tests: a form drawn with an hCaptcha frame at the
 same address is caught by the CAPTCHA check before any scan; a page
 whose address ticks parks after the cap.
+
+Item 3 (intake on Workday URLs). Cause: `extract.guess_role_and_company`
+read the page's title alone; Workday's /apply page is titled with the
+site's name ("Careers"), which has no separator, so the whole title
+became the role and the company stayed blank. Fix, blank beats wrong:
+on a Workday host (<tenant>.wd<N>.myworkdayjobs.com / myworkdaysite.com)
+the company is the tenant the address names, as written in the address
+(a fact of the link, not a display name: "generalmotors"); the role is
+the page's title, or the title with one separator cut at one point (a
+site name on either side), only when its words equal the words of the
+job slug in the address (the slug is the title with punctuation
+collapsed, "XMLNAME-" prefixed when it starts with a digit and the
+request id appended, so it can corroborate a title but is never
+reconstructed into one). On any host a title that only names the site
+("Careers", "Jobs", "Sign In", ...) is never a role or a company; the
+"Title - Company" split is otherwise unchanged. Tests: fake pages (a
+title and an address, no browser, no fetch) with Jack's GM link as the
+fixture: the "Careers" title gives no role and "generalmotors"; a
+corroborated title is the role as written, alone or beside a site
+name; an uncorroborated one is not; generic titles on an ordinary host
+give nothing; ordinary titles split as before (a guard). The first two
+tests fail on 5a19d68. Note for Jack's next run: his link was the
+/apply address, whose title is the site's; the role will show only
+when Workday titles that page with the job, or from the posting page
+if the link is the posting.
