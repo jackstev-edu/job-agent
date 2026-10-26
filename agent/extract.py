@@ -637,9 +637,11 @@ _GENERIC_TITLES = {"careers", "career", "careers site", "career site", "careers 
                    "sign in", "log in", "login", "welcome", "untitled", "loading"}
 _TITLE_SEPARATORS = (" - ", " | ", " at ", " \u2013 ")
 # Workday: <tenant>.wd<N>.myworkdayjobs.com / myworkdaysite.com, and a job
-# path /<site>/job/<location>/<title-slug>_<req-id>[/apply].
+# path /<site>/job/<location>/<title-slug>_<req-id> or
+# /<site>/details/<title-slug>_<req-id>, alone or followed by /apply and
+# the apply flow's own segments (/apply/applyManually, ...).
 _WORKDAY_HOST = re.compile(r"^([a-z0-9][a-z0-9-]*)\.wd\d+\.(myworkdayjobs|myworkdaysite)\.com$", re.I)
-_WORKDAY_JOB_PATH = re.compile(r"/job/[^/]+/([^/]+?)(?:/apply[^/]*)?/?$", re.I)
+_WORKDAY_JOB_PATH = re.compile(r"/(?:job/[^/]+|details)/([^/]+?)(?:/apply(?:/[^/]+)*)?/?$", re.I)
 _WORKDAY_SLUG_PREFIX = "XMLNAME-"          # Workday's prefix on a slug that starts with a digit
 
 

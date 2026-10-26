@@ -24,6 +24,7 @@ Run from anywhere:  .venv/Scripts/python.exe tests/test_wizard.py
 """
 import contextlib
 import json
+import types
 from pathlib import Path
 from unittest import mock
 
@@ -478,10 +479,14 @@ def test_a_form_drawn_with_a_captcha_at_the_same_address_is_checked_before_any_s
 
 
 class _FakePage:
-    """A page whose probes are scripted: False (no form), True (a form), or "raise"."""
+    """
+    A page whose probes are scripted: False (no form), True (a form), or
+    "raise"; its waits advance a fake clock instead of sleeping, so the
+    timeout falls on a known probe whatever the machine's load.
+    """
 
     def __init__(self, probes, url=f"{HOST}/apply"):
-        self.probes, self.url = list(probes), url
+        self.probes, self.url, self.now = list(probes), url, 1000.0
 
     def evaluate(self, js):
         step = self.probes.pop(0) if self.probes else False
@@ -490,8 +495,7 @@ class _FakePage:
         return step
 
     def wait_for_timeout(self, ms):
-        import time
-        time.sleep(ms / 1000)
+        self.now += ms / 1000
 
 
 def test_the_form_wait_never_ends_in_a_scan_on_a_probe_that_could_not_read_the_page():
@@ -503,11 +507,16 @@ def test_the_form_wait_never_ends_in_a_scan_on_a_probe_that_could_not_read_the_p
     check = Checks()
 
     def wait(probes):
-        w = wizard.Wizard(_FakePage(probes), _profile(), url=f"{HOST}/apply", portal="generic",
+        page = _FakePage(probes)
+        w = wizard.Wizard(page, _profile(), url=f"{HOST}/apply", portal="generic",
                           portal_method="default", company="", role="", resume=None, posting_text="",
                           pauser=pause.Pauser(notify_fn=lambda *a, **k: None, echo=lambda *a, **k: None),
                           echo=lambda *a, **k: None)
-        with mock.patch.object(wizard, "FORM_WAIT_S", 0.5), mock.patch.object(wizard, "FORM_POLL_MS", 200):
+        # Probes at 0, 0.2, 0.4 and 0.6 s on the fake clock; the timeout
+        # check (0.5 s) falls after the fourth probe, by construction.
+        fake_time = types.SimpleNamespace(monotonic=lambda: page.now, sleep=lambda s: None)
+        with mock.patch.object(wizard, "FORM_WAIT_S", 0.5), mock.patch.object(wizard, "FORM_POLL_MS", 200), \
+                mock.patch.object(wizard, "time", fake_time):
             return w._await_form(f"{HOST}/apply"), w.out.log
     got, log = wait([False, False, False, "raise"])
     check(got is False and any("couldn't be read as the form wait ended" in line for line in log),

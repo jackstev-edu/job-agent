@@ -2223,3 +2223,25 @@ Continue) instead of a crash. Logged: the four new tests were read,
 not run, against 07113ca by the reviewer (the main session ran them:
 all four fail there); the cap parks and a closed tab offer a Continue
 that can only park again (decision for Jack).
+
+Commit 44b8669 (item 3): VERDICT FLAG, 2 low, 2 info. Taken in the
+next commit: the Workday job path pattern now also reads the apply
+flow's deeper addresses (/apply/applyManually, /apply/autofillWithResume,
+where Jack's next run will land after sign-in) and the /details/
+posting shape, with a case each. Logged: a title with two site names
+on different separators ("GM - <title> | Careers") gives a blank role
+(one separator is cut at one point; blank beats wrong); the words
+comparison collapses every non-alphanumeric run, broader than the
+stop checks' normalisation, and is confined to what the row and log
+display, never a gate, tick or click; the tenant string goes into the
+tracker row and the cover-letter draft as the company (a fact of the
+link, not page text).
+
+Commit c29085e (the fold): VERDICT FLAG, 1 low, taken in the next
+commit: the scripted-page test timed its probes with real sleeps, so a
+loaded machine could push the timeout onto an earlier probe and fail
+it spuriously (toward failing, never a false pass); the fake page now
+advances a fake clock that the wait reads, so the timeout falls on a
+known probe. The residual gap (a page that re-renders at the same
+address with no fillable control between the last probe and the scan)
+stays as logged.

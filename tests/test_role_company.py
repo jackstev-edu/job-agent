@@ -45,6 +45,17 @@ def test_workday_company_is_the_tenant_and_the_role_needs_the_address_to_agree()
         (_Page("Engineer", "https://acme.wd1.myworkdaysite.com/en-US/jobs/job/Austin/Engineer_R12"),
          ("Engineer", "acme"), "  ...and the matching title is the role"),
         (_Page("Careers", "https://acme.wd1.myworkdayjobs.com/Careers"), ("", "acme"), "a Workday site page with no job path"),
+        # The apply flow's deeper addresses and the newer /details/ posting
+        # shape carry the same slug (the review of 44b8669).
+        (_Page(GM_TITLE, GM.split("/apply", 1)[0] + "/apply/applyManually"), (GM_TITLE, "generalmotors"),
+         "the chooser's address after sign-in (/apply/applyManually)"),
+        (_Page(GM_TITLE, GM.split("/apply", 1)[0] + "/apply/autofillWithResume?x=1"), (GM_TITLE, "generalmotors"),
+         "  ...and /apply/autofillWithResume"),
+        (_Page(GM_TITLE, "https://generalmotors.wd5.myworkdayjobs.com/Careers_GM/details/"
+                         "XMLNAME-2027-Summer-Intern---Digital-Product--Embedded-and-Systems-Engineering_JR-202620513"),
+         (GM_TITLE, "generalmotors"), "the /details/ posting shape"),
+        (_Page("Careers", GM.split("/apply", 1)[0] + "/apply/applyManually"), ("", "generalmotors"),
+         "  ...still no role from a site-name title"),
     ]
     for page, want, what in cases:
         got = extract.guess_role_and_company(page)
