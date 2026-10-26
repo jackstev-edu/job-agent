@@ -31,8 +31,8 @@ from collections import Counter
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
-from . import (accounts, browser as browser_mod, chooser, extract, follow, gate, google, gui as gui_mod, ledger,
-               pages, pause as pause_mod, pipeline, submit as submit_mod)
+from . import (accounts, browser as browser_mod, chooser, extract, follow, gate, google, gui as gui_mod, intake,
+               ledger, pages, pause as pause_mod, pipeline, submit as submit_mod)
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -182,6 +182,7 @@ class _Parked(Exception):
     goes back to Next / Submit instead of filling the page again.
     """
     after_fill: "pipeline.PageFill | None" = None
+    page_events: list | None = None
 
 
 class Wizard:
@@ -564,7 +565,8 @@ class Wizard:
             return self._loop()
         except _Parked as e:
             if getattr(self.pauser, "deferring", False):
-                return self.park_for_continue(str(e), after_fill=e.after_fill)
+                return self.park_for_continue(str(e), after_fill=e.after_fill,
+                                              page_events=e.page_events)
             self.out.wizard = None
             return self._parked(str(e))
         except pause_mod.Deferred as e:
@@ -587,19 +589,23 @@ class Wizard:
         self.active_s += self.clock() - (self._tick or self.clock())
         return self.out
 
-    def park_for_continue(self, reason: str, *, after_fill=None) -> Outcome:
+    def park_for_continue(self, reason: str, *, after_fill=None, page_events=None) -> Outcome:
         """
         GUI mode (Jack, 2026-10-26): a park is a pause like any other. The
         row shows the reason with Continue; the tab stays open; nothing is
         clicked or navigated. Continue re-enters the loop at the top of
         the page (a fresh scan of what the tab shows now), or, when the
-        page had been filled before the stop, at Next / Submit for that
-        same fill. Also used by intake for a link it parked before the
-        wizard started, on the tab it left.
+        page had been filled before the stop and still has the shape it
+        had at the park, at the gate and then Next / Submit for that same
+        fill (a page that changed since is scanned afresh). Also used by
+        intake for a link it parked before the wizard started, on the tab
+        it left.
         """
         if self._tick is None:
             self._tick = self.clock()
-        self.pending = {"kind": "parked", "fill": after_fill, "reason": reason}
+        shape = follow.read_shape(self.page) if after_fill is not None else None
+        self.pending = {"kind": "parked", "fill": after_fill, "reason": reason,
+                        "page_events": list(page_events or []), "shape": shape}
         info = {"kind": "parked", "wants_code": False, "fields": [],
                 "message": f"{reason}. Fix it in the tab yourself, then press Continue: the page "
                            f"is read again from where it stopped (no click, no navigation)."}
@@ -750,10 +756,18 @@ class Wizard:
                 skip_fill = True
             elif kind == "parked":
                 fill = pending.get("fill")
+                if fill is not None and self._moved(pending.get("shape")):
+                    # Jack moved the page on (or its shape is unknown): the
+                    # fill was of another page; this one is scanned afresh.
+                    self.out.log.append("the page changed since the park: scanned afresh")
+                    fill = None
                 if fill is not None:
-                    # The page was filled before the stop: back to Next /
-                    # Submit for that fill, never a second fill of it.
+                    # The page was filled before the stop and is still that
+                    # page: judged again (Jack may have changed a box), then
+                    # back to Next / Submit for that fill, never a second
+                    # fill of it.
                     self._remap(fill, pending, info)
+                    self._gate_page(fill, pending.get("page_events") or [])
                     skip_fill = True
                 # Otherwise the top of the loop: the page as the tab shows
                 # it now, scanned afresh.
@@ -765,6 +779,7 @@ class Wizard:
                 if browser_mod.page_readable(page) and not browser_mod.detect_captcha(page):
                     self._handled_by_jack("captcha", None)
         while True:
+            page_events: list[dict] = []
             if self._over_time():
                 raise _Parked("over the 60-minute cap of the agent's own time for one application")
             if self.out.pages_filled >= STEP_CAP:
@@ -796,6 +811,14 @@ class Wizard:
                 verdict = pages.fill_allowed(page, self.url, None)
                 if verdict in (pages.LINKEDIN, pages.OFF_HOST):
                     raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
+                # A job board's own pages are never filled (CLAUDE.md:
+                # LinkedIn Easy Apply and Handshake's built-in applications
+                # are refused); intake refuses them before the wizard, and
+                # a Continue on such a park lands here (fix of 16e359e's
+                # BLOCK).
+                board = intake.job_board(page.url)
+                if board:
+                    raise _Parked(f"{board}: the application stays on the job board")
                 if verdict in (pages.ACCOUNT, pages.SIGN_IN, pages.VERIFICATION):
                     res = accounts.handle(page, verdict, self.prof, self.pauser)
                     self.out.events += res.events
@@ -814,7 +837,6 @@ class Wizard:
                     fill = pipeline.fill_page(page, self.prof, guard=self.guard,
                                               resume=None if self.resume_done else self.resume,
                                               posting_text=self.posting_text, portal=self.portal)
-                page_events: list[dict] = []
                 if fill is not None:
                     self.out.pages_filled += 1
                     if fill.uploaded:
@@ -843,7 +865,8 @@ class Wizard:
             try:
                 outcome = self._advance(fill)
             except _Parked as e:
-                e.after_fill = fill         # a resume goes back to Next / Submit, not a refill
+                e.after_fill = fill         # a resume goes back to the gate and Next / Submit, not a refill
+                e.page_events = page_events
                 raise
             if outcome is not None:
                 return outcome

@@ -152,7 +152,7 @@ def test_every_park_offers_continue_in_the_gui():
           and view["pause"]["message"].startswith("the tab closed. ")
           and "press Continue" in view["pause"]["message"] and view["pause"]["fields"] == [],
           f"the row carries a parked pause (so Continue is drawn) with the reason ({view['pause']})")
-    check(w.pending == {"kind": "parked", "fill": None, "reason": "the tab closed"},
+    check(w.pending and (w.pending["kind"], w.pending["fill"], w.pending["reason"]) == ("parked", None, "the tab closed"),
           f"the resume point is the top of the page ({w.pending})")
     browser.close(); p.stop()
     # The real no-fields park: a page with no form, no Next, no Submit.
@@ -210,6 +210,94 @@ def test_a_park_after_a_fill_resumes_at_next_not_at_a_second_fill():
           f"the after-fill park offers Continue ({pauses and pauses[0]['pause']})")
     check(out.status == "submitted" and clicks == ["Submit application"] and out.pages_filled == 1
           and len(out.steps) == 1, f"resumed at Submit for the one fill ({out.status}, {out.reason}, {clicks}, {out.pages_filled})")
+    check.done()
+
+
+HANDSHAKE_FORM = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<h1>Apply on Handshake</h1><form><label for="fn">First Name</label><input id="fn" name="first_name" required>
+<button type="submit">Submit application</button></form>{CLICKS_JS}</body></html>"""
+
+
+def test_a_handshake_park_resumed_is_refused_again_not_filled():
+    # Fix of 16e359e's BLOCK: intake refuses Handshake's built-in
+    # application, and Continue on that park must meet the same refusal
+    # in the loop, not a fill. The tab holds a form and a Submit control;
+    # after Continue nothing is typed or pressed and the row waits again
+    # with the job-board reason. On 16e359e the resumed loop filled the
+    # form and pressed Submit.
+    import apply
+    check = Checks()
+    profile_path = TEST_HOME / "resume-profile3.yaml"
+    profile_path.write_text(PROFILE, encoding="utf-8")
+    link = "https://app.joinhandshake.com/jobs/77/apply"
+    state = gui.State()
+    [a] = state.start([link], dry=False)
+    waiting: dict = {}
+    args = Namespace(profile=str(profile_path), resume=None, dry=False)
+    quiet = pause.Pauser(notify_fn=lambda t, body, echo=print: None, echo=lambda *x, **k: None)
+    with _headless(_routes(_gui_site())) as ctx:
+        ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+        ctx.route("https://app.joinhandshake.com/**", lambda route: route.fulfill(
+            status=200, content_type="text/html", body=HANDSHAKE_FORM))
+        with mock.patch.object(apply.classify, "classify_fields", classify_by_label), \
+                mock.patch.object(apply.mapper, "map_fields", map_from_profile), \
+                redirect_stdout(io.StringIO()):
+            apply.gui_loop(ctx, state, apply.Profile.load(profile_path), args, quiet,
+                           idle_limit_s=1.0, waiting=waiting)
+            job = state.snapshot()["jobs"][0]
+            check(job["status"] == "needs_you" and job["pause"] and job["pause"]["kind"] == "parked"
+                  and "handshake" in job["pause"]["message"].lower() and a in waiting,
+                  f"intake's Handshake park waits with Continue ({job['status']}, {job['pause']})")
+            state.request_continue(a)
+            apply.gui_loop(ctx, state, apply.Profile.load(profile_path), args, quiet,
+                           idle_limit_s=1.0, waiting=waiting)
+            job = state.snapshot()["jobs"][0]
+            tab = next(p for p in ctx.pages if "joinhandshake" in p.url)
+            typed, clicks, url = tab.input_value("#fn"), tab.evaluate("window.__clicks"), tab.url
+    check(job["status"] == "needs_you" and job["pause"] and job["pause"]["kind"] == "parked"
+          and job["pause"]["message"].startswith("handshake: the application stays on the job board. ")
+          and a in waiting,
+          f"Continue met the loop's own refusal and waits again ({job['status']}, {job['pause']})")
+    check(typed == "" and clicks == [] and url == link,
+          f"nothing typed, nothing pressed, same page ({typed!r}, {clicks}, {url})")
+    check.done()
+
+
+def test_a_park_after_a_fill_is_judged_again_before_next_and_rescanned_if_the_page_changed():
+    # Fold of 16e359e's review: a resume after a fill runs the gate again
+    # on that page (Jack may have changed a box) before Next / Submit, and
+    # a page whose shape changed since the park (Jack moved it on himself)
+    # is scanned afresh, never advanced on a stale fill. On 16e359e the
+    # resume went straight to Next / Submit.
+    check = Checks()
+    site = _gui_site(); site["/nobuttons"] = NO_BUTTONS
+
+    def jack_empties_first_name(page, state, job_id):
+        page.fill("#fn", "")
+
+    def jack_refills_it(page, state, job_id):
+        page.fill("#fn", "Test")
+    out, pauses, url, clicks, w = _drive(site, "/nobuttons", [jack_empties_first_name, jack_refills_it],
+                                          max_pauses=3)
+    kinds = [p["pause"]["kind"] for p in pauses]
+    check(kinds == ["parked", "gate", "parked"] and clicks == [],
+          f"park, then the gate stop on the emptied box, then the park again; nothing pressed ({kinds}, {clicks})")
+    check(pauses[1]["pause"]["fields"] and pauses[1]["pause"]["fields"][0]["label"] == "First Name"
+          and "required, but empty" in pauses[1]["pause"]["fields"][0]["reason"],
+          f"the gate stop names the box Jack emptied ({pauses[1]['pause']})")
+    check(out.pages_filled == 1 and len(out.steps) == 1, f"one fill throughout ({out.pages_filled})")
+
+    def jack_moves_to_page_two(page, state, job_id):
+        page.goto(f"{HOST}/apply/2")
+
+    def jack_types_the_city(page, state, job_id):
+        page.fill("#city", "Springfield")
+    out, pauses, url, clicks, w = _drive(site, "/nobuttons", [jack_moves_to_page_two, jack_types_the_city])
+    kinds = [p["pause"]["kind"] for p in pauses]
+    check(kinds == ["parked", "gate"] and out.status == "submitted" and clicks == ["Next", "Submit application"],
+          f"the moved page was scanned afresh and the run went on ({kinds}, {out.status}, {out.reason}, {clicks})")
+    check("the page changed since the park: scanned afresh" in out.log and out.pages_filled == 3,
+          f"the fresh scan is logged; three pages filled ({out.pages_filled}, {out.log})")
     check.done()
 
 

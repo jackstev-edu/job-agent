@@ -2206,3 +2206,20 @@ passes can reach the cap and park with the "kept changing" reason
 prior commits, not run by the reviewer (the main session ran them: the
 CAPTCHA test fails on 16e359e, the ticking test spun there until a
 240 s limit).
+
+Commit 16e359e (item 2): VERDICT BLOCK, 1 BLOCK, 4 FLAGs, 1 minor. The
+BLOCK, fixed in the next commit: a Handshake park resumed through
+Continue met no refusal in the loop (pages.fill_allowed knows LinkedIn
+and the host family only), so a Handshake built-in application form
+would have been filled and submitted; the loop now refuses a job
+board's page by its address (intake.job_board) right after the
+host check, with a test that resumes a Handshake park whose tab holds
+a form and a Submit control. Folded (a stale fill advanced on a page
+never gated): a resume after a fill now runs the gate again on that
+page before Next / Submit, and a page whose shape changed since the
+park (Jack moved it on himself) is scanned afresh instead; tests for
+both. Taken: a tab closed during intake keeps the plain park (no
+Continue) instead of a crash. Logged: the four new tests were read,
+not run, against 07113ca by the reviewer (the main session ran them:
+all four fail there); the cap parks and a closed tab offer a Continue
+that can only park again (decision for Jack).
