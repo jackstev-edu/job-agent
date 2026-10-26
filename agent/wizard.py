@@ -206,7 +206,7 @@ class Wizard:
         self.uploaded: dict | None = {}
         self.resume_done = False
         self.pending: dict | None = None        # where a deferred pause left off
-        self._protect_touched = False           # the next fill leaves Jack's touched boxes alone
+        self._protect_held = False              # the next fill leaves boxes that hold a value alone
         self.resume_info: dict | None = None    # what Jack gave in the GUI for that pause
         self.active_s = 0.0                     # the agent's own time, pauses excluded
         self._tick: float | None = None
@@ -730,15 +730,17 @@ class Wizard:
         it, its events riding along for a later park. If Jack moved the
         page on, or its shape couldn't be read then or now, the fill is
         not vouched for: the page is scanned afresh, and that scan leaves
-        every box he touched alone (protect_touched) and counts it as his.
-        Returns (fill or None, skip_fill, carried events).
+        every box that holds a value alone (protect_held: never typed
+        over, never sent to a model, never counted as his; the gate
+        judges it as any other box). Returns (fill or None, skip_fill,
+        carried events).
         """
         fill = pending.get("fill")
         if fill is None:
             return None, False, []
         if pending.get("shape") is None or self._moved(pending["shape"]):
             self.out.log.append("the page changed since the park: scanned afresh")
-            self._protect_touched = True
+            self._protect_held = True
             return None, False, []
         self._remap(fill, pending, info)
         carried = list(pending.get("page_events") or [])
@@ -759,6 +761,21 @@ class Wizard:
         if pending:
             if page.is_closed():
                 raise _Parked("the tab closed")
+            # A resumed page is refused by its address before any pause's
+            # own resume runs (a job board, Google's site, another host):
+            # nothing is gated, ticked or pressed on a page that left the
+            # application's site while Jack held it.
+            try:
+                came_back_at = page.url
+            except Exception:
+                raise _Parked("the page couldn't be read")
+            if intake.job_board(came_back_at):
+                raise _Parked(f"{intake.job_board(came_back_at)}: the application stays on the job board")
+            if google.is_google_host(came_back_at):
+                raise _Parked("Google's site: the page left the application's site")
+            verdict = pages.fill_allowed(page, self.url, None)
+            if verdict in (pages.LINKEDIN, pages.OFF_HOST):
+                raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
             kind = pending.get("kind")
             self.out.log.append(f"resumed after a {kind} pause")
             if kind == "account" and pending.get("wants_code") and info.get("code"):
@@ -793,6 +810,11 @@ class Wizard:
                     self._handled_by_jack("captcha", None)
                     if pending.get("fill") is not None:
                         fill, skip_fill, carried_events = self._resume_fill(pending, info)
+                elif pending.get("fill") is not None:
+                    # Still a CAPTCHA (or unreadable): the pause comes again
+                    # from the top without the fill; whatever fill follows
+                    # then must leave boxes that hold a value alone.
+                    self._protect_held = True
         while True:
             page_events: list[dict] = carried_events if skip_fill else []
             carried_events = []
@@ -820,6 +842,9 @@ class Wizard:
             verdict = None if on_google else pages.fill_allowed(page, self.url, None)
             if verdict in (pages.LINKEDIN, pages.OFF_HOST):
                 raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
+            # The one fill pass after a fresh scan was ordered leaves boxes
+            # that hold a value alone; the order never carries to a later page.
+            protect, self._protect_held = self._protect_held, False
             if not skip_fill:
                 if on_google:
                     # A same-tab Google sign-in: walked by structure, or a
@@ -838,7 +863,8 @@ class Wizard:
                     browser_mod.settle(page, 800)
                     continue
                 if verdict in (pages.ACCOUNT, pages.SIGN_IN, pages.VERIFICATION):
-                    res = accounts.handle(page, verdict, self.prof, self.pauser)
+                    with self.activity.filling(page):
+                        res = accounts.handle(page, verdict, self.prof, self.pauser)
                     self.out.events += res.events
                     self.out.log += res.steps
                     if res.status == accounts.PARKED:
@@ -851,20 +877,16 @@ class Wizard:
                         raise _Parked("the page kept changing while the form was awaited")
                     continue            # the page moved or drew its form: every check above, again
                 rechecks = 0
-                protect, self._protect_touched = self._protect_touched, False
                 with self.activity.filling(page):
-                    fill = pipeline.fill_page(page, self.prof, guard=self.guard,
-                                              resume=None if self.resume_done else self.resume,
-                                              posting_text=self.posting_text, portal=self.portal,
-                                              protect_touched=protect)
+                    try:
+                        fill = pipeline.fill_page(page, self.prof, guard=self.guard,
+                                                  resume=None if self.resume_done else self.resume,
+                                                  posting_text=self.posting_text, portal=self.portal,
+                                                  protect_held=protect)
+                    except pipeline.Unreadable as e:
+                        raise _Parked(f"the page couldn't be read ({e})")
                 if fill is not None:
                     self.out.pages_filled += 1
-                    for ref in fill.touched:
-                        # A box with his touch mark on a page the agent filled
-                        # before: his answer, as after a pause (the filler's
-                        # own input never leaves that mark).
-                        if ref not in self.human_reviewed:
-                            self.human_reviewed.append(ref)
                     if fill.uploaded:
                         self.resume_done, self.uploaded = True, fill.uploaded
                     elif fill.uploaded is None:
@@ -907,7 +929,11 @@ class Wizard:
                 raise _Parked(f"the '{nxt.get('word')}' control is disabled")
             before = follow.read_shape(page)
             try:
-                page.locator(f"[{NEXT_ATTR}='1']").first.click(timeout=5000)
+                # Under the agent flag: a press is the agent's input, and
+                # must leave no touch mark (the listener marks the active
+                # element too, which is the last box the filler typed into).
+                with self.activity.filling(page):
+                    page.locator(f"[{NEXT_ATTR}='1']").first.click(timeout=5000)
             except Exception as e:
                 raise _Parked(f"couldn't press '{nxt.get('word')}' ({type(e).__name__})")
             self.out.log.append(f"pressed '{nxt.get('word')}'")
@@ -930,7 +956,8 @@ class Wizard:
             # with the options shown (never LinkedIn, Indeed, paste or a
             # previous application).
             try:
-                chosen = chooser.choose(page, self.resume, self.out.log)
+                with self.activity.filling(page):
+                    chosen = chooser.choose(page, self.resume, self.out.log)
             except ValueError as e:
                 raise _Parked(str(e))
             if chosen is not None:

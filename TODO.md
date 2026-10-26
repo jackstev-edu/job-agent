@@ -2280,3 +2280,50 @@ gate for that fill; no test for this path, the CAPTCHA-on-a-resumed-
 page case is hard to stage); `page.url` re-read after `here` (now
 `here` throughout); the closed-tab test's browser leaked on a failed
 check (try / finally).
+
+Commit 8185f17 (the second fold of item 2): VERDICT BLOCK, 1 BLOCK, 6
+FLAGs. The BLOCK, fixed in the next commit: a touched box on a fresh
+scan after a park was counted as Jack's with no "new since before the
+pause" baseline, and the premise was false twice over: the activity
+listener marks the active element on any trusted press outside the
+agent flag (the agent's own Next press, the chooser's and accounts.py's
+presses ran outside it), and, found while fixing, Playwright's own
+clear of a box presses Delete, which the listener counts as a touch
+even under the agent flag, so every box the filler fills carries a
+mark. Touch marks are therefore not the rule at all. Now, on a fresh
+scan after a park, a box that already holds a value (whoever put it
+there) is never typed over, never sent to the classifier or the
+mapper, and never counted as his; the gate judges it like any other
+box and stops for him (he confirms it by touching it at that pause,
+as the 2026-10-19 rule says). The agent's Next press, the chooser's
+press and accounts.py's steps run under the agent flag all the same;
+a value probe that can't read the page parks the job instead of
+filling; a CAPTCHA still shown on a resumed pass orders the protection
+for the fill that follows; the order never carries past the next fill
+pass; a resumed page is refused by its address (job board, Google,
+another host) before any pause's own resume runs. Tests: Jack's
+"Jacques" survives the fresh scan, reaches no classifier call, is not
+counted as his, and the gate stops on it (on 8185f17 it was counted as
+his); an unreadable probe parks with his correction intact; a tab
+moved off-host during a gate pause is refused on resume with nothing
+filled or pressed there. Logged (decision for Jack): after such a
+fresh scan the held boxes stop the gate until he touches them again
+at that pause; the alternative, counting a held box as his when its
+value differs from what the agent last wrote, would also count a
+value the page rewrote. The CAPTCHA-on-a-resumed-pass path is still
+untested.
+
+Found while fixing 8185f17's BLOCK (pre-existing since 2026-10-19;
+decision for Jack, logged, not changed): the filler clears a box with
+Playwright's fill(""), which presses Delete, and the activity listener
+counts a Delete keydown as a touch even under the agent flag, so every
+box the filler fills carries a touch mark from the start. The
+review-by-touch rule compares marks after a pause with those before
+it, so a correction Jack makes to a box the agent filled is never "a
+mark new since before the pause" and never counts as his review (a
+box the agent left empty, such as the City in the tests, still does).
+Seen in the tests: both boxes of the no-buttons page marked after the
+agent's own fill. Options: have the filler clear a box another way
+(select-all + insertText, no Delete key), or drop the Delete special
+case from the listener, or compare values as well as marks; each is a
+change to the review rule, so it waits for Jack.

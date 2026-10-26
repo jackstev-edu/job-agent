@@ -191,8 +191,11 @@ def test_the_wizard_takes_the_chooser_and_goes_on_to_the_form():
         with mock.patch("agent.classify.classify_fields", classify_by_label), \
                 mock.patch("agent.mapper.map_fields", map_from_profile), redirect_stdout(io.StringIO()):
             out = w2.run()
-        check(out.status == "needs_you" and "none of which the agent takes" in out.reason and "'Apply with Indeed'" in out.reason,
-              f"a chooser with only refused options parks with them listed ({out.status}, {out.reason})")
+        # In GUI mode a park waits in its tab with Continue (Jack, 2026-10-26:
+        # item 2 of that day), the options still listed in the reason.
+        check(out.status == wizard.WAITING and "none of which the agent takes" in out.reason
+              and "'Apply with Indeed'" in out.reason and w2.pending and w2.pending.get("kind") == "parked",
+              f"a chooser with only refused options waits, with them listed ({out.status}, {out.reason})")
     check.done()
 
 

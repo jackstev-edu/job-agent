@@ -20,7 +20,7 @@ from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import (adapters, browser as browser_mod, classify, extract, filler, ledger, mapper, outcome,
+from . import (adapters, browser as browser_mod, classify, extract, filler, mapper, outcome,
                sensitive, shadow)
 
 if TYPE_CHECKING:
@@ -221,6 +221,19 @@ def build_record(page, url, portal, detected_by, company, steps, events, *,
 
 # --- one page, start to finish -----------------------------------------------
 
+def _holds(value) -> bool:
+    """Does a read-back value count as something in the box (a file box reads as its names)?"""
+    if value is None or value is False:
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(_holds(v) for v in value)
+    return bool(str(value).strip())
+
+
+class Unreadable(Exception):
+    """The page couldn't be read where the fill needed to read it first; nothing was typed."""
+
+
 @dataclass
 class PageFill:
     """What one page's fill produced, for the gate and the review sheet."""
@@ -235,21 +248,26 @@ class PageFill:
     snapshot: dict = dataclass_field(default_factory=dict)   # read-back after filling
     census: list[dict] = dataclass_field(default_factory=list)  # checkboxes after filling
     lines: list[str] = dataclass_field(default_factory=list) # what to print
-    touched: list[str] = dataclass_field(default_factory=list)  # refs left as Jack's (protect_touched)
+    held: list[str] = dataclass_field(default_factory=list)     # refs left as they are (protect_held)
 
 
 def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | None,
-              posting_text: str, portal: str = "generic", protect_touched: bool = False) -> PageFill | None:
+              posting_text: str, portal: str = "generic", protect_held: bool = False) -> PageFill | None:
     """
     Fill the page the agent is on: scan, upload the resume into the one box
     labelled as the resume (if `resume` is given), classify, route, map,
     fill, read back. None when the page has no fields. Clicks nothing but
     what the filler clicks (rows, option buttons, checkboxes it is allowed).
-    With `protect_touched` (the wizard's fresh scan of a page after a
-    park, Jack, 2026-10-26), a field whose element carries a touch mark
-    (a trusted input of Jack's; the filler's own input is marked as the
-    agent's) is left out of the plan and listed in `touched`, so his
-    correction in the tab is never typed over.
+    With `protect_held` (the wizard's fresh scan of a page after a park,
+    Jack, 2026-10-26), a field that already holds a value, whoever put it
+    there, is kept from the classifier, the mapper and the plan and listed
+    in `held`, so a box Jack may have corrected in the tab is never typed
+    over and nothing of it reaches a model; it is never counted as his
+    (nothing says who wrote it), so the gate judges it like any other box.
+    Touch marks are not used: the filler's own clear leaves one. The
+    resume upload is skipped on such a scan (the page was filled before).
+    A page whose values can't be read raises Unreadable: the fill must
+    not run on it.
     """
     fields = extract.extract_fields(page, guard)
     if not fields:
@@ -259,7 +277,14 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
     lines: list[str] = []
     uploaded: dict | None = {}
     new_after_upload: set[str] = set()
-    box = resume_box(fields) if resume else None
+    marked: set[str] = set()
+    if protect_held:
+        try:
+            now = extract.snapshot(page, [f for f in fields if f.get("type") != "file"])
+        except Exception as e:
+            raise Unreadable(f"the page's values couldn't be read ({type(e).__name__})")
+        marked = {ref for ref, value in (now or {}).items() if _holds(value)}
+    box = resume_box(fields) if resume and not protect_held else None
     if box is not None:
         before_fields = fields
         before = classify.classify_fields([f for f in before_fields if f.get("type") != "file"])
@@ -277,22 +302,19 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
         uploaded = {ref: [Path(resume).name]} if ref else None
         categories, new_after_upload = reclassify_after_upload(before_fields, before, fields)
     else:
-        categories = classify.classify_fields([f for f in fields if f.get("type") != "file"])
+        categories = classify.classify_fields([f for f in fields if f.get("type") != "file"
+                                               and f["ref"] not in marked])
     plan, flags, for_model = route(fields, categories, prof, new_after_upload)
+    held: list[str] = []
+    for f in fields:
+        if f["ref"] in marked:
+            plan.pop(f["ref"], None)
+            held.append(f["ref"])
+            lines.append(f"left as it is (already holds a value): '{(f.get('label') or f.get('name') or '')[:60]}'")
+    for_model = [f for f in for_model if f["ref"] not in marked]
     ask_mapper(for_model, prof, posting_text, new_after_upload, plan)
     prefill = prefill_census(page)
     plan = fillable_plan(fields, plan)
-    touched: list[str] = []
-    if protect_touched:
-        try:
-            marked = page.evaluate(ledger.TOUCHED_JS, [[f["ref"] for f in fields], ledger.TOUCH_ATTR])
-        except Exception:
-            marked = []
-        for f in fields:
-            if f["ref"] in (marked or []) and f["ref"] in plan:
-                plan.pop(f["ref"])
-                touched.append(f["ref"])
-                lines.append(f"left as yours (touched in the tab): '{(f.get('label') or f.get('name') or '')[:60]}'")
     rows = filler.run_plan(page, fields, plan)
     step = shadow.step_entry(fields, categories, plan, flags, rows, prefill_census=prefill)
     try:
@@ -305,7 +327,7 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
         census = []
     return PageFill(fields=fields, categories=categories, plan=plan, flags=flags, rows=rows,
                     step=step, events=events, uploaded=uploaded, snapshot=snap,
-                    census=census if isinstance(census, list) else [], lines=lines, touched=touched)
+                    census=census if isinstance(census, list) else [], lines=lines, held=held)
 
 
 def has_next(page: "Page", portal: str) -> bool:

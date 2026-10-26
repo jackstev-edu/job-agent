@@ -333,20 +333,32 @@ def test_a_resume_on_a_closed_tab_or_an_unknown_shape_is_safe():
           b.textContent = 'Submit application'; document.querySelector('form').appendChild(b);
           document.querySelector('form').addEventListener('submit', e => { e.preventDefault(); location.href = '/thanks'; }); }""")
     with mock.patch("agent.follow.read_shape", lambda target: None):
-        out, pauses, url, clicks, w = _drive(site, "/nobuttons", [jack_adds_the_button])
-    check(out.status == "submitted" and "the page changed since the park: scanned afresh" in out.log
-          and out.pages_filled == 2,
-          f"an unreadable shape: scanned afresh, then on to Submit ({out.status}, {out.reason}, {out.log})")
+        out, pauses, url, clicks, w = _drive(site, "/nobuttons", [jack_adds_the_button], max_pauses=2)
+    kinds = [p["pause"]["kind"] for p in pauses]
+    # The fresh scan leaves the boxes that hold a value alone and the gate
+    # stops for Jack on them (nothing proves who wrote them): no Submit.
+    check(kinds == ["parked", "gate"] and "the page changed since the park: scanned afresh" in out.log
+          and out.pages_filled == 2 and clicks == [] and _field(pauses[1], "First Name"),
+          f"an unreadable shape: scanned afresh, then the gate stops on the held boxes ({kinds}, {out.reason}, {clicks})")
     check.done()
 
 
-def test_a_fresh_scan_after_a_park_leaves_jacks_touched_boxes_alone():
-    # Fold of f0f0e0d's review: a page scanned afresh after a park (here
-    # its shape couldn't be read) is filled again, and that fill must not
-    # type over a box Jack corrected in the tab; his box is counted as
-    # his. On f0f0e0d the agent's value was typed over his.
+def test_a_fresh_scan_after_a_park_leaves_boxes_that_hold_a_value_alone():
+    # Fold of f0f0e0d's review, redone after 8185f17's BLOCK: a page
+    # scanned afresh after a park (here its shape couldn't be read) is
+    # filled again, and that fill must not type over a box that already
+    # holds a value, nor send it to a model, nor count it as Jack's: he may
+    # have corrected it, but nothing proves who wrote it, so the gate
+    # judges it like any other box and stops for him. Touch marks are not
+    # the rule (the filler's own clear leaves one on every box it fills).
+    # On 8185f17 the boxes were counted as his.
     check = Checks()
     site = _gui_site(); site["/nobuttons"] = NO_BUTTONS
+    classified: dict = {"refs": set()}
+
+    def classify_and_record(fields):
+        classified["refs"] |= {f["ref"] for f in fields}
+        return classify_by_label(fields)
 
     def jack_corrects_first_name(page, state, job_id):
         page.fill("#fn", "Jacques")
@@ -356,7 +368,7 @@ def test_a_fresh_scan_after_a_park_leaves_jacks_touched_boxes_alone():
             page = ctx.new_page(); page.goto(f"{HOST}/nobuttons")
             state = gui.State(); [job_id] = state.start([f"{HOST}/nobuttons"], dry=False)
             w = _wizard(page, state, job_id, "/nobuttons")
-            with mock.patch("agent.classify.classify_fields", classify_by_label), \
+            with mock.patch("agent.classify.classify_fields", classify_and_record), \
                     mock.patch("agent.mapper.map_fields", map_from_profile):
                 out = w.run()
                 check(out.status == wizard.WAITING and page.input_value("#fn") == "Test",
@@ -365,17 +377,71 @@ def test_a_fresh_scan_after_a_park_leaves_jacks_touched_boxes_alone():
                 state.request_continue(job_id)
                 out = w.continue_from(state.take_resume(job_id))
             value = page.input_value("#fn")
-            by_label = {f["label"]: f["ref"] for st in out.steps for f in st["fields"]}
-            new_ref = out.steps[-1]["fields"][0]["ref"] if out.steps else None
+            new_refs = {f["label"]: f["ref"] for f in out.steps[-1]["fields"]} if out.steps else {}
+            view = state.snapshot()["jobs"][0]
         finally:
             browser.close(); p.stop()
     check(out.status == wizard.WAITING and "the page changed since the park: scanned afresh" in out.log,
-          f"scanned afresh, parked again ({out.status}, {out.reason}, {out.log})")
+          f"scanned afresh ({out.status}, {out.reason}, {out.log})")
     check(value == "Jacques", f"Jack's correction was not typed over ({value!r})")
-    check(any(line.startswith("left as yours (touched in the tab): 'First Name'") for line in out.log),
+    check(any(line.startswith("left as it is (already holds a value): 'First Name'") for line in out.log),
           f"the protected box is logged ({out.log})")
-    check(out.pages_filled == 2 and new_ref in w.human_reviewed,
-          f"the second fill counts his box as his ({out.pages_filled}, {w.human_reviewed})")
+    check(out.pages_filled == 2 and w.human_reviewed == [],
+          f"the box is not counted as his ({out.pages_filled}, {w.human_reviewed})")
+    check(new_refs.get("First Name") not in classified["refs"] and new_refs.get("Email") not in classified["refs"],
+          f"the held boxes reached no classifier call ({new_refs}, {classified})")
+    check(view["pause"] and view["pause"]["kind"] == "gate" and _field(view, "First Name"),
+          f"the gate then stops for him on the held box ({view['pause']})")
+    check.done()
+
+
+def test_an_unreadable_value_probe_parks_instead_of_filling():
+    # Fold of 8185f17's review: when the fresh scan can't read the page's
+    # values, it must not type over anything; the job parks. Jack's
+    # correction survives. On 8185f17 the fill ran regardless.
+    check = Checks()
+    site = _gui_site(); site["/nobuttons"] = NO_BUTTONS
+
+    def boom(page, fields):
+        raise RuntimeError("unreadable")
+    with mock.patch("agent.follow.read_shape", lambda target: None):
+        p, browser, ctx = _open(site)
+        try:
+            page = ctx.new_page(); page.goto(f"{HOST}/nobuttons")
+            state = gui.State(); [job_id] = state.start([f"{HOST}/nobuttons"], dry=False)
+            w = _wizard(page, state, job_id, "/nobuttons")
+            with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                    mock.patch("agent.mapper.map_fields", map_from_profile):
+                out = w.run()
+                page.fill("#fn", "Jacques")
+                state.request_continue(job_id)
+                # The page's values become unreadable only for the resumed scan.
+                with mock.patch("agent.pipeline.extract.snapshot", boom):
+                    out = w.continue_from(state.take_resume(job_id))
+            value = page.input_value("#fn")
+        finally:
+            browser.close(); p.stop()
+    check(out.status == wizard.WAITING and out.reason.startswith("the page couldn't be read"),
+          f"parked, not filled ({out.status}, {out.reason})")
+    check(value == "Jacques" and out.pages_filled == 1, f"nothing typed over ({value!r}, {out.pages_filled})")
+    check.done()
+
+
+def test_a_page_that_left_the_site_during_a_gate_pause_is_refused_on_resume():
+    # Fold of f0f0e0d's review, untested until now: a tab Jack navigated
+    # off-host during a gate pause is refused on the resumed pass before
+    # anything is gated or pressed.
+    check = Checks()
+    site = _gui_site(); site["https://elsewhere.example/x"] = SINGLE
+
+    def jack_leaves_the_site(page, state, job_id):
+        page.goto("https://elsewhere.example/x")
+    out, pauses, url, clicks, w = _drive(site, "/apply", [jack_leaves_the_site, lambda *a: None], max_pauses=2)
+    kinds = [p["pause"]["kind"] for p in pauses]
+    check(kinds == ["gate", "parked"] and "the page left the application's site" in out.reason,
+          f"refused on resume ({kinds}, {out.status}, {out.reason})")
+    check(clicks == [] and url == "https://elsewhere.example/x" and out.pages_filled == 2,
+          f"nothing pressed on the other site, nothing filled there ({clicks}, {url}, {out.pages_filled})")
     check.done()
 
 
