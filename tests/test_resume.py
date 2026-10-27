@@ -1078,6 +1078,41 @@ def test_a_page_the_agent_moved_on_is_filled_as_usual():
     check.done()
 
 
+CAPTCHA_BOX = ("() => { const d = document.createElement('div'); d.className = 'captcha-box'; "
+               "d.style.cssText = 'width:300px;height:80px'; d.textContent = 'I am not a robot'; "
+               "document.body.prepend(d); }")
+
+
+def test_a_captcha_still_shown_on_a_resumed_pass_waits_again_with_the_fill_in_hand():
+    # Item 7: on a resumed pass (after the City pause) a CAPTCHA has
+    # appeared; Continue with it still there pauses again with the fill
+    # in hand; once Jack solves it, Continue resumes at the gate for that
+    # fill (page two is filled once, never again) and the run goes on.
+    # A guard for the existing branch: it passes on PREV too.
+    check = Checks()
+
+    def jack_types_the_city_and_a_captcha_appears(page, state, job_id):
+        page.fill("#city", "Springfield")
+        page.evaluate(CAPTCHA_BOX)
+
+    def jack_does_nothing(page, state, job_id):
+        pass
+
+    def jack_solves_it(page, state, job_id):
+        page.evaluate("document.querySelector('.captcha-box').remove()")
+    out, pauses, url, clicks, w = _drive(_gui_site(), "/apply", [
+        jack_types_the_city_and_a_captcha_appears, jack_does_nothing, jack_solves_it], max_pauses=4)
+    kinds = [p["pause"]["kind"] for p in pauses]
+    check(kinds == ["gate", "captcha", "captcha"], f"the gate, then the CAPTCHA twice ({kinds})")
+    check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
+          f"solved, the run went on ({out.status}, {out.reason}, {clicks})")
+    check(out.pages_filled == 3 and len(out.steps) == 3, f"page two was filled once ({out.pages_filled})")
+    captcha_events = [e for e in out.events if e["kind"] == "captcha"]
+    check(captcha_events and captcha_events[-1]["handled"] == "jack",
+          f"the CAPTCHA is Jack's once solved ({captcha_events})")
+    check.done()
+
+
 def test_an_intake_park_waits_in_its_tab_with_continue():
     # A link intake refuses (LinkedIn Easy Apply) is a needs-you row with
     # Continue in GUI mode; Continue starts the wizard on the tab, which

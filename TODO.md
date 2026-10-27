@@ -2727,3 +2727,10 @@ Workday checks that the letter still gets the title's company (the
 guard tests the helper only); fix: have the existing board run's draft
 stub record the company. Info: letter_company is computed before the
 follow branch and unused there.
+
+Item 7 (test only). The CAPTCHA-still-shown branch on a resumed pass:
+a CAPTCHA appears at a gate pause; Continue with it still there pauses
+again with the fill in hand; solved, Continue resumes at the gate and
+page two is filled once (guard: the branch already existed; passes on
+89135f2; with the still-shown re-pause dropping its fill there, it
+fails: page two is rescanned and its City held).
