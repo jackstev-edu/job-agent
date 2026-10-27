@@ -331,8 +331,11 @@ How the code keeps them, and rules of its own:
   the GUI; never a timeout or a busy terminal), a field counts as reviewed
   by him only if it carries a touch mark that is new since before the
   pause and is not the filler's own input (the filler works under the
-  activity listener's agent flag, and only the field's own element
-  counts), or if he ticked it in the GUI and the page still holds exactly
+  activity listener's agent flag, and only the field's own element, or
+  an option element of its radio / button group, counts: Jack,
+  2026-10-26; the baseline read first drops the focus the agent's last
+  fill left, so his first click elsewhere marks nothing of the agent's),
+  or if he ticked it in the GUI and the page still holds exactly
   the value he was shown; the gate skips field-level stops for those,
   never the required-but-empty check. Every other field keeps the normal
   checks: a pause proves he was present, not that he checked every field;

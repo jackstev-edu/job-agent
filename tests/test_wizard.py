@@ -790,9 +790,9 @@ def test_the_final_pause_and_the_record_merge_on_their_own():
             real = w2._marked
             calls = {"n": 0}
 
-            def flaky(refs):
+            def flaky(fields, **kw):
                 calls["n"] += 1
-                return None if calls["n"] == 1 else real(refs)
+                return None if calls["n"] == 1 else real(fields, **kw)
             w2._marked = flaky
             w2._pause_and_review(fill, {"content_reasons": ["'A': left blank"]})
             check(page.evaluate(f"document.getElementById('a').hasAttribute('{ledger.TOUCH_ATTR}')"),

@@ -2412,3 +2412,18 @@ Tests: his click on the second option at the City pause clears the
 per-company stop and the run goes on (fails on e8021fa); the agent's
 own radio pick under the flag is never his (guard); a resume that
 rescans the page (stale refs) counts nothing as his (guard).
+
+Commit 8fd4eb8 (item 1): VERDICT BLOCK, 2 BLOCKs, 1 FLAG, 1 minor.
+Fixed in the next commit: the agent's own click (a radio pick, a
+fill) leaves its option or box focused, and the listener marks the
+active element on Jack's first trusted event anywhere on the page, so
+his first click elsewhere stamped the agent's field; with every option
+now read, an agent-picked group would have read as his. The baseline
+read now blurs the active element first, under the agent flag, so his
+first click marks nothing of the agent's (the same route existed for a
+text box before, closed by the same blur). The negative test now has
+the agent pick the second option and Jack click the City box before
+typing (fails on 8fd4eb8); a second negative covers the text-box form
+(fails on e8021fa and 8fd4eb8). CLAUDE.md's review rule and the two
+comments now say an option element of the group counts too, and that
+the baseline drops the focus.

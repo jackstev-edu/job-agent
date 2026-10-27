@@ -126,7 +126,8 @@ _HAS_FIELDS_JS = r"""
 # on their own element (TOUCH_ATTR, set only for isTrusted events while the
 # agent isn't filling). The mark on a wrapper doesn't count here: in follow
 # mode over-marking keeps a field from the model, but here a mark waives a
-# stop, so only the field's own element says anything. Refs only.
+# stop, so only the field's own element, or an option element of its
+# group (Jack, 2026-10-26), says anything. Refs only.
 _TOUCHED_JS = ledger.TOUCHED_JS
 
 
@@ -350,15 +351,30 @@ class Wizard:
         return {f["ref"]: [f["ref"], *(r for r in (f.get("option_refs") or []) if r != f["ref"])]
                 for f in fields if f.get("type") != "file"}
 
-    def _marked(self, fields: list[dict]) -> set[str] | None:
+    # The baseline read drops the focus first: the agent's last fill or
+    # click leaves its box or option focused, and the listener marks the
+    # active element on Jack's first trusted event anywhere on the page,
+    # which would read as his touch of the agent's field. Under the agent
+    # flag, so a change event the blur fires is the agent's (fix of
+    # 8fd4eb8's BLOCK).
+    _BLUR_JS = "() => { const el = document.activeElement; if (el && el !== document.body) el.blur(); }"
+
+    def _marked(self, fields: list[dict], *, baseline: bool = False) -> set[str] | None:
         """
         The fields (by ref) carrying a touch mark now: on the field's own
         element or on any option of a radio / button group (Jack's click
         on the second option marks that option, not the group's first,
-        which is the group's ref; Jack, 2026-10-26). None if the page
-        couldn't be read.
+        which is the group's ref; Jack, 2026-10-26). With `baseline`, the
+        read a pause's "before" is taken from, the active element is
+        blurred first (see _BLUR_JS). None if the page couldn't be read.
         """
         by_field = self._mark_refs(fields)
+        if baseline:
+            try:
+                with self.activity.filling(self.page):
+                    self.page.evaluate(self._BLUR_JS)
+            except Exception:
+                return None
         try:
             hit = set(self.page.evaluate(_TOUCHED_JS,
                                          [[r for refs in by_field.values() for r in refs],
@@ -405,7 +421,8 @@ class Wizard:
         Jack has acted on this page. A field counts as reviewed by him only
         if it carries a touch mark that is new since before the pause (a
         trusted input of his; the filler's own input is marked as the
-        agent's, and only the field's own element counts), or if he ticked
+        agent's, and only the field's own element or an option of its
+        group counts), or if he ticked
         it in the GUI and the page still holds exactly the value he was
         shown. Every other field keeps the gate's normal checks: a pause
         proves he was present, not that he checked every field (Jack,
@@ -552,7 +569,7 @@ class Wizard:
         happens on resume.
         """
         reasons = "; ".join(_clean(r) for r in result["content_reasons"][:8])
-        marked_before = self._marked(fill.fields)
+        marked_before = self._marked(fill.fields, baseline=True)
         how = self._pause("gate", f"This page needs you: {reasons}. Answer in the browser, "
                                   f"then press Enter.",
                           prompt="Press Enter when you've answered: ",
@@ -1009,7 +1026,7 @@ class Wizard:
         if submission.status == "needs_you" and not submission.clicked:
             # The gate stopped on the whole application: Jack's turn.
             self.out.events.append({"kind": "gate_pause", "detail": "final page", "handled": None})
-            marked_before = self._marked(fill.fields) if fill else None
+            marked_before = self._marked(fill.fields, baseline=True) if fill else None
             how = self._pause("final", f"Before submitting: {_clean(submission.reason)}. Fix it "
                                        f"in the browser, then press Enter.",
                               prompt="Press Enter when it's ready to submit: ",

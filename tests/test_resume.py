@@ -562,11 +562,13 @@ def _page2_with(extra):
 
 
 def _contact_mapper(fields, profile, page_text=""):
+    # Picks "Phone", the SECOND option, so the agent's own click lands on
+    # an option element other than the group's ref.
     out = map_from_profile(fields, profile, page_text)
     for f in fields:
         if (f.get("label") or "").startswith("Preferred contact"):
             from agent import mapper
-            out[f["ref"]] = mapper._double_check({"ref": f["ref"], "value": "Email", "confidence": "high",
+            out[f["ref"]] = mapper._double_check({"ref": f["ref"], "value": "Phone", "confidence": "high",
                                                   "needs_review": False, "source": "model"}, f)
     return out
 
@@ -596,20 +598,49 @@ def test_jacks_click_on_a_groups_second_option_counts_as_his():
 
 
 def test_the_agents_own_radio_pick_counts_for_nothing():
-    # Negative: a radio the agent answered under the agent flag carries no
-    # mark; after the City pause (Jack types the city only) the group is
-    # not his. A guard: it passes on e8021fa too.
+    # Negative (fix of 8fd4eb8's BLOCK): the agent picks the SECOND option
+    # under the agent flag, which leaves that option focused; at the City
+    # pause Jack CLICKS the City box (a trusted pointerdown, which the
+    # listener answers by marking the active element too) and types. The
+    # baseline read blurred the agent's option first, so the group is not
+    # his; the city is. On 8fd4eb8 the group was counted as his.
     check = Checks()
 
-    def jack_types_the_city(page, state, job_id):
-        page.fill("#city", "Springfield")
-    out, pauses, url, clicks, w = _drive(_page2_with(CONTACT_RADIO), "/apply", [jack_types_the_city],
+    def jack_clicks_and_types_the_city(page, state, job_id):
+        page.click("#city")
+        page.keyboard.type("Springfield")
+    out, pauses, url, clicks, w = _drive(_page2_with(CONTACT_RADIO), "/apply", [jack_clicks_and_types_the_city],
                                           mapper=_contact_mapper)
     by_label = {f["label"]: f["ref"] for st in out.steps for f in st["fields"]}
     reviewed = (out.record or {}).get("human_reviewed", [])
     check(out.status == "submitted", f"the run went on ({out.status}, {out.reason})")
     check(by_label.get("City") in reviewed and by_label.get("Preferred contact") not in reviewed,
           f"the city is his, the agent's own radio pick is not ({reviewed})")
+    detail = next(e["detail"] for e in out.events if e["kind"] == "gate_pause")
+    check(detail.startswith("1 field(s) touched by Jack"), f"one touch counted ({detail})")
+    check.done()
+
+
+def test_jacks_first_click_elsewhere_never_marks_the_box_the_agent_last_filled():
+    # Negative, the text-box form of the same route (pre-existing before
+    # 8fd4eb8, closed by the same blur): the agent's last fill on page two
+    # leaves the second Email box focused; Jack clicks the City box and
+    # types. The email box is not his. On e8021fa and 8fd4eb8 it was.
+    check = Checks()
+
+    def jack_clicks_and_types_the_city(page, state, job_id):
+        page.click("#city")
+        page.keyboard.type("Springfield")
+    out, pauses, url, clicks, w = _drive(_gui_site(email_on_2=True), "/apply", [jack_clicks_and_types_the_city])
+    by_label: dict = {}
+    for st in out.steps:
+        for f in st["fields"]:
+            by_label.setdefault(f["label"], []).append(f["ref"])
+    reviewed = (out.record or {}).get("human_reviewed", [])
+    em2 = [r for r in by_label.get("Email", []) if r in {f["ref"] for f in out.steps[1]["fields"]}]
+    check(out.status == "submitted", f"the run went on ({out.status}, {out.reason})")
+    check(by_label.get("City", [None])[0] in reviewed and em2 and em2[0] not in reviewed,
+          f"the city is his, the box the agent last filled is not ({reviewed}, {em2})")
     check.done()
 
 
