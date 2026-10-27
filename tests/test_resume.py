@@ -908,30 +908,30 @@ def test_continue_after_a_cap_park_grants_one_more_window():
     check.done()
 
 
-def test_a_park_with_no_fill_in_hand_holds_what_jack_typed_meanwhile():
-    # Found by item 4's cap test: a park raised before a page is filled
-    # (here the page cap, hit on page two) resumed with no hold, so a box
-    # Jack typed into during the park was filled over by the fresh scan.
-    # Now that scan holds every box with a value, as after a fill. On
-    # f2cd52c the agent typed the profile's email over his.
+def test_a_time_cap_on_a_resumed_pass_keeps_the_fill_in_hand():
+    # Fold of fc4b187's review: the branch where the time cap fires on a
+    # resumed pass (after the City pause) carries that page's fill, so
+    # Continue grants the window and goes back to the page's gate and
+    # Next, never a second fill of it. A guard for fc4b187's branch (it
+    # passes there; on f2cd52c there was no grant at all).
     check = Checks()
-    seen: list = []
 
-    def jack_types_his_email_during_the_park(page, state, job_id):
-        if state.snapshot()["jobs"][0]["pause"]["kind"] == "parked":
-            page.fill("#em2", "jack.own@example.invalid")
+    def jack_types_the_city_and_the_hour_runs_out(page, state, job_id):
+        page.fill("#city", "Springfield")
+        wizard.TIME_CAP_S = -1          # over the cap at the resumed pass's first check
 
-    def read_the_box(page, state, job_id):
-        seen.append(page.input_value("#em2"))
-    with mock.patch.object(wizard, "STEP_CAP", 1):
-        out, pauses, url, clicks, w = _drive(_gui_site(email_on_2=True), "/apply",
-                                              [jack_types_his_email_during_the_park, read_the_box],
-                                              max_pauses=2)
+    def jack_continues_and_the_hour_is_fresh(page, state, job_id):
+        wizard.TIME_CAP_S = 60 * 60
+    with mock.patch.object(wizard, "TIME_CAP_S", 60 * 60):
+        out, pauses, url, clicks, w = _drive(_gui_site(), "/apply", [
+            jack_types_the_city_and_the_hour_runs_out, jack_continues_and_the_hour_is_fresh], max_pauses=3)
     kinds = [p["pause"]["kind"] for p in pauses]
-    check(kinds[:1] == ["parked"], f"the cap parked first ({kinds})")
-    check("resumed with no fill in hand: boxes holding a value are held" in out.log,
-          f"the hold is logged ({out.log})")
-    check(seen == ["jack.own@example.invalid"], f"his email was left as he typed it ({seen})")
+    check(kinds == ["gate", "parked"] and "60-minute cap" in pauses[1]["pause"]["message"],
+          f"the City pause, then the time cap on the resumed pass ({kinds})")
+    check("one more 60-minute window granted" in out.log, f"the grant is logged ({out.log})")
+    check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
+          f"the run went on to Next and Submit ({out.status}, {out.reason}, {clicks})")
+    check(out.pages_filled == 3 and len(out.steps) == 3, f"page two was filled once ({out.pages_filled})")
     check.done()
 
 

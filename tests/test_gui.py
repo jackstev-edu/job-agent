@@ -83,7 +83,8 @@ def test_close_job_is_a_route_and_a_state_change():
         check(status == 200 and body.get("ok") is True and jobs[a]["status"] == "closed" and jobs[a]["pause"] is None,
               f"the closed tab's job is closed ({status}, {body}, {jobs[a]})")
         status, _, page = _req(server, "GET", "/")
-        check(status == 200 and "Close this job" in page and "/close-job" in page, "the page draws the Close button")
+        check(status == 200 and "Close this job" in page and "/close-job" in page,
+              "the page's script carries the Close button and its route (drawn for the closed kind)")
     finally:
         server.stop()
     check.done()

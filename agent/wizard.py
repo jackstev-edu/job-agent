@@ -816,11 +816,6 @@ class Wizard:
         """
         fill = pending.get("fill")
         if fill is None:
-            # A park before this page was filled (a cap, a refusal): the
-            # tab was Jack's meanwhile, so the scan that follows leaves
-            # every box that holds a value alone, as after a fill.
-            self.out.log.append("resumed with no fill in hand: boxes holding a value are held")
-            self._protect_held = True
             return None, False, []
         if pending.get("shape") is None or self._moved(pending["shape"]):
             self.out.log.append("the page changed since the park: scanned afresh")

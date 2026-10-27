@@ -2645,3 +2645,43 @@ through the same print). Tests: the final-page stop and terminal park
 lines (fail on fc4b187), the encoding test (fails on fc4b187 with
 UnicodeEncodeError), the printed-once check (passes on fc4b187, where
 the mark exists; with the mark removed there it fails: printed twice).
+
+Commit fc4b187 (item 4): VERDICT FLAG, 6 FLAGs. Folded in the next
+commit: the hold for a park with no fill in hand is taken back out. It
+failed safe but reached far beyond the caps: an intake park where Jack
+opens the form himself, an account or Google park (Workday's My
+Information prefilled from the account), a chooser park, the address
+refusals, "a Submit control with nothing filled": on each, every box
+holding a value would have been held (a flag, a gate stop) and the
+resume upload skipped (pipeline skips it under protect_held). That is
+Jack's call, not part of item 4 (decision in the report). A test now
+covers the time cap firing on a resumed pass (the fill rides along,
+Continue goes back to the gate and Next, page two filled once). The
+GUI check is renamed to what it proves (the page's script carries the
+Close button and its route). Logged: the queue loop's drop of a closed
+job's kept wizard is tested by a copy of its two lines, not through
+apply.gui_loop; request_close still counts a closed-kind job as waiting
+until Jack presses Close (it only asks for a confirm, fails safe). For
+Jack (decision): the page cap is no longer checked on a resumed pass
+on a page already filled; such a pass now goes on to Next or Submit
+after a fresh gate verdict instead of parking again with no fill (the
+reviewer confirmed pages_filled still never passes the cap).
+
+Commit 834784b (fold of item 3's review): VERDICT FLAG, 5 FLAGs, all
+logged, none folded (no password, legal-answer, submit or model-input
+risk). (1) _print_safely's fallback can still raise: a custom stdout
+reporting an unknown codec (LookupError), a wrapper whose .encoding
+differs from what it writes, a closed stdout (ValueError, pre-existing);
+the waiting job then fails as before; fix: a last-resort ascii
+backslashreplace print, or swallow. (2) "gate stopped on the final
+page:" is also written for submit.py's non-gate stops (no single Submit
+control, a disabled Submit, couldn't press Submit); fix: "final page
+stopped:" or the prefix only for the gate's reasons. (3) The terminal's
+second submit after the final pause can stop again with no log line, and
+"Submit was pressed but no confirmation was seen" is not logged either:
+"every stop and park" still does not hold there. (4) On a cp1252 pipe
+the terminal `run` path still prints page text with a plain print (the
+final status line, outside the per-link try, ends the batch; the
+terminal Pauser's echo of the pause body); fix: route both through
+_print_safely. (5) The encoding test doesn't assert on_wait was called
+(the actual harm) and covers only a real cp1252 TextIOWrapper.
