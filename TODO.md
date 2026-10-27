@@ -597,7 +597,8 @@ open once anything submits without Jack.
 - Resume under the hold (2026-10-27, from the review of 89135f2): a
   fill under protect_held skips the resume upload (pipeline.fill_page),
   and the gate skips file fields, so a page reached after a "moved"
-  pause, a park whose page changed, or a CAPTCHA resume whose page
+  pause, a park whose page changed or couldn't be read, or a CAPTCHA
+  resume whose page
   changed or couldn't be read, with an OPTIONAL empty resume
   box, can go on to Submit with no resume (a required one stops). A
   flag can't stop it (the gate skips file fields before flags) and a
@@ -2766,3 +2767,9 @@ Jack's, not only the last; the MUST FIX bullet names the CAPTCHA resume
 routes too. For Jack: item 7 is a guard for an existing branch, so it
 passes on the previous commit (the working rule asks each new test to
 fail there); it was mutation-checked instead.
+
+Commit d6a31de (fold of item 7's review): VERDICT FLAG, 1 low finding,
+fixed in the next commit (TODO only): the MUST FIX bullet's park clause
+now says "a park whose page changed or couldn't be read" (both go
+through the same branch of _resume_fill). An earlier review run of
+d6a31de stalled with no output and was run again.
