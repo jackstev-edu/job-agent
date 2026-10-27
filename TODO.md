@@ -607,6 +607,13 @@ open once anything submits without Jack.
   page event would stay unhandled after Jack's pause. DONE (Jack's
   decision 3 of 2026-10-27): the resume goes into a resume box that
   reads empty under the hold; one that holds a file is left alone.
+  Residual for Jack (from the review of f1493d5): "reads empty" is the
+  native input's files. A portal that uploads on change and clears the
+  input, showing the attached file as a chip (Greenhouse's attach
+  widget, Workday's drop zone), reads empty, so a hold fill after a park
+  where the wizard made no earlier upload would upload the resume again
+  over the file Jack attached. Decide whether a visible file-name chip
+  near the box should also hold it.
 
 ## Deferred
 
@@ -2833,3 +2840,19 @@ all six dropdown-style elements). The fixture's refocus re-arms on
 every blur until a pointerdown made with the agent flag off: the
 agent's own scan and fill blur the box too (and its clicks are trusted
 pointer events), and a one-shot refocus was spent before the pause.
+
+Commit f1493d5 (item 3): VERDICT FLAG, 4 FLAGs. Folded in the next
+commit: the hold tests now record the labels every classifier call saw
+and assert the held First Name box reached none of them and is in
+`held` (the "neither classifier call" claim had no test; mutation
+checked on 97acecf both ways: with the pre-upload exclusion removed,
+and with the post-upload skip removed, First Name reaches a call and
+the test fails). For Jack
+(residual, added to the MUST FIX bullet): a portal that clears the file
+input after its own upload reads empty, so Jack's attached file could be
+uploaded over. Logged: if the post-upload hold read raises Unreadable
+the wizard parks with the resume already in the box and no upload
+baseline in the record (safe direction; the park message doesn't say the
+resume went in); the left-alone path leaves `uploaded` as {} so a later
+page's resume box still gets the resume (pre-existing for the old skip
+path).
