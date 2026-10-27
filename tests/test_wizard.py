@@ -597,6 +597,130 @@ def test_a_page_that_moves_during_the_wait_is_checked_again_not_scanned():
     check.done()
 
 
+# One document for the whole pass: step one (two boxes, Next), step two (a
+# react-select-style combobox, the City, Submit). The step-one boxes stay
+# in the DOM after Next, so every mark of the pass can be read at once.
+SPA_COMBO = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<div id="s1"><form><label for="fn">First Name</label><input id="fn" name="first_name" required value="Parser Name">
+<label for="em">Email</label><input id="em" name="email" type="email" required>
+<button type="button" id="nx">Next</button></form></div>
+<div id="s2" style="display:none"><form id="f2">
+<label for="country">Country</label>
+<input id="country" name="country" role="combobox" aria-expanded="false" autocomplete="off">
+<ul id="menu" role="listbox" style="display:none"><li role="option">Canada</li><li role="option">Chile</li></ul>
+<label for="city">City</label><input id="city" name="city" required>
+<button type="submit">Submit application</button></form></div>
+<script>
+const menu = document.getElementById('menu'), country = document.getElementById('country');
+const show = () => {{ menu.style.display = ''; country.setAttribute('aria-expanded', 'true'); }};
+country.addEventListener('click', show); country.addEventListener('focus', show);
+country.addEventListener('input', () => {{ const q = country.value.toLowerCase();
+  for (const li of menu.querySelectorAll('li')) li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none'; }});
+for (const li of menu.querySelectorAll('li')) li.addEventListener('mousedown', e => {{ e.preventDefault();
+  country.value = li.textContent; menu.style.display = 'none'; }});
+document.getElementById('nx').addEventListener('click', () => {{
+  document.getElementById('s1').style.display = 'none'; document.getElementById('s2').style.display = ''; }});
+document.getElementById('f2').addEventListener('submit', e => {{ e.preventDefault(); location.href = '/thanks'; }});
+</script>{CLICKS_JS}</body></html>"""
+
+# A box that keeps its value in script state, React-style: any value the
+# page did not see arrive through an input event is put back at once.
+CONTROLLED1 = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<form><label for="fn">First Name</label><input id="fn" name="first_name" required value="Parser Name">
+<label for="em">Email</label><input id="em" name="email" type="email" required>
+<button type="button" onclick="location.href='/apply/2'">Next</button></form>
+<script>
+const fn = document.getElementById('fn'); let state = fn.value;
+fn.addEventListener('input', e => {{ state = e.target.value; }});
+setInterval(() => {{ if (fn.value !== state) fn.value = state; }}, 5);
+</script>{CLICKS_JS}</body></html>"""
+
+
+def _country_mapper(fields, profile, page_text=""):
+    out = map_from_profile(fields, profile, page_text)
+    from agent import mapper
+    for f in fields:
+        if (f.get("label") or "") == "Country":
+            out[f["ref"]] = mapper._double_check({"ref": f["ref"], "value": "Canada", "confidence": "high",
+                                                  "needs_review": False, "source": "model"}, f)
+    return out
+
+
+def test_the_agents_whole_pass_leaves_no_touch_mark():
+    # Item 2 of 2026-10-26's second round (Jack's amendment): after a full
+    # agent pass (the scan with its dropdown enrichment, the fill over a
+    # prefilled box, a combobox pick, the Next press) no element carries
+    # the touch mark. The filler clears by selecting, never with a Delete
+    # key; every agent press runs under the agent flag. On e8021fa the
+    # three boxes the filler cleared carried the mark.
+    check = Checks()
+    marks: list = []
+    log_at_pause: list = []
+
+    def read_marks(page, body):
+        marks.append(page.evaluate("[...document.querySelectorAll('[%s]')].map(e => e.id || e.tagName)"
+                                   % ledger.TOUCH_ATTR))
+        log_at_pause.append(body)
+    site = _site(); site["/apply"] = SPA_COMBO
+    out, jack, clicks, ticks, url = _run(site, "/apply", read_marks, mapper=_country_mapper)
+    print(out.status, out.reason, out.log)
+    check(clicks == ["Next"] and len(marks) >= 1,
+          f"the pass pressed Next and stopped on step two ({clicks}, {log_at_pause[:1]})")
+    country = next((r for r in out.rows if r.get("label") == "Country"), {})
+    check(country.get("filled") is True and str(country.get("detail", "")).startswith("selected 'Canada'")
+          and out.pages_filled == 2, f"the combobox was opened, read and picked ({country})")
+    check(out.steps and any(f.get("options") == ["Canada", "Chile"] for st in out.steps for f in st["fields"]),
+          "the enrichment read the dropdown's rows (a click under the flag)")
+    check(marks[0] == [], f"no element carries the touch mark after the agent's pass ({marks[0]})")
+    check.done()
+
+
+def test_select_and_type_replaces_the_value_in_a_controlled_input():
+    # The new clear must not cost fill reliability: a React-style box that
+    # keeps its value in script state and puts it back whenever it changes
+    # without an input event still ends up holding the agent's value,
+    # read back as filled. A guard: it passes on e8021fa too.
+    check = Checks()
+    site = _site(); site["/apply"] = CONTROLLED1
+
+    def jack_types_the_city(page, body):
+        if "City" in body:
+            page.fill("#city", "Springfield")
+    out, jack, clicks, ticks, url = _run(site, "/apply", jack_types_the_city)
+    row = next((r for r in out.rows if r.get("label") == "First Name"), {})
+    check(row.get("filled") is True and not row.get("unconfirmed") and row.get("value") == "Test",
+          f"the controlled box took the typed value over the parser's ({row})")
+    check(out.status == "submitted", f"the run went on ({out.status}, {out.reason})")
+    check.done()
+
+
+def test_jacks_own_delete_key_still_counts_while_the_agent_fills():
+    # The listener's rule is kept: a trusted Delete keydown while the agent
+    # flag is on (Jack reaching in during a fill) marks the box as his. A
+    # guard for the listener; only the filler stopped sending it.
+    check = Checks()
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            ctx = browser.new_context(); ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+            # Loaded by navigation: the listener's handlers attach to the
+            # document the init script runs in, which set_content replaces.
+            path = TEST_HOME / "delete-key.html"
+            path.write_text('<!doctype html><html><body><input id="a" value="x"><input id="b" value="y"></body></html>',
+                            encoding="utf-8")
+            page = ctx.new_page(); page.goto(path.resolve().as_uri())
+            guard = ledger.ActivityGuard(quiet_ms=0, echo=lambda *a, **k: None)
+            with guard.filling(page):
+                page.focus("#a"); page.keyboard.press("Delete")
+                page.locator("#b").type("z", delay=5)
+            marks = page.evaluate("[...document.querySelectorAll('[%s]')].map(e => e.id)" % ledger.TOUCH_ATTR)
+        finally:
+            browser.close()
+    check(marks == ["a"], f"the Delete key marks its box, the typing does not ({marks})")
+    check.done()
+
+
 def test_a_required_terms_box_mid_wizard_is_ticked_and_the_page_moves_on():
     # Jack's decision of 2026-10-23: a required terms / privacy box on a
     # page the wizard presses Next on is ticked through submit.py's helper

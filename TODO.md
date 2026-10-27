@@ -2439,3 +2439,29 @@ prints "hands off — filling" before a pause prompt. Logged: submit.py
 ticks consent boxes outside the agent flag before a final gate stop,
 so that box carries a mark in the baseline (safe direction); item 2
 runs the final page's tick and Submit press under the flag.
+
+Item 2 (the filler's clear). The filler clears a box by selecting its
+text in the page (no key event, no input event) and typing over the
+selection, never with Playwright's fill(""), which presses Delete; the
+listener's Delete rule stays for Jack's own deletions during a fill.
+The final page's consent tick and Submit press run under the agent
+flag, as the Next press, the chooser's press and the mid-wizard tick
+already do, so no agent press leaves a mark; accounts.py's steps stay
+outside it (Jack's decision 6). The Next press in `_advance` was under
+the flag since c5b13bc: the experiment's "no flag" line clicked the
+button directly, not through the wizard. Tests: after a whole agent
+pass in one document (the scan's dropdown enrichment, a fill over a
+prefilled box, a combobox pick, the Next press) no element carries the
+touch mark (fails on e8021fa: the cleared boxes did); a React-style
+controlled box still takes the typed value (guard); Jack's own Delete
+key while the agent fills still marks its box (guard); a box the agent
+filled and Jack corrected at a pause counts as his and the run goes on
+(fails on e8021fa); the agent's own radio pick, a box the page rewrote
+and Continue alone still count for nothing (the existing negatives).
+A box that became read-only or disabled since the scan is refused
+before the click with the not_editable category (Playwright's fill("")
+used to raise on it; select() and typing don't), so item 0's fixed
+category is unchanged. Item 2's whole-pass negative and the
+page-rewrote negative pass only together with the blur of the baseline
+(7efeb21): with the clear's mark gone, the focus the agent's last fill
+left would otherwise have read as Jack's at his first click.

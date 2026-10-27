@@ -1026,10 +1026,13 @@ class Wizard:
 
     def _submit(self, fill: pipeline.PageFill | None) -> Outcome:
         record = self._record(self.out.steps, self.out.events, wizard=True)
-        submission = submit_mod.submit_application(
-            self.page, record, self.prof,
-            build_record=lambda: self._record(self.out.steps, self.out.events, wizard=True),
-            steps_log=self.out.log, agent_submissions_today=self.agent_submissions_today)
+        # Under the agent flag: the consent tick and the Submit press are
+        # the agent's input and leave no touch mark (Jack, 2026-10-26).
+        with self.activity.filling(self.page):
+            submission = submit_mod.submit_application(
+                self.page, record, self.prof,
+                build_record=lambda: self._record(self.out.steps, self.out.events, wizard=True),
+                steps_log=self.out.log, agent_submissions_today=self.agent_submissions_today)
         self.out.record, self.out.gate_result = record, submission.gate_result
         self.out.evidence = submission.evidence
         if submission.status == "needs_you" and not submission.clicked:
@@ -1045,10 +1048,11 @@ class Wizard:
             if how == pause_mod.ANSWERED and fill is not None:
                 self._after_pause(fill, marked_before, {})
             record = self._record(self.out.steps, self.out.events, wizard=True)
-            submission = submit_mod.submit_application(
-                self.page, record, self.prof,
-                build_record=lambda: self._record(self.out.steps, self.out.events, wizard=True),
-                steps_log=self.out.log, agent_submissions_today=self.agent_submissions_today)
+            with self.activity.filling(self.page):
+                submission = submit_mod.submit_application(
+                    self.page, record, self.prof,
+                    build_record=lambda: self._record(self.out.steps, self.out.events, wizard=True),
+                    steps_log=self.out.log, agent_submissions_today=self.agent_submissions_today)
             self.out.record, self.out.gate_result = record, submission.gate_result
             self.out.evidence = submission.evidence
         self.out.status, self.out.reason = submission.status, submission.reason

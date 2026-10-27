@@ -129,6 +129,11 @@ _READ_BACK_JS = ("""
 """)
 
 
+# Select a box's whole text so the typing that follows replaces it. No key
+# event, no input event: nothing the activity listener could count.
+_SELECT_ALL_JS = "el => { if (typeof el.select === 'function') el.select(); }"
+
+
 def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple[bool, str]:
     """
     Fill a single field. Returns (did_it_work, what_happened).
@@ -220,8 +225,20 @@ def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple
                 # stops on an unconfirmed fill.
                 return True, f"set, but the box shows something else{UNCONFIRMED}"
             return False, "the box didn't take the value; left for you"
+        # A box that became read-only or disabled since the scan: Playwright's
+        # fill("") used to raise on it (the not_editable category); select()
+        # and typing don't, so it is checked here, with the same category.
+        if element.evaluate("el => !!(el.readOnly || el.disabled)"):
+            return False, "not_editable (the box is read-only or disabled)"
         element.click(timeout=4000)
-        element.fill("", timeout=4000)               # clear anything pre-filled
+        # Clear anything pre-filled by selecting it in the page, never with
+        # a Delete key: Playwright's fill("") presses Delete, and the
+        # activity listener counts a Delete keydown as Jack's even while
+        # the agent fills, so every box the agent cleared carried his
+        # touch mark and his later correction was never "new" (Jack,
+        # 2026-10-26). select() sends no input event; the typing replaces
+        # the selection keystroke by keystroke, as before.
+        element.evaluate(_SELECT_ALL_JS)
         element.type(text, delay=12, timeout=25_000)
         # The same read-back the contained path makes: only a word comes
         # back, and a box that has become secret is never read.

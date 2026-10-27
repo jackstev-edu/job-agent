@@ -702,6 +702,34 @@ def test_a_resume_that_rescans_the_page_counts_nothing_as_his():
     check.done()
 
 
+def test_a_box_the_agent_filled_and_jack_corrected_counts_as_his():
+    # Item 2: with no mark left by the agent's fill, Jack's correction to a
+    # box the agent filled is a mark new since the pause, so the box is his
+    # and the run goes on. The second Email box on page two is filled by
+    # the agent; at the City pause Jack retypes it. On e8021fa the box
+    # already carried the mark from the clear, so his retyping was never
+    # new and the box stayed the agent's.
+    check = Checks()
+
+    def jack_corrects_the_email_and_types_the_city(page, state, job_id):
+        page.fill("#em2", "jack@example.invalid")
+        page.fill("#city", "Springfield")
+    out, pauses, url, clicks, w = _drive(_gui_site(email_on_2=True), "/apply",
+                                          [jack_corrects_the_email_and_types_the_city])
+    by_label: dict = {}
+    for st in out.steps:
+        for f in st["fields"]:
+            by_label.setdefault(f["label"], []).append(f["ref"])
+    reviewed = (out.record or {}).get("human_reviewed", [])
+    em2 = [r for r in by_label.get("Email", []) if r in {f["ref"] for f in out.steps[1]["fields"]}]
+    check(out.status == "submitted", f"the run went on ({out.status}, {out.reason})")
+    check(em2 and em2[0] in reviewed and by_label.get("City", [None])[0] in reviewed,
+          f"the corrected email and the city are his ({reviewed})")
+    detail = next(e["detail"] for e in out.events if e["kind"] == "gate_pause")
+    check(detail.startswith("2 field(s) touched by Jack"), f"two touches counted ({detail})")
+    check.done()
+
+
 def test_an_intake_park_waits_in_its_tab_with_continue():
     # A link intake refuses (LinkedIn Easy Apply) is a needs-you row with
     # Continue in GUI mode; Continue starts the wizard on the tab, which
