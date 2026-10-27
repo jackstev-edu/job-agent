@@ -2627,7 +2627,8 @@ Two changes the cap test exposed (not in the plan): a park raised
 before a page is filled resumes with no fill in hand, and that resume
 set no hold, so a box Jack typed into during the park was filled over;
 it now holds every box with a value, as after a fill (test: fails on
-f2cd52c). And the page cap was checked at the top of a resumed pass on
+f2cd52c). [Reverted in 8c484f9, see that entry below: the hold is
+not in place.] And the page cap was checked at the top of a resumed pass on
 a page already filled, parking it again with no fill in hand; it now
 stops only before a new page is filled (a pass that fills page 25
 presses its Next, as before), and a time-cap park on a resumed pass
@@ -2695,3 +2696,34 @@ drafts no letter. Tests: a Workday posting run through `fill` with a
 letter gives the letter no company and the tracker the tenant (fails
 on 8c484f9: the letter was given "acme"); off Workday the company is kept
 (guard).
+
+Item 6 (the moved pause's hold; Jack's decision 6). After a "moved"
+pause (Next didn't move the page; Jack moved it on himself), the next
+fill leaves every box that holds a value alone, as after a park, in the
+GUI and in the terminal, with a fixed log line. Tests: Jack moves on
+and types his own email; the next fill holds it and the gate stops for
+him (fails on 4d42d7f: the agent typed over it); without a moved pause the
+agent fills that box as usual (guard).
+
+Commit 8c484f9 (fold of item 4's review): VERDICT FLAG, 3 FLAGs. Logged:
+the item 4 entry's no-fill-hold sentence now says it was reverted.
+OPEN DEFECT (reverted for scope, Jack's decision pending): a park with
+no fill in hand (a cap, a refusal, an intake, account, Google or
+chooser park) resumes with a fresh scan and no hold, so a box Jack
+typed into during the park is typed over with the profile's value, and
+that field goes to the classifier and mapper as an ordinary one
+(f2cd52c behaviour; fc4b187's cap test exposed it). Correction: with
+the carried-fill line removed at 8c484f9, the time-cap test fails
+because page two is filled twice (pages_filled 4), not because the
+City is held (that was at 834784b, where the hold still existed).
+
+Commit 4d42d7f (item 5): VERDICT FLAG, 2 low findings, 1 info. Logged:
+(1) guess_role_and_company and _letter_company each read page.url; a
+posting that sends itself off Workday between the two reads would put
+the tenant into the letter (a model input; the tenant is part of the
+address, not a profile or page value). Fix: read the address once and
+blank the letter company on the same reading. (2) No `fill` run off
+Workday checks that the letter still gets the title's company (the
+guard tests the helper only); fix: have the existing board run's draft
+stub record the company. Info: letter_company is computed before the
+follow branch and unused there.

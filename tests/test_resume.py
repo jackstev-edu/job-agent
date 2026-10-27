@@ -1031,6 +1031,53 @@ def test_the_final_page_stop_and_a_terminal_park_are_logged():
     check.done()
 
 
+STUCK1 = PAGE1.replace("onclick=\"location.href='/apply/2'\"", "")
+
+
+def test_a_moved_pause_holds_the_boxes_jack_filled_on_the_next_page():
+    # Item 6 (Jack's decision 6): page one's Next doesn't move; at the
+    # "moved" pause Jack goes on to page two himself and types his own
+    # email in the box the agent would fill. On Continue the next fill
+    # leaves it alone (held), and the gate stops for him on it. On 4d42d7f
+    # the agent typed the profile's email over his.
+    check = Checks()
+    site = _gui_site(email_on_2=True); site["/apply"] = STUCK1
+    seen: list = []
+
+    def jack_moves_on_and_types_his_email(page, state, job_id):
+        page.goto(f"{HOST}/apply/2")
+        page.fill("#em2", "jack.own@example.invalid")
+        page.fill("#city", "Springfield")
+
+    def read_the_box(page, state, job_id):
+        seen.append(page.input_value("#em2"))
+    out, pauses, url, clicks, w = _drive(site, "/apply", [jack_moves_on_and_types_his_email, read_the_box],
+                                          max_pauses=2)
+    kinds = [p["pause"]["kind"] for p in pauses]
+    check(kinds[:1] == ["moved"], f"the first pause is the moved one ({kinds})")
+    check("the page moved on in Jack's hands: boxes holding a value are held" in out.log,
+          f"the hold is logged ({out.log})")
+    check(seen == ["jack.own@example.invalid"], f"his email was left as he typed it ({seen})")
+    check(len(kinds) == 2 and kinds[1] == "gate", f"the gate stops for him on the held box ({kinds})")
+    check.done()
+
+
+def test_a_page_the_agent_moved_on_is_filled_as_usual():
+    # Guard for item 6: without a moved pause the hold isn't set; the
+    # agent fills page two's email box from the profile. Passes on 4d42d7f.
+    check = Checks()
+    seen: list = []
+
+    def jack_reads_and_types_the_city(page, state, job_id):
+        seen.append(page.input_value("#em2"))
+        page.fill("#city", "Springfield")
+    out, pauses, url, clicks, w = _drive(_gui_site(email_on_2=True), "/apply", [jack_reads_and_types_the_city])
+    check(seen and seen[0] not in ("", "jack.own@example.invalid"), f"the agent filled the box ({seen})")
+    check(not any("boxes holding a value are held" in line for line in out.log), f"no hold ({out.log})")
+    check(out.status == "submitted", f"the run went on ({out.status}, {out.reason})")
+    check.done()
+
+
 def test_an_intake_park_waits_in_its_tab_with_continue():
     # A link intake refuses (LinkedIn Easy Apply) is a needs-you row with
     # Continue in GUI mode; Continue starts the wizard on the tab, which

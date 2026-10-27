@@ -868,6 +868,11 @@ class Wizard:
                     self._pause("moved", pending["body"], prompt="Press Enter when it has moved on: ",
                                 until=lambda: self._moved(pending["before"]),
                                 extra={"before": pending["before"], "body": pending["body"]})
+                # Jack moved the page on himself and may have typed on the
+                # page it shows now: the next fill leaves every box that
+                # holds a value alone, as after a park (Jack, 2026-10-26).
+                self.out.log.append("the page moved on in Jack's hands: boxes holding a value are held")
+                self._protect_held = True
             elif kind in ("gate", "final"):
                 fill = pending.get("fill")
                 self._remap(fill, pending, info)
@@ -1051,6 +1056,10 @@ class Wizard:
                                   extra={"before": before, "body": body})
                 if not self._moved(before):
                     raise _Parked(f"the page didn't move on after '{nxt.get('word')}' ({how})")
+                # The same hold in the terminal: the page moved on while it
+                # was in Jack's hands.
+                self.out.log.append("the page moved on in Jack's hands: boxes holding a value are held")
+                self._protect_held = True
             return None
         if sub.get("chosen"):
             if fill is None and self.out.pages_filled == 0:
