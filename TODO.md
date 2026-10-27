@@ -2610,3 +2610,25 @@ direction); the comments should say that. (3) The picker residual was
 said to be logged under MUST FIX but was only in this round's log; it
 is now a bullet there. (4) Minor: the picker-branch test's comment
 doesn't list the listbox and option cases it now has.
+
+Item 4 (cap parks and a closed tab; Jack's decision 3). A cap park's
+Continue grants one more window (the agent's own time starts a new
+60 minutes; the page cap rises by 25); the row's message says so. A
+tab that is gone parks with a pause of kind "closed" whose row offers
+"Close this job" (POST /close-job -> State.close_job: status "closed",
+the queue loop drops the kept wizard) and no Continue (refused). Tests:
+with the page cap at one, the three-page run parks after each page and
+Continue carries it to Submit, with the grants logged; a jumping clock
+hits the time cap once and Continue goes on (both fail on f2cd52c); a
+closed tab's row offers Close, Continue is refused, Close ends the job
+(fails on f2cd52c); the route closes only a closed-kind pause and the
+page draws the button (fails on f2cd52c).
+Two changes the cap test exposed (not in the plan): a park raised
+before a page is filled resumes with no fill in hand, and that resume
+set no hold, so a box Jack typed into during the park was filled over;
+it now holds every box with a value, as after a fill (test: fails on
+f2cd52c). And the page cap was checked at the top of a resumed pass on
+a page already filled, parking it again with no fill in hand; it now
+stops only before a new page is filled (a pass that fills page 25
+presses its Next, as before), and a time-cap park on a resumed pass
+carries the fill so the resume goes back to its gate and Next.

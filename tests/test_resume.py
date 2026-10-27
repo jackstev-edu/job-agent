@@ -322,9 +322,11 @@ def test_a_resume_on_a_closed_tab_or_an_unknown_shape_is_safe():
             page.close()
             state.request_continue(job_id)
             out = w.continue_from(state.take_resume(job_id))
+        # Since item 4 (Jack's decision 3, 2026-10-26) the row offers
+        # "Close this job", not Continue.
         check(out.status == wizard.WAITING and out.reason == "the tab closed"
-              and state.snapshot()["jobs"][0]["pause"]["kind"] == "parked",
-              f"a closed tab parks again, with Continue, no crash ({out.status}, {out.reason})")
+              and state.snapshot()["jobs"][0]["pause"]["kind"] == "closed",
+              f"a closed tab parks again, with Close this job, no crash ({out.status}, {out.reason})")
     finally:
         browser.close(); p.stop()
 
@@ -846,6 +848,120 @@ def test_intakes_presses_head_the_job_log():
     log = made[0].out.log if made else []
     check(log and log[0].startswith("clicked 'Apply now' on "),
           f"the job log starts with intake's press ({log[:3]})")
+    check.done()
+
+
+def test_continue_after_a_cap_park_grants_one_more_window():
+    # Item 4 (Jack's decision 3): a cap park's Continue grants one more
+    # window. With the page cap at one, the three-page run parks after
+    # each page and goes on after each Continue; the time cap, hit by a
+    # clock that jumps, parks once and goes on. On f2cd52c a cap park
+    # re-parked on every Continue.
+    check = Checks()
+
+    def jack_types_the_city_at_a_gate_stop(page, state, job_id):
+        kind = (state.snapshot()["jobs"][0]["pause"] or {}).get("kind")
+        if kind == "gate" and page.locator("#city").count() and page.input_value("#city") == "":
+            page.fill("#city", "Springfield")
+    with mock.patch.object(wizard, "STEP_CAP", 1):
+        out, pauses, url, clicks, w = _drive(_gui_site(), "/apply", [jack_types_the_city_at_a_gate_stop] * 6,
+                                              max_pauses=6)
+    msgs = [p["pause"]["message"] for p in pauses]
+    check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
+          f"two cap parks, each Continue granted a window, the run submitted ({out.status}, {out.reason}, {clicks})")
+    check(sum(1 for m in msgs if m.startswith("over the ") and "page cap" in m) == 2
+          and all("one more window" in m for m in msgs if "page cap" in m),
+          f"the cap parks say what Continue grants ({msgs})")
+    check(out.log.count("one more window of 1 pages granted") == 2, f"each grant logged ({out.log})")
+
+    # The time cap: a clock that jumps past the hour at the first pass.
+    ticks = {"t": 1000.0, "n": 0}
+
+    def clock():
+        ticks["n"] += 1
+        if ticks["n"] == 2:
+            ticks["t"] += wizard.TIME_CAP_S + 1
+        return ticks["t"]
+    p, browser, ctx = _open(_gui_site())
+    try:
+        page = ctx.new_page(); page.goto(f"{HOST}/single")
+        state = gui.State(); [job_id] = state.start([f"{HOST}/single"], dry=False)
+        w = _wizard(page, state, job_id, "/single")
+        w.clock = clock
+        with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                mock.patch("agent.mapper.map_fields", map_from_profile):
+            out = w.run()
+            view = state.snapshot()["jobs"][0]
+            check(out.status == wizard.WAITING and "60-minute cap" in out.reason
+                  and "one more window" in view["pause"]["message"],
+                  f"the time cap parked with the grant on offer ({out.status}, {out.reason})")
+            state.request_continue(job_id)
+            out = w.continue_from(state.take_resume(job_id))
+    finally:
+        browser.close(); p.stop()
+    check(out.status == "submitted" and "one more 60-minute window granted" in out.log,
+          f"Continue granted the window and the run went on ({out.status}, {out.reason}, {out.log})")
+    check.done()
+
+
+def test_a_park_with_no_fill_in_hand_holds_what_jack_typed_meanwhile():
+    # Found by item 4's cap test: a park raised before a page is filled
+    # (here the page cap, hit on page two) resumed with no hold, so a box
+    # Jack typed into during the park was filled over by the fresh scan.
+    # Now that scan holds every box with a value, as after a fill. On
+    # f2cd52c the agent typed the profile's email over his.
+    check = Checks()
+    seen: list = []
+
+    def jack_types_his_email_during_the_park(page, state, job_id):
+        if state.snapshot()["jobs"][0]["pause"]["kind"] == "parked":
+            page.fill("#em2", "jack.own@example.invalid")
+
+    def read_the_box(page, state, job_id):
+        seen.append(page.input_value("#em2"))
+    with mock.patch.object(wizard, "STEP_CAP", 1):
+        out, pauses, url, clicks, w = _drive(_gui_site(email_on_2=True), "/apply",
+                                              [jack_types_his_email_during_the_park, read_the_box],
+                                              max_pauses=2)
+    kinds = [p["pause"]["kind"] for p in pauses]
+    check(kinds[:1] == ["parked"], f"the cap parked first ({kinds})")
+    check("resumed with no fill in hand: boxes holding a value are held" in out.log,
+          f"the hold is logged ({out.log})")
+    check(seen == ["jack.own@example.invalid"], f"his email was left as he typed it ({seen})")
+    check.done()
+
+
+def test_a_closed_tab_offers_close_not_continue():
+    # Item 4 (Jack's decision 3): a tab that is gone can't be resumed; the
+    # row offers "Close this job" and Continue is refused; Close ends the
+    # job and the queue loop drops its kept wizard. On f2cd52c the row
+    # offered a Continue that only parked again.
+    check = Checks()
+    site = _gui_site(); site["/nobuttons"] = NO_BUTTONS
+    p, browser, ctx = _open(site)
+    try:
+        page = ctx.new_page(); page.goto(f"{HOST}/nobuttons")
+        state = gui.State(); [job_id] = state.start([f"{HOST}/nobuttons"], dry=False)
+        w = _wizard(page, state, job_id, "/nobuttons")
+        with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                mock.patch("agent.mapper.map_fields", map_from_profile):
+            out = w.run()
+            page.close()
+            state.request_continue(job_id)
+            out = w.continue_from(state.take_resume(job_id))
+        view = state.snapshot()["jobs"][0]
+        check(out.status == wizard.WAITING and view["pause"]["kind"] == "closed"
+              and "close this job" in view["pause"]["message"].lower(),
+              f"a closed tab's pause is of kind closed with the Close wording ({view['pause']})")
+        check(state.request_continue(job_id) is False, "Continue is refused on it")
+        waiting = {job_id: (w, {})}
+        check(state.close_job(job_id) is True and state.snapshot()["jobs"][0]["status"] == "closed",
+              "Close this job ends it")
+        for jid in state.closed_jobs():
+            waiting.pop(jid, None)
+        check(waiting == {}, "the queue loop drops its kept wizard")
+    finally:
+        browser.close(); p.stop()
     check.done()
 
 

@@ -1339,6 +1339,8 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
                                 "touches nothing on it")
             except Exception as e:
                 state.notice = f"couldn't open the Google sign-in tab ({type(e).__name__})"
+        for job_id in state.closed_jobs():
+            waiting.pop(job_id, None)           # Jack closed it: nothing to resume
         for job_id in state.resumable():
             info = state.take_resume(job_id)
             kept = waiting.pop(job_id, None)

@@ -64,6 +64,31 @@ def _req(server, method, path, body=None, host=None, origin=None, token="ok"):
     return resp.status, dict(resp.getheaders()), parsed
 
 
+def test_close_job_is_a_route_and_a_state_change():
+    # Item 4: POST /close-job closes a job whose pause is of kind "closed"
+    # and nothing else; the page draws "Close this job" for that kind.
+    # On f2cd52c the route did not exist.
+    check = Checks()
+    state, server = _server()
+    try:
+        [a, b] = state.start(["https://x.example/1", "https://x.example/2"], dry=False)
+        state.set_pause(a, "closed", "the tab closed. Its tab is gone; close this job.")
+        state.set_pause(b, "gate", "This page needs you: 'City'")
+        status, _, body = _req(server, "POST", "/close-job", {"job": b})
+        check(status == 200 and body.get("ok") is False, f"a gate pause can't be closed ({status}, {body})")
+        status, _, body = _req(server, "POST", "/continue", {"job": a})
+        check(status == 200 and body.get("ok") is False, f"a closed tab can't be continued ({status}, {body})")
+        status, _, body = _req(server, "POST", "/close-job", {"job": a})
+        jobs = {j["id"]: j for j in state.snapshot()["jobs"]}
+        check(status == 200 and body.get("ok") is True and jobs[a]["status"] == "closed" and jobs[a]["pause"] is None,
+              f"the closed tab's job is closed ({status}, {body}, {jobs[a]})")
+        status, _, page = _req(server, "GET", "/")
+        check(status == 200 and "Close this job" in page and "/close-job" in page, "the page draws the Close button")
+    finally:
+        server.stop()
+    check.done()
+
+
 def test_the_page_and_its_checks():
     check = Checks()
     state, server = _server()

@@ -183,6 +183,11 @@ class _Parked(Exception):
     after_fill: "pipeline.PageFill | None" = None
     page_events: list | None = None
 
+    def __init__(self, reason: str, *, cap: str | None = None, closed: bool = False):
+        super().__init__(reason)
+        self.cap = cap            # "time" / "pages": a Continue grants one more window
+        self.closed = closed      # the tab is gone: the row offers Close, not Continue
+
 
 class Wizard:
     def __init__(self, page: "Page", prof, *, url: str, portal: str, portal_method: str,
@@ -218,6 +223,7 @@ class Wizard:
         self._protect_held = False              # the next fill leaves boxes that hold a value alone
         self.resume_info: dict | None = None    # what Jack gave in the GUI for that pause
         self.active_s = 0.0                     # the agent's own time, pauses excluded
+        self.step_cap = STEP_CAP                # raised by one window per Continue on a cap park
         self._tick: float | None = None
 
     # -- records ---------------------------------------------------------------
@@ -619,7 +625,7 @@ class Wizard:
         except _Parked as e:
             if getattr(self.pauser, "deferring", False):
                 return self.park_for_continue(str(e), after_fill=e.after_fill,
-                                              page_events=e.page_events)
+                                              page_events=e.page_events, cap=e.cap, closed=e.closed)
             self.out.wizard = None
             return self._parked(str(e))
         except pause_mod.Deferred as e:
@@ -642,7 +648,8 @@ class Wizard:
         self.active_s += self.clock() - (self._tick or self.clock())
         return self.out
 
-    def park_for_continue(self, reason: str, *, after_fill=None, page_events=None) -> Outcome:
+    def park_for_continue(self, reason: str, *, after_fill=None, page_events=None,
+                          cap: str | None = None, closed: bool = False) -> Outcome:
         """
         GUI mode (Jack, 2026-10-26): a park is a pause like any other. The
         row shows the reason with Continue; the tab stays open; nothing is
@@ -657,12 +664,21 @@ class Wizard:
         if self._tick is None:
             self._tick = self.clock()
         self.out.log.append(f"parked: {_clean(reason)}")
+        if closed:
+            # The tab is gone: nothing to resume. The row offers Close, not
+            # Continue (Jack, 2026-10-26).
+            self.pending = {"kind": "closed", "fill": None, "reason": reason, "page_events": [], "shape": None}
+            return self._wait({"kind": "closed", "wants_code": False, "fields": [],
+                               "message": f"{reason}. Its tab is gone; close this job."}, reason)
         shape = follow.read_shape(self.page) if after_fill is not None else None
         self.pending = {"kind": "parked", "fill": after_fill, "reason": reason,
-                        "page_events": list(page_events or []), "shape": shape}
-        info = {"kind": "parked", "wants_code": False, "fields": [],
-                "message": f"{reason}. Fix it in the tab yourself, then press Continue: the page "
-                           f"is read again from where it stopped (no click, no navigation)."}
+                        "page_events": list(page_events or []), "shape": shape, "cap": cap}
+        more = (" Continue grants one more window: another 60 minutes of the agent's own time."
+                if cap == "time" else
+                f" Continue grants one more window: another {STEP_CAP} pages." if cap == "pages" else
+                " Fix it in the tab yourself, then press Continue: the page is read again from where "
+                "it stopped (no click, no navigation).")
+        info = {"kind": "parked", "wants_code": False, "fields": [], "message": f"{reason}.{more}"}
         return self._wait(info, reason)
 
     def continue_from(self, info: dict | None) -> Outcome:
@@ -797,6 +813,11 @@ class Wizard:
         """
         fill = pending.get("fill")
         if fill is None:
+            # A park before this page was filled (a cap, a refusal): the
+            # tab was Jack's meanwhile, so the scan that follows leaves
+            # every box that holds a value alone, as after a fill.
+            self.out.log.append("resumed with no fill in hand: boxes holding a value are held")
+            self._protect_held = True
             return None, False, []
         if pending.get("shape") is None or self._moved(pending["shape"]):
             self.out.log.append("the page changed since the park: scanned afresh")
@@ -823,7 +844,7 @@ class Wizard:
         rechecks = 0            # passes in a row that ended in the form wait
         if pending:
             if page.is_closed():
-                raise _Parked("the tab closed")
+                raise _Parked("the tab closed", closed=True)
             # A resumed page is refused by its address before any pause's
             # own resume runs (a job board, Google's site, another host):
             # nothing is gated, ticked or pressed on a page that left the
@@ -863,7 +884,17 @@ class Wizard:
                     self._handled_by_jack("gate_pause", "final page")
                 skip_fill = True
             elif kind == "parked":
+                # A cap park resumed: Jack's Continue grants one more window
+                # (Jack, 2026-10-26); the cap itself is unchanged.
+                if pending.get("cap") == "time":
+                    self.active_s = 0.0
+                    self.out.log.append("one more 60-minute window granted")
+                elif pending.get("cap") == "pages":
+                    self.step_cap += STEP_CAP
+                    self.out.log.append(f"one more window of {STEP_CAP} pages granted")
                 fill, skip_fill, carried_events = self._resume_fill(pending, info)
+            elif kind == "closed":
+                raise _Parked("the tab closed", closed=True)
             elif kind == "captcha":
                 # Only once the page can be read and shows no CAPTCHA;
                 # otherwise the top of the loop pauses again and the event
@@ -885,11 +916,20 @@ class Wizard:
             page_events: list[dict] = carried_events if skip_fill else []
             carried_events = []
             if self._over_time():
-                raise _Parked("over the 60-minute cap of the agent's own time for one application")
-            if self.out.pages_filled >= STEP_CAP:
-                raise _Parked(f"over the {STEP_CAP}-page cap")
+                over = _Parked("over the 60-minute cap of the agent's own time for one application",
+                               cap="time")
+                if skip_fill:
+                    # A resumed pass with this page's fill in hand: the
+                    # resume goes back to its gate and Next, not a refill.
+                    over.after_fill, over.page_events = fill, page_events
+                raise over
+            # The page cap stops before a new page is filled. A resumed pass
+            # on a page already filled goes on to its Next, as the pass that
+            # filled it would have (the cap is checked before each fill).
+            if not skip_fill and self.out.pages_filled >= self.step_cap:
+                raise _Parked(f"over the {self.step_cap}-page cap", cap="pages")
             if page.is_closed():
-                raise _Parked("the tab closed")
+                raise _Parked("the tab closed", closed=True)
             try:
                 here = page.url         # the address every check below is made on
             except Exception:

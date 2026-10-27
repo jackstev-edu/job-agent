@@ -30,8 +30,8 @@ from urllib.parse import urlparse
 
 from . import gate, sensitive
 
-QUEUED, WORKING, NEEDS_YOU, SUBMITTED, FAILED, DRY, DONE = (
-    "queued", "working", "needs_you", "submitted", "failed", "dry", "done")
+QUEUED, WORKING, NEEDS_YOU, SUBMITTED, FAILED, DRY, DONE, CLOSED = (
+    "queued", "working", "needs_you", "submitted", "failed", "dry", "done", "closed")
 
 # Categories whose fields never get an approve tick, beyond what the gate's
 # sensitive test already excludes (Jack, 2026-10-19).
@@ -147,8 +147,24 @@ class State:
             job = self._job(job_id)
             if job is None or job.status != NEEDS_YOU:
                 return False
+            if (job.pause or {}).get("kind") == "closed":
+                return False            # its tab is gone: Close is the only action
             job.continue_requested = True
             return True
+
+    def close_job(self, job_id: str) -> bool:
+        """Jack closes a job whose tab is gone (pause kind "closed"): nothing more is done for it."""
+        with self.lock:
+            job = self._job(job_id)
+            if job is None or job.status != NEEDS_YOU or (job.pause or {}).get("kind") != "closed":
+                return False
+            job.status, job.pause, job.continue_requested = CLOSED, None, False
+            job.reason = f"{job.reason} (closed by Jack)" if job.reason else "closed by Jack"
+            return True
+
+    def closed_jobs(self) -> list[str]:
+        with self.lock:
+            return [j.id for j in self.jobs if j.status == CLOSED]
 
     def request_close(self, confirm: bool) -> dict:
         with self.lock:
@@ -320,9 +336,15 @@ button { font: inherit; padding: .3rem .8rem; }
           actions.appendChild(inp); actions.appendChild(send);
           if (j.code_given) actions.appendChild(el('span', 'code received', 'muted'));
         }
-        const cont = el('button', 'Continue');
-        cont.addEventListener('click', () => api('/continue', {job: j.id}).then(refresh));
-        actions.appendChild(cont);
+        if (j.pause.kind === 'closed') {
+          const close = el('button', 'Close this job');
+          close.addEventListener('click', () => api('/close-job', {job: j.id}).then(refresh));
+          actions.appendChild(close);
+        } else {
+          const cont = el('button', 'Continue');
+          cont.addEventListener('click', () => api('/continue', {job: j.id}).then(refresh));
+          actions.appendChild(cont);
+        }
         box.appendChild(actions);
         td.appendChild(box);
         if (!seenNeedsYou.has(j.id)) { seenNeedsYou.add(j.id); chime(); }
@@ -441,6 +463,8 @@ class Server:
                     self._json({"ok": ok}); return
                 if path == "/continue":
                     self._json({"ok": st.request_continue(str(body.get("job", "")))}); return
+                if path == "/close-job":
+                    self._json({"ok": st.close_job(str(body.get("job", "")))}); return
                 if path == "/close-browser":
                     self._json(st.request_close(bool(body.get("confirm")))); return
                 if path == "/google-login":
