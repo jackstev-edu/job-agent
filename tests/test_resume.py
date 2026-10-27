@@ -832,6 +832,7 @@ def test_intakes_presses_head_the_job_log():
     args = Namespace(profile=str(profile_path), resume=None, dry=False)
     quiet = pause.Pauser(notify_fn=lambda t, body, echo=print: None, echo=lambda *x, **k: None)
     made: list = []
+    printed_out = io.StringIO()
 
     class Kept(wizard.Wizard):
         def __init__(self, *a, **k):
@@ -842,12 +843,15 @@ def test_intakes_presses_head_the_job_log():
         with mock.patch.object(apply.classify, "classify_fields", classify_by_label), \
                 mock.patch.object(apply.mapper, "map_fields", map_from_profile), \
                 mock.patch.object(apply.wizard, "Wizard", Kept), \
-                redirect_stdout(io.StringIO()):
+                redirect_stdout(printed_out):
             apply.gui_loop(ctx, state, apply.Profile.load(profile_path), args, quiet,
                            idle_limit_s=1.0, waiting={})
     log = made[0].out.log if made else []
     check(log and log[0].startswith("clicked 'Apply now' on "),
           f"the job log starts with intake's press ({log[:3]})")
+    printed = printed_out.getvalue()
+    check(printed.count("clicked 'Apply now' on ") == 1,
+          f"intake's press is printed once, not again with the job log ({printed.count(chr(39) + 'Apply now')})")
     check.done()
 
 
@@ -962,6 +966,68 @@ def test_a_closed_tab_offers_close_not_continue():
         check(waiting == {}, "the queue loop drops its kept wizard")
     finally:
         browser.close(); p.stop()
+    check.done()
+
+
+def test_a_log_line_the_console_cant_encode_is_printed_with_replacements():
+    # Fold of f2cd52c's review: a gate reason carries a page label; on a
+    # stdout that can't encode one of its characters (a cp1252 pipe) the
+    # print raised and a job only waiting for Jack failed. Now the line is
+    # printed with replacements. On fc4b187 the print raised
+    # UnicodeEncodeError.
+    import apply
+    check = Checks()
+    out = wizard.Outcome(wizard.WAITING, "waiting", log=["gate stopped: 'Ville \u2713': left blank"])
+    out.wizard = object()
+    finish = {"url": f"{HOST}/log-encode", "company": "", "role": "", "ats": "generic",
+              "portal": "generic", "portal_method": "default", "resume": ""}
+    raw = io.BytesIO()
+    narrow = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+    error = None
+    try:
+        with redirect_stdout(narrow), mock.patch.object(apply.sys, "stdout", narrow):
+            apply.finish_outcome(out, finish, on_wait=lambda w, f: None)
+        narrow.flush()
+    except UnicodeEncodeError as e:
+        error = e
+    text = raw.getvalue().decode("cp1252", "replace")
+    check(error is None, f"no encoding error ({error})")
+    check("gate stopped: 'Ville ?': left blank" in text, f"printed with a replacement ({text!r})")
+    check(out.printed == 1, f"the line counts as printed ({out.printed})")
+    check.done()
+
+
+def test_the_final_page_stop_and_a_terminal_park_are_logged():
+    # Fold of f2cd52c's review: the final-page gate stop and a park in the
+    # terminal (not the GUI) logged no line. The final page here stops on
+    # a stand-in for a stop only the full record shows; then a page that
+    # never draws its form parks in the terminal. On fc4b187 neither line
+    # existed.
+    from test_wizard import _run, _site
+    import agent.submit as submit_mod
+    check = Checks()
+    real_decide = submit_mod.gate.decide
+
+    def full_record_stop(record, prof, **kw):
+        res = real_decide(record, prof, **kw)
+        n = record.get("steps")
+        n = n if isinstance(n, int) else len(n or [])
+        if record.get("wizard") and n >= 3:
+            res = dict(res, content_verdict="would_stop", content_reasons=["a stop only the full record shows"])
+        return res
+    out, jack, clicks, ticks, url = _run(_site(city_optional=True), "/apply", act=None,
+                                         patches=(("agent.submit.gate.decide", full_record_stop),))
+    check(any(line.startswith("gate stopped on the final page: the gate stopped: a stop only the full record shows")
+              for line in out.log), f"the final-page stop is logged ({out.log})")
+    # A terminal park: a page that never draws its form parks after the
+    # (shortened) wait, through the terminal's park.
+    from test_wizard import NEVER1
+    site = _site(); site["/apply"] = NEVER1
+    with mock.patch.object(wizard, "FORM_WAIT_S", 2):
+        out, jack, clicks, ticks, url = _run(site, "/apply", act=None)
+    check(out.status == "needs_you"
+          and "parked: a page with no fields, no Next and no Submit" in out.log,
+          f"the terminal park is logged ({out.status}, {out.reason}, {out.log})")
     check.done()
 
 

@@ -2632,3 +2632,16 @@ a page already filled, parking it again with no fill in hand; it now
 stops only before a new page is filled (a pass that fills page 25
 presses its Next, as before), and a time-cap park on a resumed pass
 carries the fill so the resume goes back to its gate and Next.
+
+Commit f2cd52c (item 3): VERDICT FLAG, 3 FLAGs. Folded in the next
+commit: the final-page gate stop now logs "gate stopped on the final
+page: <reason>" and a terminal park logs "parked: <reason>" (both were
+missing; the claim "every stop and park" now holds); the intake test
+asserts intake's press is printed once (deleting the printed mark
+passed every test before); a log line the console's encoding can't
+show is printed with replacements, so a stdout redirected to a cp1252
+pipe can't fail a job that is only waiting for Jack (intake's steps go
+through the same print). Tests: the final-page stop and terminal park
+lines (fail on fc4b187), the encoding test (fails on fc4b187 with
+UnicodeEncodeError), the printed-once check (passes on fc4b187, where
+the mark exists; with the mark removed there it fails: printed twice).

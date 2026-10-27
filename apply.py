@@ -1126,7 +1126,7 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
     pauser = pauser or pause.Pauser()
     landing = intake.open_link(ctx, url, new_tab=new_tab)
     for step in landing.steps:
-        print(f"{DIM}  {step}{OFF}")
+        _print_safely(f"{DIM}  {step}{OFF}")
     page = landing.page
     role = company = ""
     if page is not None:
@@ -1184,6 +1184,20 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
     return finish_outcome(out, finish, on_wait=on_wait)
 
 
+def _print_safely(text: str) -> None:
+    """
+    Print a line that may carry page text (a label in a gate reason): a
+    character the console's encoding can't show is replaced, so a stdout
+    redirected to a cp1252 file never raises and fails a job that is only
+    waiting for Jack (fold of f2cd52c's review).
+    """
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(text.encode(enc, "replace").decode(enc, "replace"))
+
+
 def finish_outcome(out, finish: dict, *, on_wait=None) -> tuple[str, str]:
     """
     What happens once the wizard returns: a waiting job (GUI mode) is
@@ -1195,7 +1209,7 @@ def finish_outcome(out, finish: dict, *, on_wait=None) -> tuple[str, str]:
     # Only the lines added since the last print: a job resumed from the
     # GUI comes back here on every Continue (Jack, 2026-10-26).
     for line in out.log[out.printed:]:
-        print(f"{DIM}  {line}{OFF}")
+        _print_safely(f"{DIM}  {line}{OFF}")
     out.printed = len(out.log)
     if out.status == wizard.WAITING:
         tracker.record(url, company=company, role=role, ats=ats, resume_used=finish["resume"],

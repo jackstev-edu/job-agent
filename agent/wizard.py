@@ -254,6 +254,9 @@ class Wizard:
         return self._record([fill.step], events, wizard=True)
 
     def _parked(self, reason: str) -> Outcome:
+        # The terminal's park; a GUI park logs the same line in
+        # park_for_continue (fold of f2cd52c's review).
+        self.out.log.append(f"parked: {_clean(reason)}")
         self.out.status, self.out.reason = "needs_you", reason
         return self.out
 
@@ -1089,6 +1092,7 @@ class Wizard:
         self.out.evidence = submission.evidence
         if submission.status == "needs_you" and not submission.clicked:
             # The gate stopped on the whole application: Jack's turn.
+            self.out.log.append(f"gate stopped on the final page: {_clean(submission.reason)}")
             self.out.events.append({"kind": "gate_pause", "detail": "final page", "handled": None})
             marked_before = self._marked(fill.fields, baseline=True) if fill else None
             how = self._pause("final", f"Before submitting: {_clean(submission.reason)}. Fix it "
