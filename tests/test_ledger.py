@@ -686,11 +686,12 @@ def test_a_misaligned_radio_group_is_never_the_agents():
 
 
 def test_a_row_click_still_marks_the_focused_dropdown_but_a_click_marks_no_other_focused_box():
-    # Guard for the listener's pointer rule (fold of bb196bf's review): a
+    # The wizard's review mark (REVIEW_ATTR, fix of cc17666's BLOCK): a
     # mouse pick of a dropdown row while its combobox input holds the
-    # focus marks the input (follow mode's case); a click elsewhere while
-    # a plain box holds the focus marks only what was clicked. The first
-    # half passes on bb196bf too; the second fails there.
+    # focus marks the input; a click elsewhere while a plain box holds the
+    # focus marks only what was clicked. Follow mode's TOUCH_ATTR still
+    # marks the focused box. The first half passes on cc17666 too; the
+    # second fails there (no REVIEW_ATTR at all).
     from playwright.sync_api import sync_playwright
     check = Checks()
     html = TEST_HOME / "pointer-rule.html"
@@ -703,7 +704,7 @@ def test_a_row_click_still_marks_the_focused_dropdown_but_a_click_marks_no_other
         try:
             ctx = browser.new_context(); ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
             page = ctx.new_page(); page.goto(html.resolve().as_uri())
-            T = ledger.TOUCH_ATTR
+            T = ledger.REVIEW_ATTR
             page.focus("#cb"); page.locator("#row").click()
             marked_after_pick = page.evaluate("[...document.querySelectorAll('[%s]')].map(e => e.id)" % T)
             page.evaluate("() => { for (const e of document.querySelectorAll('[%s]')) e.removeAttribute('%s'); }" % (T, T))
@@ -714,6 +715,95 @@ def test_a_row_click_still_marks_the_focused_dropdown_but_a_click_marks_no_other
     check("cb" in marked_after_pick, f"the focused combobox is marked by a row pick ({marked_after_pick})")
     check("plain" not in marked_after_click and "other" in marked_after_click,
           f"a click elsewhere marks the clicked box only, not the focused plain box ({marked_after_click})")
+    check.done()
+
+
+def test_the_review_mark_takes_a_focused_box_only_when_it_is_a_dropdown():
+    # Fold of cc17666's review, one case per branch of the picker test: a
+    # click elsewhere puts REVIEW_ATTR on the focused element only for an
+    # explicit combobox role, a live aria-autocomplete, a select or a box
+    # inside a [role=combobox]; never on Bootstrap's form-control box, an
+    # input inside an Ant Design-style "...-control" wrapper, or one with
+    # aria-autocomplete="none". TOUCH_ATTR (follow mode) takes the focused
+    # element in every case. Fails on cc17666 (no REVIEW_ATTR).
+    from playwright.sync_api import sync_playwright
+    check = Checks()
+    html = TEST_HOME / "pointer-rule-branches.html"
+    html.write_text('''<!doctype html><html><body>
+<input id="fc" class="form-control"><div class="ant-form-item-control"><input id="ant"></div>
+<input id="acnone" aria-autocomplete="none"><input id="aclist" aria-autocomplete="list">
+<input id="role" role="combobox"><select id="sel"><option>A</option></select>
+<div role="combobox"><input id="inner"></div>
+<button id="away" type="button">elsewhere</button></body></html>''', encoding="utf-8")
+    want = {"fc": False, "ant": False, "acnone": False, "aclist": True, "role": True, "sel": True, "inner": True}
+    got: dict = {}
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            ctx = browser.new_context(); ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+            page = ctx.new_page(); page.goto(html.resolve().as_uri())
+            for el_id in want:
+                page.evaluate("([a, b]) => { for (const e of document.querySelectorAll('*')) "
+                              "{ e.removeAttribute(a); e.removeAttribute(b); } }",
+                              [ledger.REVIEW_ATTR, ledger.TOUCH_ATTR])
+                page.focus(f"#{el_id}")
+                page.dispatch_event("#away", "pointerdown")      # untrusted: must mark nothing
+                untrusted = page.evaluate("id => document.getElementById(id).hasAttribute('%s')"
+                                          % ledger.REVIEW_ATTR, el_id)
+                page.mouse.move(0, 0)
+                box = page.locator("#away").bounding_box()
+                page.mouse.move(box["x"] + 5, box["y"] + 5); page.mouse.down(); page.mouse.up()
+                got[el_id] = page.evaluate("([id, r, t]) => { const e = document.getElementById(id); "
+                                           "return [e.hasAttribute(r), e.hasAttribute(t)]; }",
+                                           [el_id, ledger.REVIEW_ATTR, ledger.TOUCH_ATTR]) + [untrusted]
+        finally:
+            browser.close()
+    for el_id, review in want.items():
+        check(got[el_id][0] is review, f"#{el_id}: review mark {review} ({got[el_id]})")
+        check(got[el_id][1] is True, f"#{el_id}: follow mode's touch mark still taken ({got[el_id]})")
+        check(got[el_id][2] is False, f"#{el_id}: an untrusted event marks nothing ({got[el_id]})")
+    check.done()
+
+
+DATE_PORTAL = """<!doctype html><html><body><form>
+  <div id="w"><label for="dt">Start date</label><input id="dt" name="start_date"></div>
+</form>
+<div id="portal"><button type="button" id="pick">1 March</button></div>
+<script>
+  // A datepicker in a portal outside the field: its button keeps the focus
+  // in the box (mousedown default prevented) and sets the value by script.
+  const pick = document.getElementById('pick');
+  pick.addEventListener('mousedown', e => e.preventDefault());
+  pick.addEventListener('click', () => { document.getElementById('dt').value = '2026-03-01'; });
+  window.remount = () => { document.getElementById('w').innerHTML =
+    '<label for="dt">Start date</label><input id="dt" name="start_date">'; };
+</script></body></html>"""
+
+
+def test_a_box_you_changed_with_the_mouse_through_a_portal_stays_out_after_a_remount():
+    # Fix of cc17666's BLOCK (follow mode's negative): the box holds the
+    # focus, you pick a day in a datepicker whose list sits in a portal
+    # outside the field, the page sets the value by script (no trusted
+    # event on the box), then the form re-mounts it empty. The focused
+    # box was marked and recorded at your click, so it stays out of model
+    # input. On cc17666 it came back as open.
+    check = Checks()
+    with mock_page(_write("ledger_date_portal.html", DATE_PORTAL)) as page:
+        led = ledger.FieldLedger()
+        _quiet_guard(page)
+        page.focus("#dt")
+        page.click("#pick")
+        focused = page.evaluate("document.activeElement && document.activeElement.id")
+        held = page.input_value("#dt")
+        page.evaluate("window.remount()")
+        fields = extract.extract_fields(page, extract.ReadGuard())
+        box = next(f for f in fields if f.get("name") == "start_date")
+        check(focused == "dt" and held == "2026-03-01",
+              f"the pick kept the focus in the box and set its value ({focused}, {held})")
+        check(page.evaluate("() => !document.querySelector('[data-ja-touched]#dt')"),
+              "the re-mounted box carries no mark (so the next check means something)")
+        check(box["ref"] not in led.open_fields(page, fields),
+              "changed with the mouse, then re-mounted: still out of model input")
     check.done()
 
 

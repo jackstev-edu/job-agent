@@ -123,8 +123,9 @@ _HAS_FIELDS_JS = r"""
 
 
 # Which of these refs carry a trusted-input mark from the activity listener
-# on their own element (TOUCH_ATTR, set only for isTrusted events while the
-# agent isn't filling). The mark on a wrapper doesn't count here: in follow
+# on their own element (REVIEW_ATTR, set only for isTrusted events while the
+# agent isn't filling; the wizard's stricter reading of TOUCH_ATTR, see
+# ledger). The mark on a wrapper doesn't count here: in follow
 # mode over-marking keeps a field from the model, but here a mark waives a
 # stop, so only the field's own element, or an option element of its
 # group (Jack, 2026-10-26), says anything. Refs only.
@@ -387,7 +388,7 @@ class Wizard:
         try:
             hit = set(self.page.evaluate(_TOUCHED_JS,
                                          [[r for refs in by_field.values() for r in refs],
-                                          ledger.TOUCH_ATTR]) or [])
+                                          ledger.REVIEW_ATTR]) or [])
         except Exception:
             return None
         return {ref for ref, refs in by_field.items() if any(r in hit for r in refs)}

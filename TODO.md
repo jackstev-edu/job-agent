@@ -2477,7 +2477,8 @@ rule exists for, a dropdown that keeps the focus while a row is
 picked); on a key, input, paste or change it is marked as before. A
 plain box the page focused is never marked by a click elsewhere, in
 the wizard and in follow mode alike (follow mode: a touch the ledger
-no longer sees on such a box is one that was never Jack's). The blur
+no longer sees on such a box is one that was never Jack's; WRONG, see
+cc17666's review below). The blur
 and settle stay as belt and braces. Tests: a refocus slower than the
 settle marks nothing at Jack's click (fails on bb196bf); the listener
 guard: a row pick still marks the focused combobox, a click elsewhere
@@ -2507,3 +2508,26 @@ whole-pass test fails (the First Name and Email boxes carried the
 mark) and the corrected-box test fails (one touch counted, not two).
 (5) Noted only: the controlled-input test is a guard and passes on the
 old code by design.
+
+Commit cc17666 (the listener fold): VERDICT BLOCK, 1 BLOCK, 4 FLAGs.
+Fixed in the next commit: the narrower pointer rule also took the
+focused element out of follow mode's mark and its identity record, so
+a box Jack changed with the mouse while it held the focus (a datepicker
+or typeahead in a portal that sets the value by script) and that the
+form then re-mounted empty came back as open and could reach the
+model. The claim in the entry above that follow mode loses only touches
+that were never Jack's was wrong. Follow mode's TOUCH_ATTR and record
+are again exactly as on 103a876 (the focused element on every trusted
+event); the pointer rule now applies only to a separate attribute,
+REVIEW_ATTR, which the wizard's pause review alone reads. Folded with
+it (FLAG): the picker test no longer uses a class (Bootstrap's
+form-control and Ant Design's ...-control wrappers are plain boxes) and
+treats aria-autocomplete="none" as plain; the container test starts at
+the parent. FLAGs folded: one test case per picker branch, a
+follow-mode negative (focused box, portal pick, re-mount, still out of
+open_fields; fails on cc17666), the slow-refocus test asserts the focus
+was on the email box and its refocus fires once; the listener comment's
+attribution to Jack dropped (the narrowing was the reviewer's
+suggestion, not his decision). Logged: the wizard's picker list is
+checked against no real Workday or Greenhouse snapshot; a mouse pick in
+a dropdown the list misses would not count as Jack's (safe direction).

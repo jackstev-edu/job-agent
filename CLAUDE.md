@@ -334,7 +334,11 @@ How the code keeps them, and rules of its own:
   activity listener's agent flag, and only the field's own element, or
   an option element of its radio / button group, counts: Jack,
   2026-10-26; the baseline read first drops the focus the agent's last
-  fill left, so his first click elsewhere marks nothing of the agent's),
+  fill left, so his first click elsewhere marks nothing of the agent's;
+  the wizard reads its own review mark, which a click puts on the
+  focused element only when that is a dropdown-style control, while
+  follow mode's touch mark and record still take the focused element on
+  every event),
   or if he ticked it in the GUI and the page still holds exactly
   the value he was shown; the gate skips field-level stops for those,
   never the required-but-empty check. Every other field keeps the normal

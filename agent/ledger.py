@@ -42,6 +42,16 @@ MARK_ATTR = "data-ja-filled"
 # into, change or click, so a field you touched never reaches a model, even
 # once you've cleared it.
 TOUCH_ATTR = "data-ja-touched"
+# The wizard's own reading of the same trusted input, the one a pause's
+# review is counted from. It differs from TOUCH_ATTR in one way only: on a
+# pointer event the focused element gets it only when that element is a
+# dropdown-style control (an explicit combobox / listbox / option role, a
+# live aria-autocomplete, a select, or a box inside a [role=combobox]),
+# never a plain box the agent's fill or the page left focused. In the
+# wizard a mark waives a stop, so it marks less; in follow mode a mark
+# keeps a field from the model, so TOUCH_ATTR still marks more (fix of
+# cc17666's BLOCK).
+REVIEW_ATTR = "data-ja-review-touch"
 
 # Which of these refs carry a trusted-input mark on their own element (set
 # only for isTrusted events while the agent isn't filling): Jack's touches.
@@ -493,11 +503,11 @@ class FieldLedger:
 # agent's own keystrokes and clicks happen while `agent` is set, so they
 # don't count as yours. It also marks what you touched (TOUCH_ATTR): the
 # event's target, the scanned field around it, a label's own control, a
-# dropdown's control container, and the focused element: on a key, input,
-# paste or change always; on a pointer event only when the focused element
-# is a dropdown-style control (a dropdown keeps the focus while you pick a
-# row with the mouse), never a plain box the page focused (Jack,
-# 2026-10-26). While the agent fills,
+# dropdown's control container, and the focused element (a dropdown keeps
+# the focus while you pick a row with the mouse), on every trusted event.
+# The same marks go on as REVIEW_ATTR for the wizard, except that on a
+# pointer event the focused element counts only when it is a
+# dropdown-style control. While the agent fills,
 # what's typed in, pasted into or changed still gets WHILE_AGENT_ATTR, and
 # Backspace or Delete (which the agent never presses) counts as you. Each
 # touched form field's identity parts (tag, name, id, explicit label; never
@@ -562,16 +572,17 @@ _ACTIVITY_JS = r"""
   };
   const put = (el, attr) => { if (el instanceof Element) el.setAttribute(attr, ''); };
   const T = '""" + TOUCH_ATTR + r"""';
-  const touch = els => {
+  const R = '""" + REVIEW_ATTR + r"""';
+  const mark = (els, attr) => {
     for (const el of els) {
       if (!(el instanceof Element) || el === document.body) continue;
-      put(el, T);
-      put(el.closest(REF), T);
-      put(el.closest('[class*="control"], [role=combobox]'), T);
-      if (el instanceof HTMLLabelElement) put(el.control, T);
+      put(el, attr);
+      put(el.closest(REF), attr);
+      put(el.closest('[class*="control"], [role=combobox]'), attr);
+      if (el instanceof HTMLLabelElement) put(el.control, attr);
     }
-    record(els, 't');
   };
+  const touch = els => { mark(els, T); record(els, 't'); };
   for (const t of ['keydown', 'input', 'pointerdown', 'mousedown', 'change', 'paste'])
     document.addEventListener(t, e => {
       if (!e.isTrusted) return;
@@ -580,6 +591,7 @@ _ACTIVITY_JS = r"""
       if (window.__jaAct.agent) {
         if (t === 'keydown' && (e.key === 'Backspace' || e.key === 'Delete')) {
           touch([...targets, document.activeElement]);
+          mark([...targets, document.activeElement], R);
         } else if (['input', 'paste', 'change'].includes(t)) {
           for (const el of targets) {
             put(el, '""" + WHILE_AGENT_ATTR + r"""');
@@ -590,19 +602,22 @@ _ACTIVITY_JS = r"""
         return;
       }
       window.__jaAct.last = performance.now();
-      // The focused element counts as touched on a key, input, paste or
-      // change (it is the target anyway); on a pointer event only when it
-      // is a dropdown-style control, the one case the rule exists for (a
-      // dropdown keeps the focus while a row is picked with the mouse).
-      // Otherwise a click anywhere would mark whatever box the page left
-      // or put the focus on, which in the wizard is a review it never got
-      // (Jack, 2026-10-26).
       const active = document.activeElement;
+      // Follow mode: the focused element always counts (a mouse change to
+      // a box that holds the focus but isn't the target is still yours).
+      touch([...targets, active]);
+      // The wizard: on a pointer event the focused element counts only
+      // when it is a dropdown-style control (an explicit role, a live
+      // aria-autocomplete, a select, or inside a [role=combobox]; no class
+      // test: Bootstrap's form-control and Ant Design's wrappers are plain
+      // boxes). Otherwise a click anywhere would mark whatever box the
+      // agent's fill or the page left focused, a review it never got.
       const pointer = t === 'pointerdown' || t === 'mousedown';
       const picker = active instanceof Element && active !== document.body
-          && (active.matches('[role=combobox], [aria-autocomplete], [role=listbox], [role=option], select')
-              || !!active.closest('[role=combobox], [class*="control"]'));
-      touch(pointer && !picker ? targets : [...targets, active]);
+          && (active.matches('[role=combobox], [aria-autocomplete]:not([aria-autocomplete="none" i]), '
+                             + '[role=listbox], [role=option], select')
+              || !!(active.parentElement && active.parentElement.closest('[role=combobox]')));
+      mark(pointer && !picker ? targets : [...targets, active], R);
     }, true);
 }
 """

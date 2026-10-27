@@ -652,7 +652,7 @@ def test_a_page_that_restores_the_focus_makes_the_pause_count_nothing():
 
 
 REFOCUS_SLOW2 = ('<script>document.addEventListener("DOMContentLoaded", () => { const em = document.getElementById("em2"); '
-                 'if (em) em.addEventListener("blur", () => setTimeout(() => em.focus(), 400)); });</script>')
+                 'if (em) em.addEventListener("blur", () => setTimeout(() => em.focus(), 400), {once: true}); });</script>')
 
 
 def test_a_refocus_slower_than_the_settle_still_marks_nothing_at_jacks_click():
@@ -668,11 +668,15 @@ def test_a_refocus_slower_than_the_settle_still_marks_nothing_at_jacks_click():
     site = _gui_site(email_on_2=True)
     site["/apply/2"] = site["/apply/2"].replace("</body>", REFOCUS_SLOW2 + "</body>")
 
+    focus_at_click: list = []
+
     def jack_waits_then_clicks_and_types_the_city(page, state, job_id):
         page.wait_for_timeout(700)          # the refocus has happened by now
+        focus_at_click.append(page.evaluate("document.activeElement && document.activeElement.id"))
         page.click("#city")
         page.keyboard.type("Springfield")
     out, pauses, url, clicks, w = _drive(site, "/apply", [jack_waits_then_clicks_and_types_the_city])
+    check(focus_at_click == ["em2"], f"the page had put the focus back on the email box ({focus_at_click})")
     by_label: dict = {}
     for st in out.steps:
         for f in st["fields"]:
