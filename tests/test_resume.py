@@ -545,6 +545,102 @@ def test_a_page_that_left_the_site_during_a_gate_pause_is_refused_on_resume():
     check.done()
 
 
+# Page two with a per-company radio question beside the required City.
+WORKED_RADIO = ('<fieldset><legend>Have you previously worked for Example Co?</legend>'
+                '<label><input type="radio" name="worked" value="yes">Yes</label>'
+                '<label><input type="radio" name="worked" value="no">No</label></fieldset>')
+# A radio the agent answers itself (a stand-in mapper picks "Email").
+CONTACT_RADIO = ('<fieldset><legend>Preferred contact</legend>'
+                 '<label><input type="radio" name="contact" value="email">Email</label>'
+                 '<label><input type="radio" name="contact" value="phone">Phone</label></fieldset>')
+
+
+def _page2_with(extra):
+    site = _gui_site()
+    site["/apply/2"] = site["/apply/2"].replace("<label for=\"city\">", extra + "<label for=\"city\">")
+    return site
+
+
+def _contact_mapper(fields, profile, page_text=""):
+    out = map_from_profile(fields, profile, page_text)
+    for f in fields:
+        if (f.get("label") or "").startswith("Preferred contact"):
+            from agent import mapper
+            out[f["ref"]] = mapper._double_check({"ref": f["ref"], "value": "Email", "confidence": "high",
+                                                  "needs_review": False, "source": "model"}, f)
+    return out
+
+
+def test_jacks_click_on_a_groups_second_option_counts_as_his():
+    # Item 1 of 2026-10-26's second round: a radio group's ref is its first
+    # option's element, and Jack's click on "No" marks the second; the
+    # mark probe now reads every option of the group. At the City pause
+    # Jack picks "No" on the per-company question and types the city;
+    # after Continue the run goes on. On e8021fa the per-company stop
+    # came back every time (the mark was on an option the probe never
+    # read).
+    check = Checks()
+
+    def jack_answers(page, state, job_id):
+        page.check("input[name=worked][value=no]")
+        page.fill("#city", "Springfield")
+    out, pauses, url, clicks, w = _drive(_page2_with(WORKED_RADIO), "/apply", [jack_answers])
+    check(len(pauses) == 1 and _field(pauses[0], "Have you previously worked for Example Co?"),
+          f"one pause, naming the per-company question ({[p['pause']['message'] for p in pauses]})")
+    check(out.status == "submitted" and clicks == ["Next", "Next", "Submit application"],
+          f"his click on the second option counted and the run went on ({out.status}, {out.reason}, {clicks})")
+    by_label = {f["label"]: f["ref"] for st in out.steps for f in st["fields"]}
+    check(by_label.get("Have you previously worked for Example Co?") in out.record.get("human_reviewed", []),
+          "the group is his")
+    check.done()
+
+
+def test_the_agents_own_radio_pick_counts_for_nothing():
+    # Negative: a radio the agent answered under the agent flag carries no
+    # mark; after the City pause (Jack types the city only) the group is
+    # not his. A guard: it passes on e8021fa too.
+    check = Checks()
+
+    def jack_types_the_city(page, state, job_id):
+        page.fill("#city", "Springfield")
+    out, pauses, url, clicks, w = _drive(_page2_with(CONTACT_RADIO), "/apply", [jack_types_the_city],
+                                          mapper=_contact_mapper)
+    by_label = {f["label"]: f["ref"] for st in out.steps for f in st["fields"]}
+    reviewed = (out.record or {}).get("human_reviewed", [])
+    check(out.status == "submitted", f"the run went on ({out.status}, {out.reason})")
+    check(by_label.get("City") in reviewed and by_label.get("Preferred contact") not in reviewed,
+          f"the city is his, the agent's own radio pick is not ({reviewed})")
+    check.done()
+
+
+def test_a_resume_that_rescans_the_page_counts_nothing_as_his():
+    # Negative (Jack's amendment): another job's scan makes this page's refs
+    # stale, so the resume rescans the page (extract_fields only; it opens
+    # nothing) before the review. Jack pressed Continue without touching
+    # anything: the rescan leaves no mark, nothing is his, the stop stays.
+    # A guard: it passes on e8021fa too.
+    check = Checks()
+    from agent import extract
+    site = _page2_with(WORKED_RADIO)
+
+    def another_job_scans(page, state, job_id):
+        # The same process scanned another page in between (a second tab).
+        other = page.context.new_page()
+        other.set_content(SINGLE)
+        extract.extract_fields(other, extract.ReadGuard())
+        other.close()
+    out, pauses, url, clicks, w = _drive(site, "/apply", [another_job_scans, lambda *a: None], max_pauses=2)
+    kinds = [p["pause"]["kind"] for p in pauses]
+    log = out.log
+    check(kinds == ["gate", "gate"] and any("re-scanned after other jobs ran" in line for line in log),
+          f"the resume rescanned the page and the gate stopped again ({kinds}, {log})")
+    pauses_ev = [e for e in out.events if e["kind"] == "gate_pause" and e.get("handled") == "jack"]
+    check(pauses_ev and all(str(e.get("detail", "")).startswith("0 field(s) touched by Jack") for e in pauses_ev),
+          f"nothing counted as his ({pauses_ev})")
+    check(clicks == ["Next"], f"nothing pressed after the stop ({clicks})")
+    check.done()
+
+
 def test_an_intake_park_waits_in_its_tab_with_continue():
     # A link intake refuses (LinkedIn Easy Apply) is a needs-you row with
     # Continue in GUI mode; Continue starts the wizard on the tab, which

@@ -2370,3 +2370,45 @@ with no fill and no hold, so a page the tab shows after that pause is
 scanned and filled with no protection (pre-existing; the same shape
 as the parks before item 2; decision for Jack whether the hold should
 apply there too).
+
+## Round of 2026-10-26, second (Jack's go on the diagnose-and-plan round)
+
+Diagnosis of the General Motors run (no code changed for it): Continue
+on the My Information gate pause could never pass, on four independent
+counts. (a) The filler clears every box with Playwright's fill(""),
+which presses Delete, and the listener counts a Delete keydown as
+Jack's even under the agent flag (ledger.py's "the agent never presses"
+assumption), so every agent-filled box carries the touch mark from the
+start and his correction is never "new since before the pause"; shown
+by a throwaway experiment on a local page (fill("") -> touched, fill
+("x") and type -> while-agent only). The reviews of 48af673 and 32a613c
+were right about input / change / pointer events and did not look at
+what fill("") sends. (b) Held boxes did not apply (no fresh scan).
+(c) A radio group's ref is its first option's element and the mark
+probe read that element only, so his click on "No" never counted.
+(d) The unlabelled-checkbox census stop has no review exemption, and
+the plan / results stops ("filling it failed", "model confidence",
+"left for you") persist on resume unless the field is reviewed. The
+log reprint is finish_outcome printing the whole job log on every
+return; the account was created and the password stored once (read
+off accounts.py; no stored password read). A Continue only evaluates
+read-only scripts (no click, key, focus, reload or navigation), so it
+does not plausibly cause Workday's "Something went wrong". A
+parser-prefilled box is overwritten by the agent's value or stops;
+none passes unchecked; our code never chooses "Autofill with Resume"
+(chooser refuses it; intake presses only "Apply Manually"), so that
+landing was Workday's own redirect after sign-up. "obscured" is a
+click intercepted by another element (Workday's click-filter overlay);
+"items selected" and the unlabelled checkbox are, by inference, parts
+of the phone-code multiselect widget (plan item 8 needs a snapshot).
+
+Item 1 (group marks). `Wizard._marked` now takes the fields and reads
+the touch mark on the field's own element and on every option of a
+radio / button group, mapping back to the field's ref, so Jack's click
+on any option counts; the rescan in `_remap` runs under the agent flag
+(it only evaluates the scan script, which sends no input event, so it
+could not mark anything anyway; the flag guards a later change).
+Tests: his click on the second option at the City pause clears the
+per-company stop and the run goes on (fails on e8021fa); the agent's
+own radio pick under the flag is never his (guard); a resume that
+rescans the page (stale refs) counts nothing as his (guard).

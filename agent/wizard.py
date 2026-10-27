@@ -344,12 +344,28 @@ class Wizard:
             except Exception:
                 return False
 
-    def _marked(self, refs: list[str]) -> set[str] | None:
-        """The refs carrying a touch mark now; None if the page couldn't be read."""
+    @staticmethod
+    def _mark_refs(fields: list[dict]) -> dict[str, list[str]]:
+        """Each non-file field's ref -> the refs a touch on the field can land on: its own and its options'."""
+        return {f["ref"]: [f["ref"], *(r for r in (f.get("option_refs") or []) if r != f["ref"])]
+                for f in fields if f.get("type") != "file"}
+
+    def _marked(self, fields: list[dict]) -> set[str] | None:
+        """
+        The fields (by ref) carrying a touch mark now: on the field's own
+        element or on any option of a radio / button group (Jack's click
+        on the second option marks that option, not the group's first,
+        which is the group's ref; Jack, 2026-10-26). None if the page
+        couldn't be read.
+        """
+        by_field = self._mark_refs(fields)
         try:
-            return set(self.page.evaluate(_TOUCHED_JS, [refs, ledger.TOUCH_ATTR]) or [])
+            hit = set(self.page.evaluate(_TOUCHED_JS,
+                                         [[r for refs in by_field.values() for r in refs],
+                                          ledger.TOUCH_ATTR]) or [])
         except Exception:
             return None
+        return {ref for ref, refs in by_field.items() if any(r in hit for r in refs)}
 
     def _stop_fields(self, fill: pipeline.PageFill | None, result: dict) -> list[dict]:
         """
@@ -405,7 +421,7 @@ class Wizard:
         except Exception:
             now = None                  # unreadable: nothing about values is known
         refs = [f["ref"] for f in fill.fields if f.get("type") != "file"]
-        marked_after = self._marked(refs)
+        marked_after = self._marked(fill.fields)
         # A read that failed, before or after, can only shrink the waiver:
         # with no trustworthy "before", no mark counts as new.
         touched = (set() if marked_before is None or marked_after is None
@@ -536,8 +552,7 @@ class Wizard:
         happens on resume.
         """
         reasons = "; ".join(_clean(r) for r in result["content_reasons"][:8])
-        refs = [f["ref"] for f in fill.fields if f.get("type") != "file"]
-        marked_before = self._marked(refs)
+        marked_before = self._marked(fill.fields)
         how = self._pause("gate", f"This page needs you: {reasons}. Answer in the browser, "
                                   f"then press Enter.",
                           prompt="Press Enter when you've answered: ",
@@ -649,7 +664,14 @@ class Wizard:
         if fill is None or not fill.fields or extract.is_current(fill.fields[0]["ref"]):
             return
         try:
-            new_fields = extract.extract_fields(self.page, self.guard)
+            # The rescan only evaluates the scan script (it stamps refs and
+            # reads structure; it opens nothing and sends no input event, so
+            # the listener, which marks only trusted input events, sees
+            # nothing). Under the agent flag all the same, so a later change
+            # to what a rescan does can never leave a mark that reads as
+            # Jack's after the pause's baseline (Jack, 2026-10-26).
+            with self.activity.filling(self.page):
+                new_fields = extract.extract_fields(self.page, self.guard)
         except Exception:
             new_fields = []            # unreadable: every field is unpaired below
         by_key: dict = {}
@@ -987,8 +1009,7 @@ class Wizard:
         if submission.status == "needs_you" and not submission.clicked:
             # The gate stopped on the whole application: Jack's turn.
             self.out.events.append({"kind": "gate_pause", "detail": "final page", "handled": None})
-            refs = [f["ref"] for f in (fill.fields if fill else []) if f.get("type") != "file"]
-            marked_before = self._marked(refs) if fill else None
+            marked_before = self._marked(fill.fields) if fill else None
             how = self._pause("final", f"Before submitting: {_clean(submission.reason)}. Fix it "
                                        f"in the browser, then press Enter.",
                               prompt="Press Enter when it's ready to submit: ",
