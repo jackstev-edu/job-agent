@@ -107,7 +107,13 @@ TYPE_FLIP = TEST_HOME / "fill_reasons_flip.html"
 TYPE_FLIP.write_text("""<!doctype html><html><head><meta charset="utf-8"></head><body>
 <form id="f" onsubmit="return false">
 <label for="city">City</label><input id="city" name="city">
-<button type="submit">Submit</button></form></body></html>""", encoding="utf-8")
+<button type="submit">Submit</button></form>
+<script>
+  window.__hits = {click: 0, key: 0};
+  const c = document.getElementById('city');
+  c.addEventListener('click', () => { window.__hits.click++; if (window.__flipOnClick) c.type = 'checkbox'; });
+  c.addEventListener('keydown', () => { window.__hits.key++; });
+</script></body></html>""", encoding="utf-8")
 
 
 def test_a_box_that_turned_into_a_checkbox_takes_no_keystrokes():
@@ -122,11 +128,30 @@ def test_a_box_that_turned_into_a_checkbox_takes_no_keystrokes():
         fields = extract.extract_fields(page)
         city = next(f for f in fields if f.get("name") == "city")
         page.evaluate("document.getElementById('city').type = 'checkbox'")
-        ok, detail = filler.fill_one(page, city, "New York")
+        ok, detail = filler.fill_one(page, city, "Boston")
+        hits = page.evaluate("window.__hits")
         ticked = page.evaluate("document.getElementById('city').checked")
     check(ok is False and filler.reason_for(ok, detail) == "not_editable",
           f"refused as not_editable ({ok}, {detail!r})")
-    check(ticked is False, "the box was neither clicked nor typed into")
+    check(hits == {"click": 0, "key": 0} and ticked is False,
+          f"the box was neither clicked nor typed into ({hits}, ticked={ticked})")
+    check.done()
+
+
+def test_a_box_its_own_click_turns_into_a_checkbox_takes_no_keystrokes():
+    # Fold of 75ee295's review: the check also runs after the click, so a
+    # box whose click handler re-renders it into a checkbox gets no
+    # keystroke. On 75ee295 it was typed into and reported as set.
+    check = Checks()
+    with mock_page(TYPE_FLIP) as page:
+        fields = extract.extract_fields(page)
+        city = next(f for f in fields if f.get("name") == "city")
+        page.evaluate("window.__flipOnClick = true")
+        ok, detail = filler.fill_one(page, city, "Boston")
+        hits = page.evaluate("window.__hits")
+    check(ok is False and filler.reason_for(ok, detail) == "not_editable",
+          f"refused as not_editable ({ok}, {detail!r})")
+    check(hits == {"click": 1, "key": 0}, f"clicked once, no keystroke ({hits})")
     check.done()
 
 

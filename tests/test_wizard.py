@@ -729,11 +729,20 @@ def test_the_agents_final_page_tick_never_counts_as_jacks():
     site = _site(marketing=EM3, city_optional=True)
     site["/apply/3"] = site["/apply/3"].replace("</body>", CLEAR_ON_TICK + "</body>")
 
+    focus_at_baseline: list = []
+
     def jack_clicks_elsewhere_then_types_the_email(page, body):
+        focus_at_baseline.extend(page.evaluate("window.__jaFocusAtBaseline || []"))
         page.click("h1")
         page.click("#em3")
         page.keyboard.type("jack@example.invalid")
-    out, jack, clicks, ticks, url = _run(site, "/apply", jack_clicks_elsewhere_then_types_the_email)
+    # The baseline's blur, recording what held the focus first, so the test
+    # shows the route it names was there (fold of 75ee295's review).
+    recording_blur = ("() => { window.__jaFocusAtBaseline = (window.__jaFocusAtBaseline || [])"
+                      ".concat([document.activeElement ? document.activeElement.id : null]); "
+                      + wizard.Wizard._BLUR_JS[len("() => {"):])
+    out, jack, clicks, ticks, url = _run(site, "/apply", jack_clicks_elsewhere_then_types_the_email,
+                                         patches=(("agent.wizard.Wizard._BLUR_JS", recording_blur),))
     print(out.status, out.reason, out.log, out.events)
     fields = [f for st in out.steps for f in st["fields"]]
     tos = [f["ref"] for f in fields if (f.get("label") or "").startswith("I have read")]
@@ -741,6 +750,7 @@ def test_the_agents_final_page_tick_never_counts_as_jacks():
     reviewed = (out.record or {}).get("human_reviewed", [])
     check(len(jack.bodies) == 1 and "after ticking consent" in jack.bodies[0],
           f"one pause, after the agent's tick ({jack.bodies})")
+    check(focus_at_baseline[-1:] == ["tos"], f"the agent's tick left the focus on the box ({focus_at_baseline})")
     check(tos and tos[0] not in reviewed, f"the terms box the agent ticked is not his ({tos}, {reviewed})")
     check(em3 and em3[-1] in reviewed, f"the email he typed is his ({em3}, {reviewed})")
     check(out.status == "submitted", f"the run went on ({out.status}, {out.reason})")

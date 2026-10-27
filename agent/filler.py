@@ -241,6 +241,10 @@ def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple
         if not element.evaluate(_TYPEABLE_JS):
             return False, "not_editable (the box is no longer a text box)"
         element.click(timeout=4000)
+        # Again after the click: a click or focus handler can re-render the
+        # box too (fold of 75ee295's review).
+        if not element.evaluate(_TYPEABLE_JS):
+            return False, "not_editable (the box is no longer a text box)"
         # Clear anything pre-filled by selecting it in the page, never with
         # a Delete key: Playwright's fill("") presses Delete, and the
         # activity listener counts a Delete keydown as Jack's even while

@@ -2531,3 +2531,18 @@ attribution to Jack dropped (the narrowing was the reviewer's
 suggestion, not his decision). Logged: the wizard's picker list is
 checked against no real Workday or Greenhouse snapshot; a mouse pick in
 a dropdown the list misses would not count as Jack's (safe direction).
+
+Commit 75ee295 (fold of 103a876's review): VERDICT FLAG, 4 FLAGs.
+Folded in the next commit: the text-box check runs again after the
+click (a click or focus handler can re-render the box into a checkbox;
+MUST FIX BEFORE AUTO-SUBMIT class, folded because a space could tick
+it); the flipped-box test types a value with no space and counts the
+box's own clicks and keys (on the old code a space unticked what the
+click ticked, so "not ticked" proved nothing); the final-page tick
+test records what held the focus at the baseline and asserts it was
+the terms box. Logged, not folded: the abandon path's fill("")
+fallback (a password box on the page makes the value set refuse) has
+no test; its Delete mark is the safe direction because no fill runs
+between a pause's baseline and its after-read (reviewer checked the
+wizard); and, pre-existing, a contained box that reads 'other' after
+the clear keeps its text while the row says "left empty".
