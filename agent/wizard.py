@@ -123,9 +123,10 @@ _HAS_FIELDS_JS = r"""
 
 
 # Which of these refs carry a trusted-input mark from the activity listener
-# on their own element (REVIEW_ATTR, set only for isTrusted events while the
-# agent isn't filling; the wizard's stricter reading of TOUCH_ATTR, see
-# ledger). The mark on a wrapper doesn't count here: in follow
+# on their own element (REVIEW_ATTR: set for isTrusted events while the
+# agent isn't filling, and for a trusted Backspace or Delete while it is,
+# which the agent never presses; the wizard's stricter reading of
+# TOUCH_ATTR, see ledger). The mark on a wrapper doesn't count here: in follow
 # mode over-marking keeps a field from the model, but here a mark waives a
 # stop, so only the field's own element, or an option element of its
 # group (Jack, 2026-10-26), says anything. Refs only.

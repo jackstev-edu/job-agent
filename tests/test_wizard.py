@@ -984,7 +984,7 @@ def test_the_final_pause_and_the_record_merge_on_their_own():
 
             def jack_marks_and_types(pg, body):
                 pg.fill("#a", "typed")
-                pg.eval_on_selector("#a", "(el, a) => el.setAttribute(a, '1')", ledger.TOUCH_ATTR)
+                pg.eval_on_selector("#a", "(el, a) => el.setAttribute(a, '1')", ledger.REVIEW_ATTR)
             w2 = wizard.Wizard(page, _profile(), url="https://x.example/apply", portal="generic",
                                portal_method="default", company="", role="", resume=None,
                                posting_text="", pauser=_Jack(page, jack_marks_and_types),
@@ -1001,7 +1001,7 @@ def test_the_final_pause_and_the_record_merge_on_their_own():
                 return None if calls["n"] == 1 else real(fields, **kw)
             w2._marked = flaky
             w2._pause_and_review(fill, {"content_reasons": ["'A': left blank"]})
-            check(page.evaluate(f"document.getElementById('a').hasAttribute('{ledger.TOUCH_ATTR}')"),
+            check(page.evaluate(f"document.getElementById('a').hasAttribute('{ledger.REVIEW_ATTR}')"),
                   "the mark is on the field (so the next check means something)")
             check(fields[0]["ref"] not in w2.human_reviewed
                   and str(w2.out.events[-1]["detail"]).startswith("0 field(s) touched by Jack"),

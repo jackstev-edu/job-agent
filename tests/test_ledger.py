@@ -734,8 +734,10 @@ def test_the_review_mark_takes_a_focused_box_only_when_it_is_a_dropdown():
 <input id="acnone" aria-autocomplete="none"><input id="aclist" aria-autocomplete="list">
 <input id="role" role="combobox"><select id="sel"><option>A</option></select>
 <div role="combobox"><input id="inner"></div>
+<div id="lb" role="listbox" tabindex="0">list</div><div id="op" role="option" tabindex="0">row</div>
 <button id="away" type="button">elsewhere</button></body></html>''', encoding="utf-8")
-    want = {"fc": False, "ant": False, "acnone": False, "aclist": True, "role": True, "sel": True, "inner": True}
+    want = {"fc": False, "ant": False, "acnone": False, "aclist": True, "role": True, "sel": True, "inner": True,
+            "lb": True, "op": True}
     got: dict = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)

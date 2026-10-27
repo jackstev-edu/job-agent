@@ -2546,3 +2546,21 @@ no test; its Delete mark is the safe direction because no fill runs
 between a pause's baseline and its after-read (reviewer checked the
 wizard); and, pre-existing, a contained box that reads 'other' after
 the clear keeps its text while the row says "left empty".
+
+Commit 1663f32 (fix of cc17666's BLOCK): VERDICT FLAG, 2 FLAGs, 2
+minor; the BLOCK is cleared (follow mode's TOUCH_ATTR and record are as
+on 103a876 for every event type; REVIEW_ATTR is always a subset;
+nothing but the wizard's pause review reads it). Folded in the next
+commit: the "failed before-read waives nothing" negative set and read
+TOUCH_ATTR by hand, which the wizard no longer reads, so it passed
+whatever the None baseline did; it now uses REVIEW_ATTR. The picker
+branch test gains the role=listbox and role=option cases. The wizard's
+comment on REVIEW_ATTR names the Backspace / Delete case. Logged under
+MUST FIX BEFORE AUTO-SUBMIT: a page that moves the focus to a
+dropdown-style control (a combobox, a select, a live aria-autocomplete
+box, say one the agent filled) after the baseline's blur and settle
+would have Jack's first click anywhere put REVIEW_ATTR on it, and the
+pause would count it as his review (stop to pass; the dropdown twin of
+the plain-box refocus; it was wider before). A possible fix: count a
+focused picker on a pointer event only when the event's path includes
+a [role=option] / [role=listbox] row.
