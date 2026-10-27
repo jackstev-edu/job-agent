@@ -2717,7 +2717,9 @@ agent fills that box as usual (guard).
 
 Commit 8c484f9 (fold of item 4's review): VERDICT FLAG, 3 FLAGs. Logged:
 the item 4 entry's no-fill-hold sentence now says it was reverted.
-OPEN DEFECT (reverted for scope, Jack's decision pending): a park with
+DECIDED by Jack, 2026-10-27: no hold; the agent's value wins and the
+gate checks it against the profile. Was: OPEN DEFECT (reverted for
+scope, Jack's decision pending): a park with
 no fill in hand (a cap, a refusal, an intake, account, Google or
 chooser park) resumes with a fresh scan and no hold, so a box Jack
 typed into during the park is typed over with the profile's value, and
@@ -2773,3 +2775,20 @@ fixed in the next commit (TODO only): the MUST FIX bullet's park clause
 now says "a park whose page changed or couldn't be read" (both go
 through the same branch of _resume_fill). An earlier review run of
 d6a31de stalled with no output and was run again.
+
+## Round of 2026-10-27 (Jack's decisions on the report of items 1-7)
+
+Decided by Jack, 2026-10-27, on the report of c6bfb95:
+1. Main pushed at c6bfb95; the full-suite limit is 40 minutes (CLAUDE.md
+   amended; the 31:27 run at c6bfb95 stands).
+2. Parks with no fill in hand: no hold. The agent's value wins; the gate
+   checks it against the profile. (The open-defect entry above is marked
+   decided.)
+3. Resume under the hold: upload into a resume box that reads empty; one
+   that already holds a file is left alone. Built as item 3 below.
+4. Page cap on a resumed pass: kept as built.
+5. Test-only items: a mutation check instead of fail-on-previous
+   (CLAUDE.md's working rule amended).
+6. Dropdown focus residual: a focused dropdown counts as reviewed on a
+   click only when the click's path holds one of its rows or the
+   dropdown itself. Built as item 6 below.

@@ -208,7 +208,7 @@ Added by Jack on 2026-10-20 (second set):
 - Test runs: per commit, run the new / changed test files plus the
   non-browser tests; run the full suite once before each push. Browser
   tests are split off by a single marker. The "stop and report" threshold
-  for the full suite is 30 minutes.
+  for the full suite is 40 minutes (Jack, 2026-10-27; it was 30).
 
 Added by Jack on 2026-10-20 (third set, after the General Motors,
 Caterpillar and Divergent run):
@@ -264,6 +264,24 @@ Added by Jack on 2026-10-23 (the go on `docs/PLAN-workday.md`):
 - The optional-empties wording in CLAUDE.md (third set) is Jack's as
   written.
 - Divergent (plan item 9) stays last.
+
+Added by Jack on 2026-10-27 (decisions on the report of items 1-7 of the
+2026-10-26 plan):
+
+- A park with no fill in hand (a cap, a refusal, an intake, account,
+  Google or chooser park) resumes with no hold: the agent's value wins,
+  and the gate checks it against the profile.
+- Under the hold (protect_held) the resume still goes into a resume box
+  that reads empty; a resume box that already holds a file is left
+  alone.
+- The page cap is checked only before a new page is filled; a resumed
+  pass on a page already filled goes on to Next or Submit after a fresh
+  gate verdict.
+- A focused dropdown counts as reviewed on a click only when the trusted
+  click's path includes one of its rows ([role=option] or
+  [role=listbox]) or the dropdown itself.
+- Test-only items: a mutation check instead of fail-on-previous.
+- The full-suite limit is 40 minutes.
 
 ## Design rules — do not relax these
 
@@ -535,6 +553,9 @@ How the code keeps them, and rules of its own:
   exception, approved in advance). Push to origin main after each
   milestone; before each push, scan the new commits for personal data.
 - Each new test must fail on the previous commit's code; say so per test.
+  For a test-only item (a guard for a branch that already exists) a
+  mutation check that makes it fail is accepted instead; say which per
+  test (Jack, 2026-10-27).
 - Before claiming "no caution is lost" or similar, show the check that
   proves it.
 - Never narrow a stop, guard or secret pattern (HARD_STOPS, LEGAL_GUARD,
@@ -542,8 +563,9 @@ How the code keeps them, and rules of its own:
   pass without Jack's explicit approval. False positives there are
   acceptable; if a negative test conflicts with a pattern, report it
   instead of narrowing.
-- If a full test run takes over 30 minutes (Jack, 2026-10-20, second
-  set; it was 20), stop and report which test hung; do not just rerun.
+- If a full test run takes over 40 minutes (Jack, 2026-10-27; it was
+  30, and 20 before that), stop and report which test hung; do not just
+  rerun.
 - Big features are plan-first: propose and wait for Jack's go.
 - Report: table hash | summary | tests | reviewer verdict | full-run
   time; each reviewer output unedited; a separate "not asked for" list;
