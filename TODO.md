@@ -594,6 +594,14 @@ open once anything submits without Jack.
   review (stop to pass). Possible fix: count a focused picker on a
   pointer event only when the event's path holds a row. See the round
   of 2026-10-26, second, commit 1663f32's entry.
+- Resume under the hold (2026-10-27, from the review of 89135f2): a
+  fill under protect_held skips the resume upload (pipeline.fill_page),
+  and the gate skips file fields, so a page reached after a "moved"
+  pause or a park whose page changed, with an OPTIONAL empty resume
+  box, can go on to Submit with no resume (a required one stops). A
+  flag can't stop it (the gate skips file fields before flags) and a
+  page event would stay unhandled after Jack's pause. Jack to decide:
+  upload into a resume box that reads empty under the hold, or stop.
 
 ## Deferred
 
@@ -2734,3 +2742,16 @@ again with the fill in hand; solved, Continue resumes at the gate and
 page two is filled once (guard: the branch already existed; passes on
 89135f2; with the still-shown re-pause dropping its fill there, it
 fails: page two is rescanned and its City held).
+
+Commit 89135f2 (item 6): VERDICT FLAG, 4 findings. Logged, not folded:
+(1) the resume upload is skipped on the page Jack moved to (MUST FIX
+bullet added; decision for Jack). (2) wizard.py's comment says the
+hold never carries to a later page; after a moved pause onto an
+account, sign-in, verification or Google page (or a form wait) it
+survives to the next form page the agent reached itself (safe
+direction: only boxes with a value are held; plus (1)). (3) The moved
+test's last check names the held email box in its message but asserts
+only that the second pause is a gate stop (City is held too). (4) The
+terminal half of item 6 has no test (a non-deferring pauser that moves
+to page two and types, then the hold line, the held box and the stop;
+and a negative where the page never moves).
