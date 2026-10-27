@@ -1158,7 +1158,8 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
             w = wizard.Wizard(page, prof, url=url, portal=portal, portal_method=method,
                               company=company, role=role, resume=prof.resume_path(args.resume),
                               posting_text=extract.page_text(page, 6000), pauser=pauser, echo=print,
-                              reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause)
+                              reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause,
+                              intake_steps=landing.steps)
             return finish_outcome(w.park_for_continue(landing.parked), finish, on_wait=on_wait)
         _park(url, landing.parked, company=company, role=role, ats=ats)
         return NEEDS_YOU, landing.parked
@@ -1178,7 +1179,8 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
         company=company, role=role, resume=prof.resume_path(args.resume),
         posting_text=posting_text, pauser=pauser, echo=print,
         agent_submissions_today=submitted_today,
-        reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause)
+        reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause,
+        intake_steps=landing.steps)
     return finish_outcome(out, finish, on_wait=on_wait)
 
 
@@ -1190,8 +1192,11 @@ def finish_outcome(out, finish: dict, *, on_wait=None) -> tuple[str, str]:
     tracker row, the gate-run row and the evidence.
     """
     url, company, role, ats = finish["url"], finish["company"], finish["role"], finish["ats"]
-    for line in out.log:
+    # Only the lines added since the last print: a job resumed from the
+    # GUI comes back here on every Continue (Jack, 2026-10-26).
+    for line in out.log[out.printed:]:
         print(f"{DIM}  {line}{OFF}")
+    out.printed = len(out.log)
     if out.status == wizard.WAITING:
         tracker.record(url, company=company, role=role, ats=ats, resume_used=finish["resume"],
                        answers=out.rows, flags=out.flags, status=NEEDS_YOU, notes=out.reason)

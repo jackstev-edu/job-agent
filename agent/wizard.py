@@ -145,6 +145,7 @@ class Outcome:
     gate_result: dict | None = None
     evidence: dict = dataclass_field(default_factory=dict)
     log: list[str] = dataclass_field(default_factory=list)
+    printed: int = 0                         # how many log lines the terminal has shown
     pages_filled: int = 0
     wizard: object = None                    # the Wizard to resume, while waiting
 
@@ -187,7 +188,7 @@ class Wizard:
     def __init__(self, page: "Page", prof, *, url: str, portal: str, portal_method: str,
                  company: str, role: str, resume, posting_text: str, pauser, echo=print,
                  clock=time.monotonic, agent_submissions_today=None, reload_profile=None,
-                 on_pause=None):
+                 on_pause=None, intake_steps=None):
         self.page, self.prof, self.url = page, prof, url
         self.portal, self.portal_method = portal, portal_method
         self.company, self.role, self.resume = company, role, resume
@@ -201,6 +202,11 @@ class Wizard:
         # as Jack's, so a touch mark can only come from him.
         self.activity = ledger.ActivityGuard(quiet_ms=0, echo=lambda *a, **k: None)
         self.out = Outcome("needs_you", wizard=self)
+        # What intake pressed on the posting ("clicked '<label>' on <host>"),
+        # at the head of the job's own log (Jack, 2026-10-26).
+        self.out.log.extend(str(s) for s in (intake_steps or []))
+        # run_one printed them as intake returned: not again.
+        self.out.printed = len(self.out.log)
         self.snapshots: dict = {}               # every page's read-back, by ref
         self.census: dict = {}                  # every page's checkboxes after filling, by ref
         self.prefill: dict = {}                 # earlier pages' pair boxes before filling, by group
@@ -492,6 +498,9 @@ class Wizard:
             result = self._tick_required_consent(fill, result, page_events)
             if result["content_verdict"] == gate.WOULD_SUBMIT:
                 return
+        # Every stop, first or on a resume, in the log with its reasons
+        # (Jack, 2026-10-26: a re-stop after Continue logged nothing).
+        self.out.log.append("gate stopped: " + "; ".join(_clean(r) for r in result["content_reasons"][:8]))
         self._pause_and_review(fill, result, page_events)
         # Terminal mode from here: GUI mode deferred above.
         result = gate.decide(self._page_record(fill, page_events), self.prof,
@@ -647,6 +656,7 @@ class Wizard:
         """
         if self._tick is None:
             self._tick = self.clock()
+        self.out.log.append(f"parked: {_clean(reason)}")
         shape = follow.read_shape(self.page) if after_fill is not None else None
         self.pending = {"kind": "parked", "fill": after_fill, "reason": reason,
                         "page_events": list(page_events or []), "shape": shape}

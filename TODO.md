@@ -586,6 +586,14 @@ open once anything submits without Jack.
     form-control wrapper, the Python collapsed reading; pin GATE_VERSION 6
     in a test; the react-select mock is an approximation (real
     react-select picks on click), unchecked against a live page.
+- Wizard pause review (2026-10-27, from the reviews of 1663f32 and
+  1dc0e90): a page that moves the focus to a dropdown-style control
+  (a combobox, a select, a live aria-autocomplete box, a listbox or an
+  option) after the baseline's blur and 150 ms settle has Jack's first
+  click anywhere put REVIEW_ATTR on it, and the pause counts it as his
+  review (stop to pass). Possible fix: count a focused picker on a
+  pointer event only when the event's path holds a row. See the round
+  of 2026-10-26, second, commit 1663f32's entry.
 
 ## Deferred
 
@@ -2564,3 +2572,41 @@ pause would count it as his review (stop to pass; the dropdown twin of
 the plain-box refocus; it was wider before). A possible fix: count a
 focused picker on a pointer event only when the event's path includes
 a [role=option] / [role=listbox] row.
+
+Item 3 (logging). Every gate stop, first or on a resume, logs "gate
+stopped: <reasons>"; a park logs "parked: <reason>"; the terminal prints
+only the lines added since its last print (Outcome.printed), so a
+Continue no longer reprints the whole job log; what intake pressed on
+the posting ("clicked '<label>' on <host>", intake's existing fixed
+phrase) heads the job's own log. Tests: two Continues without typing
+leave three "gate stopped:" lines naming the City (fails on 1dc0e90);
+a second print shows only the new line (fails on 1dc0e90); the job log
+of a link intake clicked through starts with that press (fails on
+1dc0e90).
+
+Commit 57f36ef (fold of 75ee295's review): VERDICT FLAG, 4 FLAGs, no
+fix asked for. Logged: filler.py changed again (a pure refusal: no
+click, tick, key or read added; a box its click turns into a password
+box also gets no keystroke). The agent's own click may leave a
+re-rendered checkbox ticked while its row reads not_editable; the
+gate's "filling it failed" stop and the census stop still run, but no
+test asserts the box's state or the gate's stop there. The final-page
+test's recording wrapper slices _BLUR_JS after its opening "() => {";
+a changed _BLUR_JS would break it loudly in the safe direction (an
+assert on the prefix would say why). The strengthened assertions of
+the two older tests pass on the previous commit too (strengthenings,
+not new tests).
+
+Commit 1dc0e90 (fold of 1663f32's review): VERDICT FLAG, 3 FLAGs, 1
+minor. Logged: (1) the repaired before-read negative has no in-test
+control that the real read would count the hand-set mark (the
+mutation run that showed it is outside the test); a control line
+`fields[0]["ref"] in real(fields)` would keep it from going vacuous
+again. (2) The wizard's comment (and ledger.py's) says the agent never
+presses Backspace or Delete; it does, in the fill("") fallbacks
+(filler's abandon path, accounts.py), always before any pause's
+baseline, so the mark sits in "before" and never counts (safe
+direction); the comments should say that. (3) The picker residual was
+said to be logged under MUST FIX but was only in this round's log; it
+is now a bullet there. (4) Minor: the picker-branch test's comment
+doesn't list the listbox and option cases it now has.

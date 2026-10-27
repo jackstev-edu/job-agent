@@ -770,6 +770,85 @@ def test_a_box_the_agent_filled_and_jack_corrected_counts_as_his():
     check.done()
 
 
+def test_every_gate_stop_is_logged_with_its_reasons():
+    # Item 3: a re-stop after Continue logged only "resumed after a gate
+    # pause"; now every stop, first or on a resume, logs "gate stopped:"
+    # with its reasons. Jack presses Continue twice without typing. On
+    # 1dc0e90 no such line existed.
+    check = Checks()
+    out, pauses, url, clicks, w = _drive(_gui_site(), "/apply", [lambda *a: None, lambda *a: None], max_pauses=3)
+    stops = [line for line in out.log if line.startswith("gate stopped: ")]
+    check(len(stops) == 3 and all("'City': required, but empty" in line for line in stops),
+          f"three stops, each logged with the reason ({out.log})")
+    check(out.log.count("resumed after a gate pause") == 3, f"three resumes logged ({out.log})")
+    check.done()
+
+
+def test_the_job_log_is_printed_once_per_line():
+    # Item 3: the terminal printed the whole job log on every return
+    # (every Continue). finish_outcome prints only the lines added since
+    # its last print. On 1dc0e90 the second print repeated the first.
+    import apply
+    check = Checks()
+    out = wizard.Outcome(wizard.WAITING, "waiting", log=["clicked 'Apply' on x", "first"])
+    out.wizard = object()
+    finish = {"url": f"{HOST}/log-print", "company": "", "role": "", "ats": "generic",
+              "portal": "generic", "portal_method": "default", "resume": ""}
+    first, second = io.StringIO(), io.StringIO()
+    with redirect_stdout(first):
+        apply.finish_outcome(out, finish, on_wait=lambda w, f: None)
+    out.log.append("second")
+    with redirect_stdout(second):
+        apply.finish_outcome(out, finish, on_wait=lambda w, f: None)
+    a, b = first.getvalue(), second.getvalue()
+    check("first" in a and "clicked 'Apply' on x" in a, f"the first print shows the log ({a!r})")
+    check("second" in b and "first" not in b and "clicked" not in b,
+          f"the second print shows only the new line ({b!r})")
+    check.done()
+
+
+def test_intakes_presses_head_the_job_log():
+    # Item 3 (Jack's amendment): what intake pressed on the posting is the
+    # first line of the job's own log, as a fixed phrase plus the
+    # control's label. On 1dc0e90 intake's steps were printed once and
+    # never entered the log.
+    import apply
+    from test_gui import COMPANY, FORM, POSTING
+    check = Checks()
+    profile_path = TEST_HOME / "resume-profile4.yaml"
+    profile_path.write_text(PROFILE, encoding="utf-8")
+    state = gui.State()
+    # Its own job address: the tracker in the test home is shared with
+    # test_gui's dry run of /jobs/1, which checks it wrote nothing.
+    site = {f"{COMPANY}/jobs/7": POSTING.replace("/jobs/1/apply", "/jobs/7/apply"),
+            f"{COMPANY}/jobs/7/apply": FORM}
+
+    def handle(route):
+        html = site.get(route.request.url.split("?")[0])
+        route.fulfill(status=200 if html else 404, content_type="text/html", body=html or "<p>404</p>")
+    state.start([f"{COMPANY}/jobs/7"], dry=False)
+    args = Namespace(profile=str(profile_path), resume=None, dry=False)
+    quiet = pause.Pauser(notify_fn=lambda t, body, echo=print: None, echo=lambda *x, **k: None)
+    made: list = []
+
+    class Kept(wizard.Wizard):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            made.append(self)
+    with _headless({"**/*": handle}) as ctx:
+        ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+        with mock.patch.object(apply.classify, "classify_fields", classify_by_label), \
+                mock.patch.object(apply.mapper, "map_fields", map_from_profile), \
+                mock.patch.object(apply.wizard, "Wizard", Kept), \
+                redirect_stdout(io.StringIO()):
+            apply.gui_loop(ctx, state, apply.Profile.load(profile_path), args, quiet,
+                           idle_limit_s=1.0, waiting={})
+    log = made[0].out.log if made else []
+    check(log and log[0].startswith("clicked 'Apply now' on "),
+          f"the job log starts with intake's press ({log[:3]})")
+    check.done()
+
+
 def test_an_intake_park_waits_in_its_tab_with_continue():
     # A link intake refuses (LinkedIn Easy Apply) is a needs-you row with
     # Continue in GUI mode; Continue starts the wizard on the tab, which
