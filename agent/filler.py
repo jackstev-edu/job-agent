@@ -132,6 +132,14 @@ _READ_BACK_JS = ("""
 # Select a box's whole text so the typing that follows replaces it. No key
 # event, no input event: nothing the activity listener could count.
 _SELECT_ALL_JS = "el => { if (typeof el.select === 'function') el.select(); }"
+# Still a box that takes typed text: a textarea, or an input of a type
+# Playwright's fill accepted (bar password, which is refused before this).
+# fill("") used to be what refused anything else; without it a re-render
+# that turned the scanned box into a checkbox, radio or button would take
+# the keystrokes, and a space would tick or press it.
+_TYPEABLE_JS = ("el => el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && "
+                "['', 'text', 'email', 'number', 'search', 'tel', 'url', 'date', 'time', "
+                "'datetime-local', 'month', 'week'].includes((el.type || '').toLowerCase()))")
 
 
 def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple[bool, str]:
@@ -230,6 +238,8 @@ def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple
         # and typing don't, so it is checked here, with the same category.
         if element.evaluate("el => !!(el.readOnly || el.disabled)"):
             return False, "not_editable (the box is read-only or disabled)"
+        if not element.evaluate(_TYPEABLE_JS):
+            return False, "not_editable (the box is no longer a text box)"
         element.click(timeout=4000)
         # Clear anything pre-filled by selecting it in the page, never with
         # a Delete key: Playwright's fill("") presses Delete, and the
@@ -559,13 +569,20 @@ def _press_option_button(page: "Page", field: dict, value: str) -> tuple[bool, s
 
 def _abandon_combobox(page: "Page", element, contained: bool = False) -> None:
     """Leave no half-typed text behind in a box we couldn't answer."""
+    # On the element, no keystrokes, for both kinds: fill("") presses
+    # Delete, which the activity listener counts as Jack's even under the
+    # agent flag (fold of 103a876's review). If the value can't be set that
+    # way (a password box on the page, a box that isn't an input), fill("")
+    # is the fallback: its mark only keeps a later touch from counting.
     try:
-        if contained:
-            element.evaluate(_SET_VALUE_JS, "")      # on the element: no keystrokes
-        else:
-            element.fill("", timeout=2000)
+        cleared = element.evaluate(_SET_VALUE_JS, "") in ("exact", "empty")
     except Exception:
-        pass
+        cleared = False
+    if not cleared and not contained:
+        try:
+            element.fill("", timeout=2000)
+        except Exception:
+            pass
     extract.close_dropdown(page, element if contained else None)
 
 

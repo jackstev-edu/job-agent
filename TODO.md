@@ -2484,3 +2484,26 @@ guard: a row pick still marks the focused combobox, a click elsewhere
 marks the clicked box only (the second half fails on bb196bf). Logged
 (minor): the 150 ms settle runs under the agent flag with no banner;
 Jack's input in that window would be the agent's (safe direction).
+
+Commit 103a876 (item 2): VERDICT FLAG, 5 FLAGs. Folded in the next
+commit: (1) the filler checks the box still takes typed text (a
+textarea or a text-like input) before it clicks and types; fill("")
+was the check before, and without it a box re-rendered into a checkbox
+or button would take the keystrokes (MUST FIX BEFORE AUTO-SUBMIT class,
+folded because a space could tick a box). (2) The combobox abandon
+path cleared with fill(""), a Delete key: it now sets the value on the
+element for both kinds, with fill("") only as the fallback when that
+can't be done (its mark is the safe direction). Item 2's claim that
+the filler never clears with a Delete key held only for the text path
+until this commit. (3) The negative test the round rule asks for: the
+agent's final-page consent tick, then a gate stop, then Jack's click
+elsewhere, never counts the box as his (a guard: it passes on
+cc17666 too). The type check and the abandon clear each have a test
+that fails on cc17666 (the flipped checkbox was typed into and reported
+as set; the abandoned country box carried the mark). (4) Correction:
+item 2's entry says its tests fail on e8021fa; the previous commit was
+bb196bf, and on a scratch worktree of bb196bf with 103a876's tests the
+whole-pass test fails (the First Name and Email boxes carried the
+mark) and the corrected-box test fails (one touch counted, not two).
+(5) Noted only: the controlled-input test is a guard and passes on the
+old code by design.

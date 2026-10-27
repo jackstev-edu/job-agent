@@ -675,6 +675,78 @@ def test_the_agents_whole_pass_leaves_no_touch_mark():
     check.done()
 
 
+def _mexico_mapper(fields, profile, page_text=""):
+    # A value none of the dropdown's rows match, so the filler types it,
+    # finds no row and abandons the box (clears it).
+    out = map_from_profile(fields, profile, page_text)
+    for f in fields:
+        if (f.get("label") or "") == "Country":
+            out[f["ref"]] = {"ref": f["ref"], "value": "Mexico", "confidence": "high",
+                             "needs_review": False, "source": "model"}
+    return out
+
+
+def test_an_abandoned_combobox_carries_no_touch_mark():
+    # Fold of 103a876's review: the filler's abandon path still cleared a
+    # combobox it couldn't answer with fill(""), a Delete key the listener
+    # counts as Jack's. The rows here don't filter, so "Mexico" is typed,
+    # matches no row and the box is cleared. At the City pause no element
+    # carries the touch mark. On cc17666 the country box carried it.
+    check = Checks()
+    marks: list = []
+
+    def read_marks(page, body):
+        marks.append(page.evaluate("[...document.querySelectorAll('[%s]')].map(e => e.id || e.tagName)"
+                                   % ledger.TOUCH_ATTR))
+        marks.append(page.evaluate("document.getElementById('country').value"))
+    site = _site()
+    site["/apply"] = SPA_COMBO.replace("country.addEventListener('input',", "country.addEventListener('x-none',")
+    out, jack, clicks, ticks, url = _run(site, "/apply", read_marks, mapper=_mexico_mapper)
+    print(out.status, out.reason, out.rows)
+    country = next((r for r in out.rows if r.get("label") == "Country"), {})
+    check(country.get("filled") is False and "Mexico" in str(country.get("detail", "")),
+          f"the box was typed into, matched no row and was abandoned ({country})")
+    check(len(marks) >= 2 and marks[1] == "", f"the box was cleared ({marks[1:2]})")
+    check(marks and marks[0] == [], f"no element carries the touch mark ({marks[:1]})")
+    check.done()
+
+
+CLEAR_ON_TICK = ("<script>document.getElementById('tos').addEventListener('change', () => "
+                 "{ document.getElementById('em3').value = ''; });</script>")
+EM3 = '<label for="em3">Email</label><input id="em3" name="email" type="email" required>'
+
+
+def test_the_agents_final_page_tick_never_counts_as_jacks():
+    # Fold of 103a876's review (negative, Jack's round rule): the final
+    # page's consent tick now runs under the agent flag, so it leaves no
+    # mark before the pause baseline, and the box could be counted as
+    # his. Here the tick empties a required box (a page script), the
+    # gate's second pass stops, and Jack first clicks the page heading,
+    # then the email box, and types. The terms box is not his; the email
+    # is. A guard: it passes on cc17666 too, held there by the baseline
+    # blur and the listener's pointer rule.
+    check = Checks()
+    site = _site(marketing=EM3, city_optional=True)
+    site["/apply/3"] = site["/apply/3"].replace("</body>", CLEAR_ON_TICK + "</body>")
+
+    def jack_clicks_elsewhere_then_types_the_email(page, body):
+        page.click("h1")
+        page.click("#em3")
+        page.keyboard.type("jack@example.invalid")
+    out, jack, clicks, ticks, url = _run(site, "/apply", jack_clicks_elsewhere_then_types_the_email)
+    print(out.status, out.reason, out.log, out.events)
+    fields = [f for st in out.steps for f in st["fields"]]
+    tos = [f["ref"] for f in fields if (f.get("label") or "").startswith("I have read")]
+    em3 = [f["ref"] for f in fields if f.get("name") == "email" and f.get("type") == "email"]
+    reviewed = (out.record or {}).get("human_reviewed", [])
+    check(len(jack.bodies) == 1 and "after ticking consent" in jack.bodies[0],
+          f"one pause, after the agent's tick ({jack.bodies})")
+    check(tos and tos[0] not in reviewed, f"the terms box the agent ticked is not his ({tos}, {reviewed})")
+    check(em3 and em3[-1] in reviewed, f"the email he typed is his ({em3}, {reviewed})")
+    check(out.status == "submitted", f"the run went on ({out.status}, {out.reason})")
+    check.done()
+
+
 def test_select_and_type_replaces_the_value_in_a_controlled_input():
     # The new clear must not cost fill reliability: a React-style box that
     # keeps its value in script state and puts it back whenever it changes

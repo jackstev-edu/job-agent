@@ -103,6 +103,33 @@ def test_every_fixed_phrase_and_exception_shape_has_a_category():
     check.done()
 
 
+TYPE_FLIP = TEST_HOME / "fill_reasons_flip.html"
+TYPE_FLIP.write_text("""<!doctype html><html><head><meta charset="utf-8"></head><body>
+<form id="f" onsubmit="return false">
+<label for="city">City</label><input id="city" name="city">
+<button type="submit">Submit</button></form></body></html>""", encoding="utf-8")
+
+
+def test_a_box_that_turned_into_a_checkbox_takes_no_keystrokes():
+    # Fold of 103a876's review: fill("") used to be the only check that the
+    # scanned box still took text. A re-render that turns it into a checkbox
+    # (React reuses the node) must not get the keystrokes: refused as
+    # not_editable, the box left unticked. The click runs after the check,
+    # so not even that reaches it. On cc17666 the box was clicked and typed
+    # into, and reported as set (unconfirmed).
+    check = Checks()
+    with mock_page(TYPE_FLIP) as page:
+        fields = extract.extract_fields(page)
+        city = next(f for f in fields if f.get("name") == "city")
+        page.evaluate("document.getElementById('city').type = 'checkbox'")
+        ok, detail = filler.fill_one(page, city, "New York")
+        ticked = page.evaluate("document.getElementById('city').checked")
+    check(ok is False and filler.reason_for(ok, detail) == "not_editable",
+          f"refused as not_editable ({ok}, {detail!r})")
+    check(ticked is False, "the box was neither clicked nor typed into")
+    check.done()
+
+
 def test_four_failed_fills_on_a_page_carry_categories_and_no_values():
     check = Checks()
     with mock_page(FORM) as page:
