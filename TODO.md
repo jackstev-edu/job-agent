@@ -2465,3 +2465,22 @@ category is unchanged. Item 2's whole-pass negative and the
 page-rewrote negative pass only together with the blur of the baseline
 (7efeb21): with the clear's mark gone, the focus the agent's last fill
 left would otherwise have read as Jack's at his first click.
+
+Commit bb196bf (the fold): VERDICT FLAG, 1 FLAG, 1 minor. Folded in
+the next commit: the settle after the blur bounded the refocus route
+but did not close it (a refocus slower than 150 ms, or one triggered
+later, would still have had Jack's first click mark the box). The
+listener now marks the focused element on a pointer event only when
+it is a dropdown-style control (a combobox, a listbox or an option, a
+select, or a box inside a combobox / control container: the case the
+rule exists for, a dropdown that keeps the focus while a row is
+picked); on a key, input, paste or change it is marked as before. A
+plain box the page focused is never marked by a click elsewhere, in
+the wizard and in follow mode alike (follow mode: a touch the ledger
+no longer sees on such a box is one that was never Jack's). The blur
+and settle stay as belt and braces. Tests: a refocus slower than the
+settle marks nothing at Jack's click (fails on bb196bf); the listener
+guard: a row pick still marks the focused combobox, a click elsewhere
+marks the clicked box only (the second half fails on bb196bf). Logged
+(minor): the 150 ms settle runs under the agent flag with no banner;
+Jack's input in that window would be the agent's (safe direction).

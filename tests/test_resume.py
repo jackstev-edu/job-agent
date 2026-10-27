@@ -651,6 +651,42 @@ def test_a_page_that_restores_the_focus_makes_the_pause_count_nothing():
     check.done()
 
 
+REFOCUS_SLOW2 = ('<script>document.addEventListener("DOMContentLoaded", () => { const em = document.getElementById("em2"); '
+                 'if (em) em.addEventListener("blur", () => setTimeout(() => em.focus(), 400)); });</script>')
+
+
+def test_a_refocus_slower_than_the_settle_still_marks_nothing_at_jacks_click():
+    # Fold of bb196bf's review: the settle after the blur is a bound, not a
+    # close; a page that puts the focus back later than it would still
+    # have had Jack's first click mark that box. The listener now marks
+    # the focused element on a pointer event only when it is a
+    # dropdown-style control, so a plain box the page refocused is never
+    # marked by a click elsewhere: the baseline is taken (focus was free
+    # at the settle), Jack's click and typing count the City only, the
+    # run goes on. On bb196bf the refocused email box counted as his.
+    check = Checks()
+    site = _gui_site(email_on_2=True)
+    site["/apply/2"] = site["/apply/2"].replace("</body>", REFOCUS_SLOW2 + "</body>")
+
+    def jack_waits_then_clicks_and_types_the_city(page, state, job_id):
+        page.wait_for_timeout(700)          # the refocus has happened by now
+        page.click("#city")
+        page.keyboard.type("Springfield")
+    out, pauses, url, clicks, w = _drive(site, "/apply", [jack_waits_then_clicks_and_types_the_city])
+    by_label: dict = {}
+    for st in out.steps:
+        for f in st["fields"]:
+            by_label.setdefault(f["label"], []).append(f["ref"])
+    reviewed = (out.record or {}).get("human_reviewed", [])
+    em2 = [r for r in by_label.get("Email", []) if r in {f["ref"] for f in out.steps[1]["fields"]}]
+    check(out.status == "submitted", f"the run went on ({out.status}, {out.reason})")
+    check(by_label.get("City", [None])[0] in reviewed and em2 and em2[0] not in reviewed,
+          f"the city is his, the refocused box the agent filled is not ({reviewed}, {em2})")
+    detail = next(e["detail"] for e in out.events if e["kind"] == "gate_pause")
+    check(detail.startswith("1 field(s) touched by Jack"), f"one touch counted ({detail})")
+    check.done()
+
+
 def test_jacks_first_click_elsewhere_never_marks_the_box_the_agent_last_filled():
     # Negative, the text-box form of the same route (pre-existing before
     # 8fd4eb8, closed by the same blur): the agent's last fill on page two

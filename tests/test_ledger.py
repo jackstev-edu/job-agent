@@ -685,5 +685,37 @@ def test_a_misaligned_radio_group_is_never_the_agents():
     check.done()
 
 
+def test_a_row_click_still_marks_the_focused_dropdown_but_a_click_marks_no_other_focused_box():
+    # Guard for the listener's pointer rule (fold of bb196bf's review): a
+    # mouse pick of a dropdown row while its combobox input holds the
+    # focus marks the input (follow mode's case); a click elsewhere while
+    # a plain box holds the focus marks only what was clicked. The first
+    # half passes on bb196bf too; the second fails there.
+    from playwright.sync_api import sync_playwright
+    check = Checks()
+    html = TEST_HOME / "pointer-rule.html"
+    html.write_text('''<!doctype html><html><body>
+<input id="plain" value="x"><input id="other" value="y">
+<label for="cb">Pick</label><input id="cb" role="combobox" aria-expanded="true" autocomplete="off">
+<ul role="listbox"><li id="row" role="option">Canada</li></ul></body></html>''', encoding="utf-8")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            ctx = browser.new_context(); ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+            page = ctx.new_page(); page.goto(html.resolve().as_uri())
+            T = ledger.TOUCH_ATTR
+            page.focus("#cb"); page.locator("#row").click()
+            marked_after_pick = page.evaluate("[...document.querySelectorAll('[%s]')].map(e => e.id)" % T)
+            page.evaluate("() => { for (const e of document.querySelectorAll('[%s]')) e.removeAttribute('%s'); }" % (T, T))
+            page.focus("#plain"); page.locator("#other").click()
+            marked_after_click = page.evaluate("[...document.querySelectorAll('[%s]')].map(e => e.id)" % T)
+        finally:
+            browser.close()
+    check("cb" in marked_after_pick, f"the focused combobox is marked by a row pick ({marked_after_pick})")
+    check("plain" not in marked_after_click and "other" in marked_after_click,
+          f"a click elsewhere marks the clicked box only, not the focused plain box ({marked_after_click})")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())

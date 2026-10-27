@@ -493,8 +493,11 @@ class FieldLedger:
 # agent's own keystrokes and clicks happen while `agent` is set, so they
 # don't count as yours. It also marks what you touched (TOUCH_ATTR): the
 # event's target, the scanned field around it, a label's own control, a
-# dropdown's control container, and the focused element (a dropdown keeps
-# the focus while you pick a row with the mouse). While the agent fills,
+# dropdown's control container, and the focused element: on a key, input,
+# paste or change always; on a pointer event only when the focused element
+# is a dropdown-style control (a dropdown keeps the focus while you pick a
+# row with the mouse), never a plain box the page focused (Jack,
+# 2026-10-26). While the agent fills,
 # what's typed in, pasted into or changed still gets WHILE_AGENT_ATTR, and
 # Backspace or Delete (which the agent never presses) counts as you. Each
 # touched form field's identity parts (tag, name, id, explicit label; never
@@ -587,7 +590,19 @@ _ACTIVITY_JS = r"""
         return;
       }
       window.__jaAct.last = performance.now();
-      touch([...targets, document.activeElement]);
+      // The focused element counts as touched on a key, input, paste or
+      // change (it is the target anyway); on a pointer event only when it
+      // is a dropdown-style control, the one case the rule exists for (a
+      // dropdown keeps the focus while a row is picked with the mouse).
+      // Otherwise a click anywhere would mark whatever box the page left
+      // or put the focus on, which in the wizard is a review it never got
+      // (Jack, 2026-10-26).
+      const active = document.activeElement;
+      const pointer = t === 'pointerdown' || t === 'mousedown';
+      const picker = active instanceof Element && active !== document.body
+          && (active.matches('[role=combobox], [aria-autocomplete], [role=listbox], [role=option], select')
+              || !!active.closest('[role=combobox], [class*="control"]'));
+      touch(pointer && !picker ? targets : [...targets, active]);
     }, true);
 }
 """
