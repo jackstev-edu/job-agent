@@ -354,7 +354,8 @@ How the code keeps them, and rules of its own:
   2026-10-26; the baseline read first drops the focus the agent's last
   fill left, so his first click elsewhere marks nothing of the agent's;
   the wizard reads its own review mark, which a click puts on the
-  focused element only when that is a dropdown-style control, while
+  focused element only when that is a dropdown-style control and the
+  click lands on it or one of its rows (Jack, 2026-10-27), while
   follow mode's touch mark and record still take the focused element on
   every event),
   or if he ticked it in the GUI and the page still holds exactly

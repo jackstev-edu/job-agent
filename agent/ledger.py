@@ -46,11 +46,13 @@ TOUCH_ATTR = "data-ja-touched"
 # review is counted from. It differs from TOUCH_ATTR in one way only: on a
 # pointer event the focused element gets it only when that element is a
 # dropdown-style control (an explicit combobox / listbox / option role, a
-# live aria-autocomplete, a select, or a box inside a [role=combobox]),
-# never a plain box the agent's fill or the page left focused. In the
-# wizard a mark waives a stop, so it marks less; in follow mode a mark
-# keeps a field from the model, so TOUCH_ATTR still marks more (fix of
-# cc17666's BLOCK).
+# live aria-autocomplete, a select, or a box inside a [role=combobox])
+# AND the click lands on that dropdown or one of its rows ([role=option]
+# or [role=listbox]; Jack, 2026-10-27), never a plain box the agent's
+# fill or the page left focused, and never a dropdown the page moved the
+# focus to when the click is elsewhere. In the wizard a mark waives a
+# stop, so it marks less; in follow mode a mark keeps a field from the
+# model, so TOUCH_ATTR still marks more (fix of cc17666's BLOCK).
 REVIEW_ATTR = "data-ja-review-touch"
 
 # Which of these refs carry a trusted-input mark on their own element (set
@@ -617,7 +619,15 @@ _ACTIVITY_JS = r"""
           && (active.matches('[role=combobox], [aria-autocomplete]:not([aria-autocomplete="none" i]), '
                              + '[role=listbox], [role=option], select')
               || !!(active.parentElement && active.parentElement.closest('[role=combobox]')));
-      mark(pointer && !picker ? targets : [...targets, active], R);
+      // ...and only when the click lands on that dropdown or one of its
+      // rows (Jack, 2026-10-27): a page that moves the focus to a dropdown
+      // after the pause's baseline must not have a click elsewhere count
+      // it as reviewed. A row keeps the focus in the dropdown, so the row
+      // is in the event's path while the dropdown is the active element.
+      const own = picker ? (active.closest('[role=combobox]') || active) : null;
+      const onPicker = picker && path.some(n => n === active || n === own
+          || (n instanceof Element && n.matches('[role=option], [role=listbox]')));
+      mark(pointer && !onPicker ? targets : [...targets, active], R);
     }, true);
 }
 """

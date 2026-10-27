@@ -718,14 +718,18 @@ def test_a_row_click_still_marks_the_focused_dropdown_but_a_click_marks_no_other
     check.done()
 
 
-def test_the_review_mark_takes_a_focused_box_only_when_it_is_a_dropdown():
-    # Fold of cc17666's review, one case per branch of the picker test: a
-    # click elsewhere puts REVIEW_ATTR on the focused element only for an
-    # explicit combobox role, a live aria-autocomplete, a select or a box
-    # inside a [role=combobox]; never on Bootstrap's form-control box, an
-    # input inside an Ant Design-style "...-control" wrapper, or one with
-    # aria-autocomplete="none". TOUCH_ATTR (follow mode) takes the focused
-    # element in every case. Fails on cc17666 (no REVIEW_ATTR).
+def test_the_review_mark_takes_a_focused_dropdown_only_from_a_click_on_it_or_its_row():
+    # Jack's decision 6 of 2026-10-27, one case per branch of the picker
+    # test: a click ELSEWHERE puts REVIEW_ATTR on no focused element at
+    # all (a page that moved the focus to a dropdown after the baseline
+    # must not have it count); a click on a ROW ([role=option]) puts it
+    # on the focused element only for an explicit combobox role, a live
+    # aria-autocomplete, a select, a listbox, an option or a box inside a
+    # [role=combobox]; never on Bootstrap's form-control box, an input
+    # inside an Ant Design-style "...-control" wrapper, or one with
+    # aria-autocomplete="none". TOUCH_ATTR (follow mode) takes the
+    # focused element in every case. On f1493d5 the click elsewhere
+    # marked every dropdown-style element.
     from playwright.sync_api import sync_playwright
     check = Checks()
     html = TEST_HOME / "pointer-rule-branches.html"
@@ -735,35 +739,50 @@ def test_the_review_mark_takes_a_focused_box_only_when_it_is_a_dropdown():
 <input id="role" role="combobox"><select id="sel"><option>A</option></select>
 <div role="combobox"><input id="inner"></div>
 <div id="lb" role="listbox" tabindex="0">list</div><div id="op" role="option" tabindex="0">row</div>
-<button id="away" type="button">elsewhere</button></body></html>''', encoding="utf-8")
-    want = {"fc": False, "ant": False, "acnone": False, "aclist": True, "role": True, "sel": True, "inner": True,
-            "lb": True, "op": True}
+<button id="away" type="button">elsewhere</button>
+<ul role="listbox"><li id="row" role="option">Canada</li></ul>
+<script>document.getElementById('row').addEventListener('mousedown', e => e.preventDefault());</script>
+</body></html>''', encoding="utf-8")
+    on_row = {"fc": False, "ant": False, "acnone": False, "aclist": True, "role": True, "sel": True,
+              "inner": True, "lb": True, "op": True}
     got: dict = {}
+    got_row: dict = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
             ctx = browser.new_context(); ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
             page = ctx.new_page(); page.goto(html.resolve().as_uri())
-            for el_id in want:
-                page.evaluate("([a, b]) => { for (const e of document.querySelectorAll('*')) "
-                              "{ e.removeAttribute(a); e.removeAttribute(b); } }",
-                              [ledger.REVIEW_ATTR, ledger.TOUCH_ATTR])
+            clear = ("([a, b]) => { for (const e of document.querySelectorAll('*')) "
+                     "{ e.removeAttribute(a); e.removeAttribute(b); } }")
+            read = ("([id, r, t]) => { const e = document.getElementById(id); "
+                    "return [e.hasAttribute(r), e.hasAttribute(t)]; }")
+
+            def click(sel):
+                page.mouse.move(0, 0)
+                box = page.locator(sel).bounding_box()
+                page.mouse.move(box["x"] + 5, box["y"] + 5); page.mouse.down(); page.mouse.up()
+            for el_id in on_row:
+                page.evaluate(clear, [ledger.REVIEW_ATTR, ledger.TOUCH_ATTR])
                 page.focus(f"#{el_id}")
                 page.dispatch_event("#away", "pointerdown")      # untrusted: must mark nothing
                 untrusted = page.evaluate("id => document.getElementById(id).hasAttribute('%s')"
                                           % ledger.REVIEW_ATTR, el_id)
-                page.mouse.move(0, 0)
-                box = page.locator("#away").bounding_box()
-                page.mouse.move(box["x"] + 5, box["y"] + 5); page.mouse.down(); page.mouse.up()
-                got[el_id] = page.evaluate("([id, r, t]) => { const e = document.getElementById(id); "
-                                           "return [e.hasAttribute(r), e.hasAttribute(t)]; }",
-                                           [el_id, ledger.REVIEW_ATTR, ledger.TOUCH_ATTR]) + [untrusted]
+                click("#away")
+                got[el_id] = page.evaluate(read, [el_id, ledger.REVIEW_ATTR, ledger.TOUCH_ATTR]) + [untrusted]
+                page.evaluate(clear, [ledger.REVIEW_ATTR, ledger.TOUCH_ATTR])
+                page.focus(f"#{el_id}")
+                click("#row")                                    # the row keeps the focus where it was
+                focused = page.evaluate("document.activeElement && document.activeElement.id")
+                got_row[el_id] = page.evaluate(read, [el_id, ledger.REVIEW_ATTR, ledger.TOUCH_ATTR]) + [focused]
         finally:
             browser.close()
-    for el_id, review in want.items():
-        check(got[el_id][0] is review, f"#{el_id}: review mark {review} ({got[el_id]})")
+    for el_id, review in on_row.items():
+        check(got[el_id][0] is False, f"#{el_id}: a click elsewhere never puts the review mark on it ({got[el_id]})")
         check(got[el_id][1] is True, f"#{el_id}: follow mode's touch mark still taken ({got[el_id]})")
         check(got[el_id][2] is False, f"#{el_id}: an untrusted event marks nothing ({got[el_id]})")
+        check(got_row[el_id][2] == el_id, f"#{el_id}: the row click left the focus on it ({got_row[el_id]})")
+        check(got_row[el_id][0] is review, f"#{el_id}: a click on a row: review mark {review} ({got_row[el_id]})")
+        check(got_row[el_id][1] is True, f"#{el_id}: follow mode's touch mark on a row click ({got_row[el_id]})")
     check.done()
 
 

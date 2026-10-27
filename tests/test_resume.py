@@ -754,6 +754,105 @@ def test_a_refocus_slower_than_the_settle_still_marks_nothing_at_jacks_click():
     check.done()
 
 
+# Page two with a Country dropdown the agent fills (a combobox input with
+# a listbox of rows; a row's mousedown keeps the focus in the box), a
+# required City, and a page script that puts the focus back on the
+# dropdown 400 ms after it loses it (until Jack's first click): after the
+# pause's baseline blur and settle, the dropdown holds the focus again
+# when Jack acts.
+COMBO2 = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<h1>Step 2 of 3</h1><form id="f2">
+<label for="country">Country</label>
+<input id="country" name="country" role="combobox" aria-expanded="false" autocomplete="off">
+<ul id="menu" role="listbox" style="display:none"><li role="option">Canada</li><li role="option">Chile</li></ul>
+<label for="city">City</label><input id="city" name="city" required>
+<button type="button" onclick="location.href='/apply/3'">Next</button></form>
+<script>
+const menu = document.getElementById('menu'), country = document.getElementById('country');
+const show = () => {{ menu.style.display = ''; country.setAttribute('aria-expanded', 'true'); }};
+country.addEventListener('click', show); country.addEventListener('focus', show);
+country.addEventListener('input', () => {{ const q = country.value.toLowerCase();
+  for (const li of menu.querySelectorAll('li')) li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none'; }});
+for (const li of menu.querySelectorAll('li')) li.addEventListener('mousedown', e => {{ e.preventDefault();
+  country.value = li.textContent; menu.style.display = 'none'; }});
+// Every blur, until Jack's first click: the agent's own scan and fill blur
+// it too, and the refocus must still be live at the pause's baseline.
+country.addEventListener('blur', () => {{ if (!window.__jackActed) setTimeout(() => country.focus(), 400); }});
+// The agent's own clicks are trusted pointer events too: only one made
+// while the agent flag is off is Jack's.
+document.addEventListener('pointerdown', () => {{ if (!(window.__jaAct && window.__jaAct.agent)) window.__jackActed = true; }}, true);
+</script>{CLICKS_JS}</body></html>"""
+
+
+def _combo_site():
+    site = _gui_site()
+    site["/apply/2"] = COMBO2
+    return site
+
+
+def _refs_by_label(out):
+    by_label: dict = {}
+    for st in out.steps:
+        for f in st["fields"]:
+            by_label.setdefault(f["label"], f["ref"])
+    return by_label
+
+
+def test_a_dropdown_the_page_refocused_is_not_reviewed_by_a_click_elsewhere():
+    # Jack's decision 6 of 2026-10-27 (the dropdown twin of the plain-box
+    # refocus): the agent picked Canada in the Country dropdown; at the
+    # City pause the page has put the focus back on the dropdown; Jack
+    # clicks the City box and types. The dropdown is not his: a focused
+    # dropdown counts only from a click on it or one of its rows. On
+    # f1493d5 the click on City put the review mark on the dropdown and
+    # the pause counted it as his.
+    from test_wizard import _country_mapper
+    check = Checks()
+    focus_at_click: list = []
+
+    def jack_waits_then_clicks_and_types_the_city(page, state, job_id):
+        page.wait_for_timeout(700)          # the refocus has happened by now
+        focus_at_click.append(page.evaluate("document.activeElement && document.activeElement.id"))
+        page.click("#city")
+        page.keyboard.type("Springfield")
+    out, pauses, url, clicks, w = _drive(_combo_site(), "/apply", [jack_waits_then_clicks_and_types_the_city],
+                                          mapper=_country_mapper, max_pauses=1)
+    by_label = _refs_by_label(out)
+    check(focus_at_click == ["country"], f"the page had put the focus back on the dropdown ({focus_at_click})")
+    check(by_label.get("City") in w.human_reviewed and by_label.get("Country") not in w.human_reviewed,
+          f"the city is his, the refocused dropdown is not ({w.human_reviewed}, {by_label})")
+    detail = next(e["detail"] for e in out.events if e["kind"] == "gate_pause")
+    check(detail.startswith("1 field(s) touched by Jack"), f"one touch counted ({detail})")
+    check.done()
+
+
+def test_a_row_jack_picks_in_the_refocused_dropdown_counts_as_his():
+    # The positive guard for decision 6: with the focus back on the
+    # dropdown and its rows showing, Jack clicks the Canada row (the row
+    # keeps the focus in the box, so the box is the active element and
+    # the row is in the click's path), then the City. Both are his.
+    # Passes on f1493d5 too (there every click counted the dropdown).
+    from test_wizard import _country_mapper
+    check = Checks()
+    focus_at_click: list = []
+
+    def jack_picks_a_row_then_types_the_city(page, state, job_id):
+        page.wait_for_timeout(700)
+        focus_at_click.append(page.evaluate("document.activeElement && document.activeElement.id"))
+        page.click("#menu li:first-child")
+        page.click("#city")
+        page.keyboard.type("Springfield")
+    out, pauses, url, clicks, w = _drive(_combo_site(), "/apply", [jack_picks_a_row_then_types_the_city],
+                                          mapper=_country_mapper, max_pauses=1)
+    by_label = _refs_by_label(out)
+    check(focus_at_click == ["country"], f"the page had put the focus back on the dropdown ({focus_at_click})")
+    check(by_label.get("City") in w.human_reviewed and by_label.get("Country") in w.human_reviewed,
+          f"the city and the dropdown he picked a row in are his ({w.human_reviewed}, {by_label})")
+    detail = next(e["detail"] for e in out.events if e["kind"] == "gate_pause")
+    check(detail.startswith("2 field(s) touched by Jack"), f"two touches counted ({detail})")
+    check.done()
+
+
 def test_jacks_first_click_elsewhere_never_marks_the_box_the_agent_last_filled():
     # Negative, the text-box form of the same route (pre-existing before
     # 8fd4eb8, closed by the same blur): the agent's last fill on page two

@@ -591,9 +591,11 @@ open once anything submits without Jack.
   (a combobox, a select, a live aria-autocomplete box, a listbox or an
   option) after the baseline's blur and 150 ms settle has Jack's first
   click anywhere put REVIEW_ATTR on it, and the pause counts it as his
-  review (stop to pass). Possible fix: count a focused picker on a
-  pointer event only when the event's path holds a row. See the round
-  of 2026-10-26, second, commit 1663f32's entry.
+  review (stop to pass). DONE (Jack's decision 6 of 2026-10-27): a
+  focused dropdown takes the review mark on a click only when the click's
+  path holds one of its rows or the dropdown itself. See the round of
+  2026-10-26, second, commit 1663f32's entry, and the round of
+  2026-10-27, item 6.
 - Resume under the hold (2026-10-27, from the review of 89135f2): a
   fill under protect_held skips the resume upload (pipeline.fill_page),
   and the gate skips file fields, so a page reached after a "moved"
@@ -2814,3 +2816,20 @@ CLAUDE.md owner-decision lines for the resume under the hold and the
 dropdown click rule described code not yet on main; item 3 (this
 commit) makes the first true and item 6 the second. No design rule
 relaxed; nothing personal.
+
+Item 6 of 2026-10-27 (the dropdown focus residual; Jack's decision 6).
+The listener puts REVIEW_ATTR on a focused dropdown-style element on a
+pointer event only when the event's composedPath holds the element
+itself, its [role=combobox] container, or a [role=option] / [role=listbox]
+row; a click elsewhere marks the clicked targets only. TOUCH_ATTR and the
+identity record (follow mode) are unchanged. Tests: the page refocuses an
+agent-filled combobox after the baseline, Jack clicks the City box and
+types, the dropdown is not reviewed (fails on f1493d5: it was counted,
+"2 field(s) touched"); Jack picks a row in the refocused dropdown and it
+counts (guard; passes on f1493d5); the listener's branch test now checks
+a click elsewhere marks no focused element and a click on a row marks
+the dropdown-style ones only (the elsewhere half fails on f1493d5 for
+all six dropdown-style elements). The fixture's refocus re-arms on
+every blur until a pointerdown made with the agent flag off: the
+agent's own scan and fill blur the box too (and its clicks are trusted
+pointer events), and a one-shot refocus was spent before the pause.
