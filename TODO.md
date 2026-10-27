@@ -2685,3 +2685,13 @@ final status line, outside the per-link try, ends the batch; the
 terminal Pauser's echo of the pause body); fix: route both through
 _print_safely. (5) The encoding test doesn't assert on_wait was called
 (the actual harm) and covers only a real cp1252 TextIOWrapper.
+
+Item 5 (Workday company and the cover letter; Jack's decision 5). On a
+Workday host the company is the tenant the address names: the log, the
+GUI row and the tracker keep it; the `fill` command's cover letter (the
+model's draft and the saved file's name and header) gets a blank
+company, and so does any page whose address can't be read. The wizard
+drafts no letter. Tests: a Workday posting run through `fill` with a
+letter gives the letter no company and the tracker the tenant (fails
+on 8c484f9: the letter was given "acme"); off Workday the company is kept
+(guard).

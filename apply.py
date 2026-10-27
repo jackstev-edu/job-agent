@@ -200,6 +200,21 @@ def cmd_check(args) -> None:
 # ---------------------------------------------------------------------------
 #  fill — the main event
 # ---------------------------------------------------------------------------
+def _letter_company(page, company: str) -> str:
+    """
+    The company a cover letter may name: blank on a Workday host. There
+    the company is the tenant the address names, as written ("gm",
+    "jci"), right for the log, the GUI row and the tracker but not a name
+    a letter can address (Jack, 2026-10-26). Blank beats wrong, so an
+    unreadable address is blank too.
+    """
+    try:
+        url = str(page.url or "")
+    except Exception:
+        return ""
+    return "" if extract.workday_tenant(url) else company
+
+
 def cmd_fill(args) -> None:
     prof = Profile.load(args.profile)
     url = args.url
@@ -271,6 +286,7 @@ def cmd_fill(args) -> None:
         # Role and company from the posting's title, for the same reason: a
         # later page's title can carry an answer, and the letter is sent both.
         role, company = extract.guess_role_and_company(page)
+        letter_company = _letter_company(page, company)
         if getattr(args, "follow", False):
             _follow(page, args, prof, url, key, ats, detected_by, events, posting_text,
                     role, company)
@@ -417,8 +433,8 @@ def cmd_fill(args) -> None:
         if args.cover_letter:
             print(f"\n{DIM}Drafting a cover letter…{OFF}")
             try:
-                text = letters.draft_cover_letter(prof, posting_text, company, role)
-                path = letters.save_draft(text, company, role)
+                text = letters.draft_cover_letter(prof, posting_text, letter_company, role)
+                path = letters.save_draft(text, letter_company, role)
                 print(f"  {GREEN}draft saved:{OFF} {path}")
             except Exception as e:
                 print(f"  {RED}cover letter failed: {str(e)[:100]}{OFF}")
