@@ -1100,7 +1100,10 @@ def test_a_captcha_still_shown_on_a_resumed_pass_waits_again_with_the_fill_in_ha
 
     def jack_solves_it(page, state, job_id):
         page.evaluate("document.querySelector('.captcha-box').remove()")
-    out, pauses, url, clicks, w = _drive(_gui_site(), "/apply", [
+    # Page three has a box that already holds a value: a hold that leaked
+    # past page two would leave it as it is and the gate would stop there.
+    prefilled = '<label for="em3">Email</label><input id="em3" name="email" type="email" value="old@example.invalid">'
+    out, pauses, url, clicks, w = _drive(_gui_site(marketing=prefilled), "/apply", [
         jack_types_the_city_and_a_captcha_appears, jack_does_nothing, jack_solves_it], max_pauses=4)
     kinds = [p["pause"]["kind"] for p in pauses]
     check(kinds == ["gate", "captcha", "captcha"], f"the gate, then the CAPTCHA twice ({kinds})")
@@ -1108,8 +1111,12 @@ def test_a_captcha_still_shown_on_a_resumed_pass_waits_again_with_the_fill_in_ha
           f"solved, the run went on ({out.status}, {out.reason}, {clicks})")
     check(out.pages_filled == 3 and len(out.steps) == 3, f"page two was filled once ({out.pages_filled})")
     captcha_events = [e for e in out.events if e["kind"] == "captcha"]
-    check(captcha_events and captcha_events[-1]["handled"] == "jack",
-          f"the CAPTCHA is Jack's once solved ({captcha_events})")
+    check(len(captcha_events) == 2 and all(e["handled"] == "jack" for e in captcha_events),
+          f"both CAPTCHA events are Jack's once solved ({captcha_events})")
+    page3 = out.steps[-1] if out.steps else {}
+    check(not any(fl.get("category") == "held" for fl in page3.get("flags") or [])
+          and not any(line.startswith("left as it is") for line in out.log),
+          f"the CAPTCHA pass's hold was cleared before page three ({page3.get('flags')}, {out.log})")
     check.done()
 
 

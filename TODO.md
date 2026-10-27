@@ -597,7 +597,8 @@ open once anything submits without Jack.
 - Resume under the hold (2026-10-27, from the review of 89135f2): a
   fill under protect_held skips the resume upload (pipeline.fill_page),
   and the gate skips file fields, so a page reached after a "moved"
-  pause or a park whose page changed, with an OPTIONAL empty resume
+  pause, a park whose page changed, or a CAPTCHA resume whose page
+  changed or couldn't be read, with an OPTIONAL empty resume
   box, can go on to Submit with no resume (a required one stops). A
   flag can't stop it (the gate skips file fields before flags) and a
   page event would stay unhandled after Jack's pause. Jack to decide:
@@ -2755,3 +2756,13 @@ only that the second pause is a gate stop (City is held too). (4) The
 terminal half of item 6 has no test (a non-deferring pauser that moves
 to page two and types, then the hold line, the held box and the stop;
 and a negative where the page never moves).
+
+Commits 1548f54 / 8de5233 (item 7 and its TODO): VERDICT FLAG, 4 FLAGs.
+Folded in the next commit: page three gets a box that holds a value,
+and the test asserts no "held" flag and no "left as it is" line there
+(the CAPTCHA pass's hold must be cleared before page three; it fails
+with the clear in _resume_fill removed); both CAPTCHA events must be
+Jack's, not only the last; the MUST FIX bullet names the CAPTCHA resume
+routes too. For Jack: item 7 is a guard for an existing branch, so it
+passes on the previous commit (the working rule asks each new test to
+fail there); it was mutation-checked instead.
