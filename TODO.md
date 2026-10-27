@@ -602,8 +602,9 @@ open once anything submits without Jack.
   changed or couldn't be read, with an OPTIONAL empty resume
   box, can go on to Submit with no resume (a required one stops). A
   flag can't stop it (the gate skips file fields before flags) and a
-  page event would stay unhandled after Jack's pause. Jack to decide:
-  upload into a resume box that reads empty under the hold, or stop.
+  page event would stay unhandled after Jack's pause. DONE (Jack's
+  decision 3 of 2026-10-27): the resume goes into a resume box that
+  reads empty under the hold; one that holds a file is left alone.
 
 ## Deferred
 
@@ -2792,3 +2793,24 @@ Decided by Jack, 2026-10-27, on the report of c6bfb95:
 6. Dropdown focus residual: a focused dropdown counts as reviewed on a
    click only when the click's path holds one of its rows or the
    dropdown itself. Built as item 6 below.
+
+Item 3 of 2026-10-27 (the resume under the hold; Jack's decision 3).
+pipeline.fill_page under protect_held now reads the resume box's files
+(the page's read policy, names only) and uploads the resume when the box
+reads empty; a box that holds a file, or whose files can't be read, is
+left alone with a fixed line ("left as it is (holds a file, or couldn't
+be read)"). Tests: an empty optional resume box under the hold gets the
+resume while the prefilled box stays held (fails on 9b68049: nothing
+uploaded); a box that already holds a file is left alone (a guard for
+the upload rule; on 9b68049 it fails only on the new fixed line, which
+did not exist there). Found while building it: the re-scan after the
+upload gives every field a new ref, so the hold read before the upload
+no longer matched and the prefilled box was typed over; the hold is now
+read again on the re-scan (_held_refs), and a held box reaches neither
+classifier call around the upload (reclassify_after_upload's `skip`).
+
+Commit 9b68049 (the decisions recorded): VERDICT FLAG, 2 FLAGs: the
+CLAUDE.md owner-decision lines for the resume under the hold and the
+dropdown click rule described code not yet on main; item 3 (this
+commit) makes the first true and item 6 the second. No design rule
+relaxed; nothing personal.

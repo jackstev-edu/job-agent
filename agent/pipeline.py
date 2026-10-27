@@ -147,13 +147,14 @@ def identity(f: dict) -> tuple | None:
 
 
 def reclassify_after_upload(before: list[dict], before_categories: dict,
-                            after: list[dict]) -> tuple[dict, set[str]]:
+                            after: list[dict], skip: set[str] | None = None) -> tuple[dict, set[str]]:
     """
     The categories for the post-upload scan, and the refs treated as new.
     A field keeps its pre-upload category only when it's the one field with
     its identity before and after, and its label AND help text are exactly
     the same (compared here, never sent). Every other field is classified
-    again with no help text at all.
+    again with no help text at all. A ref in `skip` (a box a protected fill
+    holds) is neither kept nor classified: nothing of it reaches a model.
     """
     def unique(fields):
         seen: dict = {}
@@ -166,7 +167,7 @@ def reclassify_after_upload(before: list[dict], before_categories: dict,
     categories: dict[str, str] = {}
     new: list[dict] = []
     for f in after:
-        if f.get("type") == "file":
+        if f.get("type") == "file" or f["ref"] in (skip or set()):
             continue
         key = identity(f)
         old = was.get(key) if key in now else None
@@ -234,6 +235,26 @@ class Unreadable(Exception):
     """The page couldn't be read where the fill needed to read it first; nothing was typed."""
 
 
+def _held_refs(page: "Page", fields: list[dict]) -> set[str]:
+    """
+    The refs a protected fill holds: every box but one that was read and
+    reads empty (booleans only, through the read policy). One the read left
+    out (no stable identity, a partly read group) is held, never filled over
+    (fix of c5b13bc's BLOCK). Read again after an upload's re-scan, whose
+    refs are new. A read that fails or comes back empty raises Unreadable.
+    """
+    plain = [f for f in fields if f.get("type") != "file"]
+    try:
+        now = extract.snapshot(page, plain)
+    except Exception as e:
+        raise Unreadable(f"the page's values couldn't be read ({type(e).__name__})")
+    if plain and not now:
+        # The read came back with nothing (a password box on the page
+        # makes the whole read refuse): no box is known empty.
+        raise Unreadable("the page's values couldn't be read (nothing came back)")
+    return {f["ref"] for f in plain if not (f["ref"] in now and not _holds(now[f["ref"]]))}
+
+
 @dataclass
 class PageFill:
     """What one page's fill produced, for the gate and the review sheet."""
@@ -266,9 +287,11 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
     box Jack may have corrected in the tab is never typed over and nothing
     of it reaches a model; it is never counted as his (nothing says who
     wrote it), so the gate stops on it for him. Touch marks are not used:
-    the filler's own clear leaves one. The resume upload is skipped on
-    such a scan (the page was filled before). A read that fails or comes
-    back empty raises Unreadable: the fill must not run on it.
+    the filler's own clear leaves one. The resume still goes into a
+    resume box that reads empty (Jack, 2026-10-27); one that holds a
+    file, or whose files can't be read, is left alone and said so. A read
+    that fails or comes back empty raises Unreadable: the fill must not
+    run on it.
     """
     fields = extract.extract_fields(page, guard)
     if not fields:
@@ -278,25 +301,29 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
     lines: list[str] = []
     uploaded: dict | None = {}
     new_after_upload: set[str] = set()
-    marked: set[str] = set()
-    if protect_held:
-        plain = [f for f in fields if f.get("type") != "file"]
+    # Held by default on a protected fill: see _held_refs.
+    marked: set[str] = _held_refs(page, fields) if protect_held else set()
+    box = resume_box(fields) if resume else None
+    if box is not None and protect_held:
+        # Under the hold the resume still goes into a resume box that reads
+        # empty (Jack, 2026-10-27): a page reached after a park, a moved
+        # pause or a CAPTCHA was never filled by the agent, and an optional
+        # empty resume box would otherwise go on to Submit with no resume.
+        # A box that holds a file (Jack's, or a portal's) or whose files
+        # can't be read is left alone, like any other held box.
         try:
-            now = extract.snapshot(page, plain)
-        except Exception as e:
-            raise Unreadable(f"the page's values couldn't be read ({type(e).__name__})")
-        if plain and not now:
-            # The read came back with nothing (a password box on the page
-            # makes the whole read refuse): no box is known empty.
-            raise Unreadable("the page's values couldn't be read (nothing came back)")
-        # Held by default: a box is filled only when it was read and reads
-        # empty. One the read left out (no stable identity, a partly read
-        # group) is held, never filled over (fix of c5b13bc's BLOCK).
-        marked = {f["ref"] for f in plain if not (f["ref"] in now and not _holds(now[f["ref"]]))}
-    box = resume_box(fields) if resume and not protect_held else None
+            files_now = extract.snapshot(page, [box])
+        except Exception:
+            files_now = {}
+        if box["ref"] not in files_now or _holds(files_now[box["ref"]]):
+            lines.append(f"left as it is (holds a file, or couldn't be read): "
+                         f"'{(box.get('label') or box.get('name') or '')[:60]}'")
+            box = None
     if box is not None:
         before_fields = fields
-        before = classify.classify_fields([f for f in before_fields if f.get("type") != "file"])
+        # A held box never reaches the classifier, here or after the re-scan.
+        before = classify.classify_fields([f for f in before_fields if f.get("type") != "file"
+                                           and f["ref"] not in marked])
         try:
             handle = page.query_selector(f"[{extract.REF_ATTR}='{box['ref']}']")
         except Exception:
@@ -307,9 +334,12 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
             events.append({"kind": "upload_failed", "detail": detail})
         browser_mod.settle(page, 2500)
         fields = extract.enrich_comboboxes(page, extract.extract_fields(page, guard))
+        if protect_held:
+            # The re-scan's refs are new: the hold is read again on them.
+            marked = _held_refs(page, fields)
         ref = outcome.upload_ref(handle, fields) if worked else None
         uploaded = {ref: [Path(resume).name]} if ref else None
-        categories, new_after_upload = reclassify_after_upload(before_fields, before, fields)
+        categories, new_after_upload = reclassify_after_upload(before_fields, before, fields, skip=marked)
     else:
         categories = classify.classify_fields([f for f in fields if f.get("type") != "file"
                                                and f["ref"] not in marked])

@@ -406,6 +406,67 @@ NO_IDENTITY = f"""<!doctype html><html><head><title>Engineer - Example Co</title
 {CLICKS_JS}</body></html>"""
 
 
+RESUME_BOX = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
+<form><label for="fn">First Name</label><input id="fn" name="first_name" value="Jacques">
+<label for="em">Email</label><input id="em" name="email" type="email">
+<label for="cv">Resume</label><input id="cv" name="resume" type="file">
+<button type="button">Next</button></form>{CLICKS_JS}</body></html>"""
+
+
+def _hold_fill_with_resume(site_path, cv, before=None):
+    from agent import extract, pipeline
+    site = _gui_site(); site[site_path] = RESUME_BOX
+    p, browser, ctx = _open(site)
+    try:
+        page = ctx.new_page(); page.goto(f"{HOST}{site_path}")
+        if before is not None:
+            before(page)
+        with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                mock.patch("agent.mapper.map_fields", map_from_profile):
+            fill = pipeline.fill_page(page, _profile(), guard=extract.ReadGuard(), resume=cv,
+                                      posting_text="", protect_held=True)
+        names = page.evaluate("[...document.getElementById('cv').files].map(f => f.name)")
+        fn, em = page.input_value("#fn"), page.input_value("#em")
+    finally:
+        browser.close(); p.stop()
+    return fill, names, fn, em
+
+
+def test_an_empty_resume_box_under_the_hold_still_gets_the_resume():
+    # Jack's decision 3 of 2026-10-27: a fill under the hold (after a
+    # park, a moved pause or a CAPTCHA) used to skip the resume upload, so
+    # a page with an optional, empty resume box could go on to Submit with
+    # no resume. Now the resume goes into a resume box that reads empty;
+    # the other boxes are held or filled as before. On c6bfb95 the box
+    # stayed empty and nothing was uploaded.
+    check = Checks()
+    cv = TEST_HOME / "hold-resume.pdf"; cv.write_bytes(b"%PDF-1.4 test")
+    fill, names, fn, em = _hold_fill_with_resume("/cv", cv)
+    check(names == ["hold-resume.pdf"], f"the resume went into the empty box ({names})")
+    check(fill is not None and fill.uploaded and list(fill.uploaded.values()) == [["hold-resume.pdf"]],
+          f"the upload is in the fill's record ({fill and fill.uploaded})")
+    check(fn == "Jacques" and em == "test@example.invalid",
+          f"the prefilled box is still held, the empty one filled ({fn!r}, {em!r})")
+    check(fill is not None and any(line.startswith("uploaded hold-resume.pdf") for line in fill.lines),
+          f"the upload is logged ({fill and fill.lines})")
+    check.done()
+
+
+def test_a_resume_box_that_already_holds_a_file_is_left_alone_under_the_hold():
+    # The guard for decision 3: a resume box that holds a file (Jack's, or
+    # a portal's) is left alone under the hold, said so, and nothing is
+    # recorded as uploaded. Passes on c6bfb95 too (no upload at all there).
+    check = Checks()
+    cv = TEST_HOME / "hold-resume.pdf"; cv.write_bytes(b"%PDF-1.4 test")
+    own = TEST_HOME / "jacks-own.pdf"; own.write_bytes(b"%PDF-1.4 own")
+    fill, names, fn, em = _hold_fill_with_resume("/cv2", cv, before=lambda page: page.set_input_files("#cv", str(own)))
+    check(names == ["jacks-own.pdf"], f"the file already in the box stays ({names})")
+    check(fill is not None and not fill.uploaded, f"nothing recorded as uploaded ({fill and fill.uploaded})")
+    check(fill is not None and any(line.startswith("left as it is (holds a file, or couldn't be read): 'Resume'")
+                                   for line in fill.lines), f"said so ({fill and fill.lines})")
+    check.done()
+
+
 def test_a_box_the_value_read_leaves_out_is_held_not_filled_over():
     # Fix of c5b13bc's BLOCK: on a protected fill, a box the value read
     # leaves out (no name, no aria-label, no <label>: no stable identity)
