@@ -621,6 +621,36 @@ def test_the_agents_own_radio_pick_counts_for_nothing():
     check.done()
 
 
+REFOCUS2 = ('<script>document.addEventListener("DOMContentLoaded", () => { const em = document.getElementById("em2"); '
+            'if (em) em.addEventListener("blur", () => setTimeout(() => em.focus(), 10)); });</script>')
+
+
+def test_a_page_that_restores_the_focus_makes_the_pause_count_nothing():
+    # Fold of 7efeb21's review: the baseline blurs the agent's last box,
+    # but a page that puts the focus back (a validation, a re-render)
+    # would have Jack's first click mark it as his. The baseline now
+    # checks the focus is free after the blur; if not, nothing counts at
+    # that pause, not even the box Jack really touched. On 7efeb21 the
+    # refocused email box was counted as his.
+    check = Checks()
+    site = _gui_site(email_on_2=True)
+    site["/apply/2"] = site["/apply/2"].replace("</body>", REFOCUS2 + "</body>")
+
+    def jack_clicks_and_types_the_city(page, state, job_id):
+        page.click("#city")
+        page.keyboard.type("Springfield")
+    out, pauses, url, clicks, w = _drive(site, "/apply", [jack_clicks_and_types_the_city, lambda *a: None],
+                                          max_pauses=2)
+    kinds = [p["pause"]["kind"] for p in pauses]
+    pause_events = [e for e in out.events if e["kind"] == "gate_pause" and e.get("handled") == "jack"]
+    check(kinds == ["gate", "gate"] and pause_events
+          and all(str(e.get("detail", "")).startswith("0 field(s) touched by Jack") for e in pause_events),
+          f"nothing counted at the pauses, the stop stays ({kinds}, {pause_events})")
+    check(any("keeps the focus on a box" in line for line in out.log), f"the reason is logged ({out.log})")
+    check(clicks == ["Next"], f"nothing pressed after the stop ({clicks})")
+    check.done()
+
+
 def test_jacks_first_click_elsewhere_never_marks_the_box_the_agent_last_filled():
     # Negative, the text-box form of the same route (pre-existing before
     # 8fd4eb8, closed by the same blur): the agent's last fill on page two

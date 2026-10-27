@@ -2427,3 +2427,15 @@ typing (fails on 8fd4eb8); a second negative covers the text-box form
 (fails on e8021fa and 8fd4eb8). CLAUDE.md's review rule and the two
 comments now say an option element of the group counts too, and that
 the baseline drops the focus.
+
+Commit 7efeb21 (the fix of item 1's BLOCK): VERDICT FLAG, 2 FLAGs, 1
+minor. Folded in the next commit: a page that puts the focus back on
+a box after the baseline's blur (a validation, a re-render, an
+autofocus) would have had Jack's first click mark that box as his;
+the baseline now settles 150 ms after the blur and, if the focus is
+not free, counts nothing at that pause (a fixed log line says so);
+the blur runs under a quiet agent flag, so the terminal no longer
+prints "hands off — filling" before a pause prompt. Logged: submit.py
+ticks consent boxes outside the agent flag before a final gate stop,
+so that box carries a mark in the baseline (safe direction); item 2
+runs the final page's tick and Submit press under the flag.

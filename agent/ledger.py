@@ -646,8 +646,10 @@ class ActivityGuard:
         return False
 
     @contextmanager
-    def filling(self, page: "Page"):
-        self.echo("  hands off — filling")
+    def filling(self, page: "Page", *, quiet: bool = False):
+        """The agent flag on, for the block; `quiet` for a step that is no fill (a blur) and shows no banner."""
+        if not quiet:
+            self.echo("  hands off — filling")
         try:
             page.evaluate(_AGENT_JS, True)
         except Exception:

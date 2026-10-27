@@ -358,6 +358,7 @@ class Wizard:
     # flag, so a change event the blur fires is the agent's (fix of
     # 8fd4eb8's BLOCK).
     _BLUR_JS = "() => { const el = document.activeElement; if (el && el !== document.body) el.blur(); }"
+    _FOCUS_FREE_JS = "() => { const el = document.activeElement; return !el || el === document.body; }"
 
     def _marked(self, fields: list[dict], *, baseline: bool = False) -> set[str] | None:
         """
@@ -371,9 +372,17 @@ class Wizard:
         by_field = self._mark_refs(fields)
         if baseline:
             try:
-                with self.activity.filling(self.page):
+                with self.activity.filling(self.page, quiet=True):
                     self.page.evaluate(self._BLUR_JS)
+                    self.page.wait_for_timeout(150)
+                    free = bool(self.page.evaluate(self._FOCUS_FREE_JS))
             except Exception:
+                return None
+            if not free:
+                # The page put the focus back on a box (a validation, a
+                # re-render, an autofocus): Jack's first click would mark
+                # it as his. No baseline, so this pause counts nothing.
+                self.out.log.append("the page keeps the focus on a box: nothing counts as reviewed at this pause")
                 return None
         try:
             hit = set(self.page.evaluate(_TOUCHED_JS,
