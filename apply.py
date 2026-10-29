@@ -1206,7 +1206,8 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
                               company=company, role=role, resume=prof.resume_path(args.resume),
                               posting_text=extract.page_text(page, 6000), pauser=pauser, echo=print,
                               reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause,
-                              intake_steps=landing.steps, auto_submit=auto_submit)
+                              intake_steps=landing.steps, auto_submit=auto_submit,
+                              on_log=lambda o: _flush_log(o, report_to))
             return finish_outcome(w.park_for_continue(landing.parked), finish, on_wait=on_wait)
         _park(url, landing.parked, company=company, role=role, ats=ats)
         return NEEDS_YOU, landing.parked
@@ -1227,7 +1228,8 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
         posting_text=posting_text, pauser=pauser, echo=print,
         agent_submissions_today=submitted_today,
         reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause,
-        intake_steps=landing.steps, auto_submit=auto_submit)
+        intake_steps=landing.steps, auto_submit=auto_submit,
+        on_log=lambda o: _flush_log(o, report_to))
     return finish_outcome(out, finish, on_wait=on_wait)
 
 
@@ -1245,6 +1247,22 @@ def _print_safely(text: str) -> None:
         print(text.encode(enc, "replace").decode(enc, "replace"))
 
 
+def _flush_log(out, report_to=None) -> None:
+    """
+    Print the job-log lines not printed yet, each exactly as the log
+    holds it, and tell the GUI row the newest (Jack, 2026-10-29: live
+    progress while a job runs). `printed` moves on here only, so a line
+    printed as it landed is not printed again when the job ends, and a
+    job resumed from the GUI prints only what the resume added.
+    """
+    new = list(out.log[out.printed:])
+    for line in new:
+        _print_safely(f"{DIM}  {line}{OFF}")
+    out.printed = len(out.log)
+    if new and report_to is not None:
+        report_to({"progress": new[-1]})
+
+
 def finish_outcome(out, finish: dict, *, on_wait=None) -> tuple[str, str]:
     """
     What happens once the wizard returns: a waiting job (GUI mode) is
@@ -1253,11 +1271,9 @@ def finish_outcome(out, finish: dict, *, on_wait=None) -> tuple[str, str]:
     tracker row, the gate-run row and the evidence.
     """
     url, company, role, ats = finish["url"], finish["company"], finish["role"], finish["ats"]
-    # Only the lines added since the last print: a job resumed from the
-    # GUI comes back here on every Continue (Jack, 2026-10-26).
-    for line in out.log[out.printed:]:
-        _print_safely(f"{DIM}  {line}{OFF}")
-    out.printed = len(out.log)
+    # Whatever the live flush has not shown yet (a line added after the
+    # hook was unset, or a job run without one).
+    _flush_log(out)
     if out.status == wizard.WAITING:
         tracker.record(url, company=company, role=role, ats=ats, resume_used=finish["resume"],
                        answers=out.rows, flags=out.flags, status=NEEDS_YOU, notes=out.reason)

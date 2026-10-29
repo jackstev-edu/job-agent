@@ -78,6 +78,7 @@ class Job:
     reason: str = ""
     final_url: str = ""
     form_found: bool | None = None
+    progress: str = ""                 # the newest job-log line while the job runs (Jack, 2026-10-29)
     pause: dict | None = None          # {"kind", "message", "fields": [...], "wants_code": bool}
     approved: set = dataclass_field(default_factory=set)
     code: str | None = None
@@ -97,7 +98,7 @@ class Job:
         return {"id": self.id, "url": self.url, "dry": self.dry, "company": self.company,
                 "role": self.role, "portal": self.portal, "status": self.status,
                 "reason": self.reason, "final_url": self.final_url,
-                "form_found": self.form_found, "pause": pause,
+                "form_found": self.form_found, "progress": self.progress, "pause": pause,
                 "code_given": self.code is not None}
 
 
@@ -339,7 +340,8 @@ button { font: inherit; padding: .3rem .8rem; }
       tr.appendChild(el('td', j.company || ''));
       tr.appendChild(el('td', j.role || ''));
       tr.appendChild(el('td', j.portal || ''));
-      const st = el('td', (ready ? 'READY — press Submit yourself' : j.status.replace('_', ' ')) + (j.dry ? ' (dry)' : ''), 'status');
+      const working = j.status === 'working' && j.progress ? j.progress : j.status.replace('_', ' ');
+      const st = el('td', (ready ? 'READY — press Submit yourself' : working) + (j.dry ? ' (dry)' : ''), 'status');
       tr.appendChild(st);
       const td = el('td');
       td.appendChild(el('div', j.url, 'muted'));

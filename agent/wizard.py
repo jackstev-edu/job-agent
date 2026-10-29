@@ -143,6 +143,38 @@ _HAS_FIELDS_JS = r"""
 _TOUCHED_JS = ledger.TOUCHED_JS
 
 
+class _Log(list):
+    """
+    The job's log lines, with one hook called after every append, extend
+    or += (Jack, 2026-10-29): run_one prints the new lines as they land
+    and tells the GUI row the newest, instead of a bare "working" and a
+    silent terminal until the job ends. Lines go out exactly as held
+    here; the hook adds nothing to them, and a hook that raises changes
+    nothing in the job.
+    """
+    on_line = None
+
+    def _fire(self) -> None:
+        if self.on_line is not None:
+            try:
+                self.on_line()
+            except Exception:
+                pass
+
+    def append(self, line) -> None:
+        super().append(line)
+        self._fire()
+
+    def extend(self, lines) -> None:
+        super().extend(lines)
+        self._fire()
+
+    def __iadd__(self, lines):
+        super().__iadd__(lines)
+        self._fire()
+        return self
+
+
 @dataclass
 class Outcome:
     status: str                              # "submitted" | "needs_you" | "failed" | "waiting"
@@ -154,7 +186,7 @@ class Outcome:
     record: dict | None = None
     gate_result: dict | None = None
     evidence: dict = dataclass_field(default_factory=dict)
-    log: list[str] = dataclass_field(default_factory=list)
+    log: list[str] = dataclass_field(default_factory=_Log)
     printed: int = 0                         # how many log lines the terminal has shown
     pages_filled: int = 0
     wizard: object = None                    # the Wizard to resume, while waiting
@@ -206,7 +238,7 @@ class Wizard:
     def __init__(self, page: "Page", prof, *, url: str, portal: str, portal_method: str,
                  company: str, role: str, resume, posting_text: str, pauser, echo=print,
                  clock=time.monotonic, agent_submissions_today=None, reload_profile=None,
-                 on_pause=None, intake_steps=None, auto_submit=None):
+                 on_pause=None, intake_steps=None, auto_submit=None, on_log=None):
         self.page, self.prof, self.url = page, prof, url
         # The auto-submit switch, read through this callable at the final
         # page and never captured here (Jack, 2026-10-29). None is OFF.
@@ -230,6 +262,10 @@ class Wizard:
         self.out.log.extend(str(s) for s in (intake_steps or []))
         # run_one printed them as intake returned: not again.
         self.out.printed = len(self.out.log)
+        # Every later line goes out as it lands (Jack, 2026-10-29): the
+        # terminal and the GUI row, through run_one's flush of this
+        # Outcome, which is what moves `printed` on.
+        self.out.log.on_line = (lambda: on_log(self.out)) if on_log is not None else None
         self.snapshots: dict = {}               # every page's read-back, by ref
         self.census: dict = {}                  # every page's checkboxes after filling, by ref
         self.prefill: dict = {}                 # earlier pages' pair boxes before filling, by group
