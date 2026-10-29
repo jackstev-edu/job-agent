@@ -320,5 +320,75 @@ def test_a_ready_row_never_auto_submits_even_once_the_switch_is_on():
     check.done()
 
 
+# A final page whose own prose carries a confirmation sentence while the
+# form is still open and unsubmitted.
+PROSE = SINGLE.replace('<form id="f">', '<p>Thank you for applying! Press Submit to finish.</p><form id="f">')
+
+
+def test_a_confirmation_sentence_in_the_prose_of_the_open_form_never_counts_once_other_jobs_ran():
+    # Fix of cacfd8a's BLOCK. Job A parks ready on a form whose prose says
+    # "Thank you for applying"; job B runs next, so A's refs are stale;
+    # Continue on A with its page unchanged must leave it ready. On
+    # cacfd8a the empty ref list read as "form gone" and A was marked
+    # submitted by Jack.
+    check = Checks()
+    profile_path = TEST_HOME / "auto-submit-prose.yaml"
+    profile_path.write_text(PROFILE, encoding="utf-8")
+    state = gui.State()
+    a, b = state.start([f"{HOST}/prose", f"{HOST}/single-b"], dry=False)
+    waiting: dict = {}
+    site = _gui_site(); site["/prose"], site["/single-b"] = PROSE, SINGLE
+    with _headless(_routes(site)) as ctx:
+        ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+        _loop_once(state, waiting, ctx, profile_path)
+        jobs = {j["id"]: j for j in state.snapshot()["jobs"]}
+        check(all(jobs[j]["pause"] and jobs[j]["pause"]["kind"] == "ready" for j in (a, b)),
+              f"both parked ready, B's scan after A's ({[(jobs[j]['status'], jobs[j]['pause'] and jobs[j]['pause']['kind']) for j in (a, b)]})")
+        state.request_continue(a)
+        _loop_once(state, waiting, ctx, profile_path)
+        jobs = {j["id"]: j for j in state.snapshot()["jobs"]}
+        tab = next(p for p in ctx.pages if p.url.endswith("/prose"))
+        clicks, where, still_kept = tab.evaluate("window.__clicks"), tab.url, a in waiting
+        # Now Jack really presses Submit: the confirmation still counts
+        # with stale refs, since the page's structure changed since the park.
+        tab.click("button[type=submit]")
+        tab.wait_for_url("**/thanks")
+        state.request_continue(a)
+        _loop_once(state, waiting, ctx, profile_path)
+        after = {j["id"]: j for j in state.snapshot()["jobs"]}
+    check(jobs[a]["status"] == "needs_you" and jobs[a]["pause"] and jobs[a]["pause"]["kind"] == "ready"
+          and still_kept and clicks == [] and where.endswith("/prose"),
+          f"A stays ready: the prose is not a confirmation ({jobs[a]['status']}, {jobs[a]['reason'][:80]})")
+    check(after[a]["status"] == "submitted" and "confirmation seen" in after[a]["reason"] and a not in waiting,
+          f"after Jack's own press the confirmation counts ({after[a]['status']}, {after[a]['reason']})")
+    row = tracker.find(f"{HOST}/prose")
+    check(row and row["status"] == "submitted" and row["agent_submitted"] == 0, "logged as submitted, not by the agent")
+    check.done()
+
+
+def test_an_empty_ref_list_is_never_form_gone():
+    # Fix of cacfd8a's BLOCK, at the probe itself: with no current refs
+    # the form is unknown, never gone, so the generic sentence alone
+    # confirms nothing. On cacfd8a `[].some(...)` made it "gone".
+    from _harness import mock_page
+    from agent import outcome, submit as submit_mod
+    check = Checks()
+    page_path = TEST_HOME / "prose.html"
+    page_path.write_text(PROSE.replace("{CLICKS_JS}", ""), encoding="utf-8")
+    with mock_page(page_path) as page:
+        confirmed, evidence = submit_mod.confirmation(page, portal="generic", portal_method="default",
+                                                      start_url=page.url, refs=[])
+        check(confirmed is False and evidence["generic_text"] is True and evidence["form_gone"] is False,
+              f"the sentence is seen, the form is not gone, nothing is confirmed ({evidence})")
+        det = outcome.detect_success(page, portal="greenhouse", portal_method="host", start_url=page.url, refs=[])
+        check(det["signals"].get("form_gone") is False and det["result"] != "match",
+              f"the portal signature's form_gone signal is False on no refs ({det})")
+        confirmed, evidence = submit_mod.confirmation(page, portal="generic", portal_method="default",
+                                                      start_url=page.url, refs=[], form_gone=True)
+        check(confirmed is True and evidence["form_gone"] is True,
+              "a caller that knows the form is gone says so, and the sentence then confirms")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())

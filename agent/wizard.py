@@ -1205,6 +1205,15 @@ class Wizard:
         # while, so this pass's _advance returns None.
         return None
 
+    def _form_gone_since(self, before) -> bool:
+        """Is the form of the shape `before` gone: the page's structure now shares no field with it? Unreadable either way: not gone."""
+        if before is None:
+            return False
+        now = follow.read_shape(self.page)
+        if now is None or not before.get("fields"):
+            return False
+        return not (set(now["fields"]) & set(before["fields"]))
+
     def _after_ready(self, pending: dict, *, by_jack: bool = True) -> Outcome | None:
         """
         Jack has acted on a ready park (`by_jack`: Continue in the GUI,
@@ -1219,9 +1228,18 @@ class Wizard:
         """
         if by_jack:
             self._handled_by_jack("ready", None)
+        # The park's refs go stale the moment another job's scan runs (the
+        # normal GUI case), and a stale list must never read as "the form
+        # is gone" (fix of cacfd8a's BLOCK). The form counts as gone only
+        # when the page's structure, read now, shares no field with the
+        # structure read at the park; a page that couldn't be read then
+        # or now is never gone. A confirmation needs that, so a
+        # confirmation sentence in the prose of the still-open form never
+        # marks the job submitted.
         confirmed, evidence = submit_mod.confirmation(
             self.page, portal=self.portal, portal_method=self.portal_method,
-            start_url=self.url, refs=[r for r in pending.get("refs") or [] if extract.is_current(r)])
+            start_url=self.url, refs=[r for r in pending.get("refs") or [] if extract.is_current(r)],
+            form_gone=self._form_gone_since(pending.get("shape")))
         if confirmed:
             self.out.evidence = evidence
             self.out.events.append({"kind": "confirmation", "detail": "seen after a ready park", "handled": "jack"})

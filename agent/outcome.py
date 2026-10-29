@@ -143,18 +143,25 @@ def url_shape(url: str) -> str:
 
 
 def detect_success(page: "Page", *, portal: str, portal_method: str, start_url: str,
-                   refs: list[str]) -> dict:
+                   refs: list[str], form_gone: bool | None = None) -> dict:
     """
     Does the tab show the portal's confirmation page? Returns {"result":
     "match" | "partial" | "none" | "unsupported", "signals", "url_shape"}.
     Only host-detected portals with a known signature can ever match.
+    The form counts as gone when none of `refs` is on the page; an empty
+    list says nothing (stale refs after another scan), so it is never
+    gone. A caller that knows better (the ready park, which compares the
+    page's structure with the park's) passes `form_gone` itself.
     """
     sig = SUCCESS_SIGNATURES.get(portal)
     if not sig or portal_method != "host":
         return {"result": "unsupported", "signals": {}, "url_shape": ""}
     try:
         url = page.url
-        gone = not page.evaluate(_PRESENT_JS, refs)
+        if form_gone is not None:
+            gone = bool(form_gone)
+        else:
+            gone = bool(refs) and not page.evaluate(_PRESENT_JS, refs)
         text = page.evaluate(_TEXT_JS)
     except Exception:
         return {"result": "none", "signals": {"readable": False}, "url_shape": ""}

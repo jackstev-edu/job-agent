@@ -2977,3 +2977,37 @@ overwrites the preflight banner on the page; every later real job still
 fails with the banner as its reason. Noted: a 404 from a wrong
 ANTHROPIC_BASE_URL path also refuses real jobs (false-positive
 direction; the banner's wording would mislead there).
+
+Commit cacfd8a (item 1, the auto-submit switch): VERDICT BLOCK, 1 high,
+3 low. The BLOCK (fixed in the next commit): on Continue after a ready
+park the confirmation check passed the park's refs through is_current;
+every other job's scan makes them stale, the empty list made
+_PRESENT_JS's `[].some` false, so "form gone" was vacuously true and the
+generic sentence anywhere in the still-open page's prose marked the job
+submitted by Jack. Fix: an empty ref list is never gone (submit._form_gone
+and outcome.detect_success); the ready park's resume judges the form by
+the page's structure (no field of the shape read at the park is on the
+page now; unreadable either way is not gone) and passes that in; a
+two-job test reproduces the BLOCK and proves Jack's own press still
+counts afterwards. Logged, not folded (test quality, low): (1)
+test_switch_off_ticks_no_consent_box_on_the_final_page asserts clicks
+and the pause wording, never the checkbox state. (2)
+test_a_ready_row_never_auto_submits_even_once_the_switch_is_on
+exercises only "page unchanged → still ready", which never consults
+_submit_allowed; the jack_submits guard is proved by an attribute
+assertion in the moved test, with the switch OFF throughout. (3) In the
+terminal, the ready pause's `until` ends it FINISHED when the page
+changes for any reason and the ready event is then marked Jack's (no
+submit can follow; the same pattern as the "moved" pause).
+
+Commit eb644b4 (item 3, crash containment): VERDICT FLAG, 2 FLAGs, 1
+low, none a safety issue; logged, not folded: (1) a crash after a
+deferred pause set `job.pause` but before the wizard was kept (a
+tracker.record raising inside finish_outcome) leaves a failed row with
+the pause box and an inert Continue drawn (request_continue refuses it
+server-side); fix would be `pause=None` in the crash-site
+state.update calls. Decision for Jack: fold that one-line fix? (2) No
+test asserts decision 4 directly (a failed row's `pause` is None and
+request_continue returns False); no test covers the crash-after-pause
+case. (3) failure_line's `rel.name == "apply.py"` would also name a
+library file called apply.py under .venv/; naming only.

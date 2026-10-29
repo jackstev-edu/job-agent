@@ -161,6 +161,9 @@ def _text_snippet(page: "Page") -> tuple[str, bool]:
 
 
 def _form_gone(page: "Page", refs: list[str]) -> bool:
+    """None of these refs is on the page now. No refs (stale after a later scan) is unknown, never gone."""
+    if not refs:
+        return False
     try:
         return not page.evaluate(outcome._PRESENT_JS, refs)
     except Exception:
@@ -168,17 +171,19 @@ def _form_gone(page: "Page", refs: list[str]) -> bool:
 
 
 def confirmation(page: "Page", *, portal: str, portal_method: str, start_url: str,
-                 refs: list[str]) -> tuple[bool, dict]:
+                 refs: list[str], form_gone: bool | None = None) -> tuple[bool, dict]:
     """
     Did the submit go through? The portal's signature when it has one
     (outcome.detect_success), else the generic wording with the form gone.
     Returns (confirmed, evidence): address, title, which signals held, and
-    only the matched sentence of the page's text.
+    only the matched sentence of the page's text. `form_gone`, when
+    given, replaces the probe of `refs` (the ready park's resume knows
+    its refs are stale and judges the form by the page's structure).
     """
     det = outcome.detect_success(page, portal=portal, portal_method=portal_method,
-                                 start_url=start_url, refs=refs)
+                                 start_url=start_url, refs=refs, form_gone=form_gone)
     snippet, generic = _text_snippet(page)
-    gone = _form_gone(page, refs)
+    gone = bool(form_gone) if form_gone is not None else _form_gone(page, refs)
     try:
         url, title = page.url, page.title()
     except Exception:
