@@ -3011,3 +3011,35 @@ test asserts decision 4 directly (a failed row's `pause` is None and
 request_continue returns False); no test covers the crash-after-pause
 case. (3) failure_line's `rel.name == "apply.py"` would also name a
 library file called apply.py under .venv/; naming only.
+
+Commit d583f42 (fix of cacfd8a's BLOCK): VERDICT FLAG; the BLOCK is
+closed (both probes refuse an empty ref list; the ready path's
+structural check is not satisfied by a re-render that keeps names /
+ids / labels). Logged, not folded (a fold commit's non-safety FLAGs):
+(1) MEDIUM, pre-existing in submit.py's own path: after the press, the
+form-gone signal is the ref probe alone; a validation-error remount
+that drops the data-ja-ref stamps with the form still open, plus a
+GENERIC_CONFIRMATION sentence in the prose (or Ashby's header blurb),
+returns "submitted" for a rejected application. Fix would be a
+read_shape before the click and form_gone from structure as in the
+ready path. Decision for Jack. (2) MEDIUM, safe direction: a final page
+with no fields in the record (a review-only page: Workday's Review
+step) now never confirms: after Jack's own Submit the job falls to the
+moved check and the loop goes on on the thanks page; after an agent
+submit it ends "Submit was pressed but no confirmation was seen". On
+cacfd8a these confirmed vacuously. Decision for Jack: accept (correct
+with apply.py status), or count the empty parked shape as gone only
+when the page now has no fields and another address. (3) LOW:
+_form_gone_since reads the shape with no settle; a Continue landing
+mid-render could read an empty field set as "gone" and, with a
+confirmation-like sentence in the prose, mark the job submitted by
+Jack. Fix would be a 600 ms settle or two agreeing reads. Decision for
+Jack. (4) LOW, residual under the accepted structure-change route: a
+page that remounts every field with fresh ids and no names, or hides
+the whole form behind a modal, defeats the structural check. (5) LOW,
+pre-existing design: the confirmation check runs before the moved
+check, so a tab Jack navigated to any page bearing a confirmation
+sentence (an applications dashboard) counts as this job's. (6) LOW,
+test quality: the two-job prose test never asserts that B's scan
+staled A's refs. (7) The empty-ref test's third check would also fail
+on cacfd8a by TypeError; its first check fails behaviourally.
