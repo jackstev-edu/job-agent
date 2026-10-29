@@ -68,14 +68,15 @@ def _open(site):
     return p, browser, ctx
 
 
-def _wizard(page, state, job_id, start, mapper=map_from_profile):
-    """A GUI-mode wizard on `page`, reporting its pauses into `state`."""
+def _wizard(page, state, job_id, start, mapper=map_from_profile, auto_submit=lambda: True):
+    """A GUI-mode wizard on `page`, reporting its pauses into `state`; the switch reads ON unless a test says otherwise."""
     pauser = pause.GuiPauser(notify_fn=lambda t, b, echo=print: None, echo=lambda *a, **k: None)
     return wizard.Wizard(page, _profile(), url=f"{HOST}{start}", portal="generic",
                          portal_method="default", company="Example Co", role="Engineer",
                          resume=None, posting_text="", pauser=pauser, echo=lambda *a, **k: None,
                          on_pause=lambda info: state.set_pause(job_id, info["kind"], info["message"],
-                                                               info["fields"], wants_code=info["wants_code"]))
+                                                               info["fields"], wants_code=info["wants_code"]),
+                         auto_submit=auto_submit)
 
 
 def _tick_all(page, state, job_id):
@@ -90,7 +91,7 @@ def _tick_all(page, state, job_id):
         pass
 
 
-def _drive(site, start, acts, mapper=map_from_profile, max_pauses=6):
+def _drive(site, start, acts, mapper=map_from_profile, max_pauses=6, auto_submit=lambda: True):
     """
     Run a GUI-mode wizard on `start`; at each pause call the next act
     (page, state, job_id) and press Continue. Returns (outcome, pauses
@@ -101,7 +102,7 @@ def _drive(site, start, acts, mapper=map_from_profile, max_pauses=6):
     page.goto(f"{HOST}{start}")
     state = gui.State()
     [job_id] = state.start([f"{HOST}{start}"], dry=False)
-    w = _wizard(page, state, job_id, start, mapper)
+    w = _wizard(page, state, job_id, start, mapper, auto_submit=auto_submit)
     pauses = []
     with mock.patch("agent.classify.classify_fields", classify_by_label), \
             mock.patch("agent.mapper.map_fields", mapper):
@@ -1500,6 +1501,7 @@ def test_the_queue_goes_on_while_a_job_waits():
     profile_path.write_text(PROFILE + "consent_allowlist:\n  - I agree to receive SMS updates\n",
                             encoding="utf-8")
     state = gui.State()
+    state.auto_submit = True                 # the ON path: as on f147f5c
     a, b = state.start([f"{HOST}/apply", f"{HOST}/single"], dry=False)
     waiting: dict = {}
     args = Namespace(profile=str(profile_path), resume=None, dry=False)

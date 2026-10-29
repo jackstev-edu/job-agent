@@ -50,10 +50,14 @@ def test_migration_from_the_original_layout():
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         conn.close()
-        check(version == tracker.SCHEMA_VERSION == 2, f"user_version 0 -> 2 (got {version})")
+        check(version == tracker.SCHEMA_VERSION == 3, f"user_version 0 -> 3 (got {version})")
         check({"applications", "gate_runs"} <= tables, "gate_runs added beside applications")
         check(old is not None and "evidence_json" in old and old.get("agent_submitted") == 0,
               "migration 2 adds evidence_json and agent_submitted (0) to the old row")
+        conn = sqlite3.connect(path)
+        gate_cols = {r[1] for r in conn.execute("PRAGMA table_info(gate_runs)")}
+        conn.close()
+        check("submitted_by" in gate_cols, "migration 3 adds submitted_by to gate_runs")
         check(old and old["status"] == "submitted" and old["company"] == "Old",
               "the existing application row is untouched")
         tracker.find("x"); tracker.find("y")

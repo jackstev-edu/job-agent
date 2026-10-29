@@ -1126,7 +1126,8 @@ def _clean_title(text: str) -> str:
 
 
 def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
-            new_tab: bool = False, report_to=None, on_pause=None, on_wait=None) -> tuple[str, str]:
+            new_tab: bool = False, report_to=None, on_pause=None, on_wait=None,
+            auto_submit=None) -> tuple[str, str]:
     """
     One link, end to end: open it, click Apply, follow to the form, detect
     the portal, then the wizard (accounts, every page, the gate, Submit).
@@ -1137,7 +1138,9 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
     portal, final URL, and for a dry run whether a form was found).
     `on_pause(info)` and `on_wait(wizard, finish)` serve GUI mode: a
     deferred pause tells the page what to show, and the waiting Wizard is
-    kept to be resumed when Jack presses Continue.
+    kept to be resumed when Jack presses Continue. `auto_submit` is the
+    switch, a callable the wizard reads at the final page (Jack,
+    2026-10-29); None is OFF.
     """
     pauser = pauser or pause.Pauser()
     landing = intake.open_link(ctx, url, new_tab=new_tab)
@@ -1175,7 +1178,7 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
                               company=company, role=role, resume=prof.resume_path(args.resume),
                               posting_text=extract.page_text(page, 6000), pauser=pauser, echo=print,
                               reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause,
-                              intake_steps=landing.steps)
+                              intake_steps=landing.steps, auto_submit=auto_submit)
             return finish_outcome(w.park_for_continue(landing.parked), finish, on_wait=on_wait)
         _park(url, landing.parked, company=company, role=role, ats=ats)
         return NEEDS_YOU, landing.parked
@@ -1196,7 +1199,7 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
         posting_text=posting_text, pauser=pauser, echo=print,
         agent_submissions_today=submitted_today,
         reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause,
-        intake_steps=landing.steps)
+        intake_steps=landing.steps, auto_submit=auto_submit)
     return finish_outcome(out, finish, on_wait=on_wait)
 
 
@@ -1230,6 +1233,18 @@ def finish_outcome(out, finish: dict, *, on_wait=None) -> tuple[str, str]:
     if out.status == wizard.WAITING:
         tracker.record(url, company=company, role=role, ats=ats, resume_used=finish["resume"],
                        answers=out.rows, flags=out.flags, status=NEEDS_YOU, notes=out.reason)
+        if (out.pause_kind == "ready" and out.record is not None and out.gate_result is not None
+                and out.gate_run_id is None):
+            # The ready park's verdict (Jack, 2026-10-29): one gate_runs
+            # row per park, agent_submitted False; a confirmation seen on
+            # Continue updates this same row, never a second one.
+            try:
+                out.gate_run_id = tracker.record_gate_run(
+                    url, portal=finish["portal"], portal_method=finish["portal_method"],
+                    result=out.gate_result, record_json=shadow.redacted(out.record, out.gate_result),
+                    agent_submitted=False)
+            except Exception as e:
+                print(f"{DIM}  couldn't log the gate's verdict ({type(e).__name__}){OFF}")
         if on_wait is not None and out.wizard is not None:
             on_wait(out.wizard, finish)
         return NEEDS_YOU, out.reason
@@ -1241,28 +1256,47 @@ def finish_outcome(out, finish: dict, *, on_wait=None) -> tuple[str, str]:
     except Exception as e:
         print(f"{DIM}  couldn't write the review sheet ({type(e).__name__}){OFF}")
     status = out.status if out.status in ("submitted", NEEDS_YOU, FAILED) else NEEDS_YOU
+    # Who pressed Submit: the agent (submit.py) or Jack (a confirmation seen
+    # after a ready park, 2026-10-29). Only the agent's press is logged as
+    # agent_submitted; Jack's is "confirmation seen", not his y/n answer.
+    by_agent = status == "submitted" and out.submitted_by == "agent"
+    by_jack = status == "submitted" and out.submitted_by == "jack"
     tracker.record(url, company=company, role=role, ats=ats,
                    resume_used=finish["resume"], answers=out.rows,
                    flags=out.flags, report_path=str(sheet or ""), status=status, notes=out.reason)
     if out.record is not None and out.gate_result is not None:
         try:
-            run_id = tracker.record_gate_run(
-                url, portal=finish["portal"], portal_method=finish["portal_method"],
-                result=out.gate_result, record_json=shadow.redacted(out.record, out.gate_result),
-                agent_submitted=(status == "submitted"))
-            if status == "submitted":
-                tracker.set_gate_outcome(run_id, human_submitted="unknown", edits=[],
-                                         capture="none",
-                                         success_signal=json.dumps(
-                                             {"ended": "agent_submit", "detected":
-                                              out.evidence.get("portal_signal"),
-                                              "signals": out.evidence.get("signals"),
-                                              "url_shape": out.evidence.get("url_shape"),
-                                              "answer": None, "hooked": False}))
+            signal = json.dumps({"ended": "jack_submit" if by_jack else "agent_submit",
+                                 "detected": out.evidence.get("portal_signal"),
+                                 "signals": out.evidence.get("signals"),
+                                 "url_shape": out.evidence.get("url_shape"),
+                                 "answer": None, "hooked": False})
+            if by_jack:
+                # The ready park's own row (written while the job waited;
+                # a terminal run writes it now), updated, never a second row.
+                run_id = out.gate_run_id
+                if run_id is None:
+                    run_id = tracker.record_gate_run(
+                        url, portal=finish["portal"], portal_method=finish["portal_method"],
+                        result=out.gate_result, record_json=shadow.redacted(out.record, out.gate_result),
+                        agent_submitted=False)
+                tracker.set_gate_outcome(run_id, human_submitted="unknown", edits=None,
+                                         capture="confirmation", success_signal=signal,
+                                         submitted_by="jack")
+            elif out.gate_run_id is None:
+                run_id = tracker.record_gate_run(
+                    url, portal=finish["portal"], portal_method=finish["portal_method"],
+                    result=out.gate_result, record_json=shadow.redacted(out.record, out.gate_result),
+                    agent_submitted=by_agent)
+                if by_agent:
+                    tracker.set_gate_outcome(run_id, human_submitted="unknown", edits=[],
+                                             capture="none", success_signal=signal)
         except Exception as e:
             print(f"{DIM}  couldn't log the gate's verdict ({type(e).__name__}){OFF}")
     try:
-        tracker.set_evidence(url, out.evidence, agent_submitted=(status == "submitted"))
+        tracker.set_evidence(url, out.evidence, agent_submitted=by_agent)
+        if by_jack:
+            tracker.set_status(url, "submitted")       # submitted_at, as a hand-set status gets
     except Exception as e:
         print(f"{DIM}  couldn't store the evidence ({type(e).__name__}){OFF}")
     return status, out.reason
@@ -1297,7 +1331,8 @@ def cmd_run(args) -> None:
                 results.append((url, "skipped", existing["status"]))
                 continue
             try:
-                status, reason = run_one(ctx, url, prof, args, pauser)
+                status, reason = run_one(ctx, url, prof, args, pauser,
+                                         auto_submit=lambda: bool(getattr(args, "auto_submit", False)))
             except Exception as e:
                 status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
                 _park(url, reason, status=FAILED)
@@ -1413,7 +1448,8 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
                 on_pause=lambda info, j=job: state.set_pause(
                     j.id, info.get("kind", ""), info.get("message", ""), info.get("fields") or [],
                     wants_code=bool(info.get("wants_code"))),
-                on_wait=lambda w, f, j=job: waiting.__setitem__(j.id, (w, f)))
+                on_wait=lambda w, f, j=job: waiting.__setitem__(j.id, (w, f)),
+                auto_submit=state.auto_submit_on)
         except Exception as e:
             status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
             if not job.dry:
@@ -1644,6 +1680,9 @@ def main() -> None:
     p_run.add_argument("--dry", action="store_true",
                        help="intake only: open, click Apply, follow, report the landing; "
                             "fill nothing, sign in to nothing, submit nothing")
+    p_run.add_argument("--auto-submit", action="store_true", dest="auto_submit",
+                       help="let the agent press Submit when the gate passes (default off: "
+                            "the final page parks as ready for you to submit)")
     p_run.set_defaults(fn=cmd_run)
 
     p_gui = sub.add_parser("gui", help="a local page to paste links into and watch each one")

@@ -10,8 +10,10 @@ the one control that reads as Submit. Then it reads the confirmation:
 the portal's signature or a generic one, keeping only the sentence that
 matched, the address and the title.
 WHY IT MATTERS: This is the only module that presses Submit, and it can
-only do so after the gate says yes on the full record. Nothing else in the
-codebase submits.
+only do so after the gate says yes on the full record and while the
+auto-submit switch it is handed reads ON at that moment (Jack,
+2026-10-29: with the switch OFF it ticks nothing and presses nothing).
+Nothing else in the codebase submits.
 """
 
 from __future__ import annotations
@@ -187,15 +189,29 @@ def confirmation(page: "Page", *, portal: str, portal_method: str, start_url: st
                        "snippet": snippet, "url_shape": outcome.url_shape(url)}
 
 
+def switch_on(auto_submit) -> bool:
+    """The auto-submit switch, read now. No callable, or one that raises, is OFF."""
+    if auto_submit is None:
+        return False
+    try:
+        return auto_submit() is True
+    except Exception:
+        return False
+
+
 def submit_application(page: "Page", record: dict, profile, *, build_record, steps_log=None,
-                       agent_submissions_today: int | None = None) -> Submission:
+                       agent_submissions_today: int | None = None, auto_submit=None) -> Submission:
     """
     Gate, tick what the gate allows, gate again on a fresh record, Submit.
     `build_record` rebuilds the full record from the page after the ticks,
     so the second verdict is on what is actually there. Never presses
-    Submit on anything but would_submit.
+    Submit on anything but would_submit, and never ticks or presses
+    unless `auto_submit()` reads True at that moment (Jack, 2026-10-29):
+    checked before the first tick and again just before the press.
     """
     steps: list[str] = steps_log if steps_log is not None else []
+    if not switch_on(auto_submit):
+        return Submission("needs_you", "auto-submit is off: nothing ticked or pressed", steps=steps)
     result = gate.decide(record, profile, agent_submissions_today=agent_submissions_today)
     if result["content_verdict"] != gate.WOULD_SUBMIT:
         return Submission("needs_you", "the gate stopped: " + "; ".join(result["content_reasons"][:6]),
@@ -216,6 +232,9 @@ def submit_application(page: "Page", record: dict, profile, *, build_record, ste
                           result, steps=steps)
     refs = [r for f in record.get("fields") or [] for r in (f.get("option_refs") or [f.get("ref")])
             if extract.is_current(r)]
+    if not switch_on(auto_submit):
+        return Submission("needs_you", "auto-submit was turned off before Submit was pressed",
+                          result, steps=steps)
     try:
         page.locator(f"[{SUBMIT_ATTR}='1']").first.click(timeout=5000)
     except Exception as e:

@@ -9,6 +9,9 @@ for a field the gate's own sensitive test doesn't flag, that isn't a
 checkbox, a consent or a per-company question, and that the agent filled,
 the page's read-back value with an approve tick. Links, approvals, codes,
 Continue and Close requests go from the page into State and nowhere else.
+The auto-submit switch (Jack, 2026-10-29) lives here too: OFF at every
+start, never persisted, shown at the top of the page in words with a
+warning while ON, and read by the wizard at the final page.
 WHY IT MATTERS: The page shows untrusted text (labels from job pages), so
 it renders every string as a text node under a strict CSP, binds only to
 the loopback address, checks Host and Origin on every request and a
@@ -108,6 +111,19 @@ class State:
         self.google_login = False
         self.browser_open = False
         self.notice = ""
+        # The auto-submit switch (Jack, 2026-10-29): OFF at every start,
+        # never persisted; the wizard reads it at the final page through
+        # auto_submit_on, never captured at job start.
+        self.auto_submit = False
+
+    def set_auto_submit(self, on: bool) -> bool:
+        with self.lock:
+            self.auto_submit = on is True
+            return self.auto_submit
+
+    def auto_submit_on(self) -> bool:
+        with self.lock:
+            return self.auto_submit is True
 
     # -- from the page --------------------------------------------------------
     def start(self, links: list[str], dry: bool) -> list[str]:
@@ -249,7 +265,7 @@ class State:
     def snapshot(self) -> dict:
         with self.lock:
             return {"jobs": [j.view() for j in self.jobs], "browser_open": self.browser_open,
-                    "notice": self.notice}
+                    "notice": self.notice, "auto_submit": self.auto_submit is True}
 
     def _job(self, job_id: str) -> Job | None:
         return next((j for j in self.jobs if j.id == job_id), None)
@@ -267,8 +283,15 @@ textarea { width: 100%%; height: 6rem; font: inherit; }
 table { width: 100%%; border-collapse: collapse; background: #fff; margin-top: 1rem; }
 th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #d5dae0; vertical-align: top; }
 tr.needs_you { background: #fff4e0; }
+tr.ready { background: #e3f3e8; }
+tr.ready td.status { color: #1f5e3a; font-weight: 700; }
 tr.submitted td.status { color: #2f6b4f; font-weight: 600; }
 tr.failed td.status { color: #9b2226; }
+#switch { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; padding: .9rem 1rem; margin: .5rem 0 1rem;
+          border: 3px solid #5b6875; border-radius: .5rem; background: #e9ecef; font-size: 1.25em; font-weight: 700; }
+#switch.on { border-color: #9b2226; background: #fde2e4; color: #6a0f14; }
+#switch button { font-size: 1em; font-weight: 700; padding: .5rem 1.2rem; }
+#warning { flex-basis: 100%%; font-size: .8em; font-weight: 400; color: #6a0f14; }
 .pause { margin: .4rem 0 0; padding: .5rem; border-left: 3px solid #a65a00; background: #fff; }
 .pause li { margin: .2rem 0; }
 button { font: inherit; padding: .3rem .8rem; }
@@ -277,7 +300,12 @@ button { font: inherit; padding: .3rem .8rem; }
 </style></head>
 <body>
 <h1>job-agent</h1>
-<p class="muted">Paste links, one per line. The agent fills in its own browser; rows that need you turn amber and chime.</p>
+<div id="switch" class="off">
+  <button id="toggle">Turn auto-submit ON</button>
+  <span id="switch-text">Auto-submit: OFF — you press Submit</span>
+  <div id="warning" hidden>While ON the agent presses Submit when the gate passes. The MUST FIX BEFORE AUTO-SUBMIT items in TODO.md are still open.</div>
+</div>
+<p class="muted">Paste links, one per line. The agent fills in its own browser; rows that need you turn amber and chime; a green READY row is filled and waits for you to press Submit.</p>
 <textarea id="links" placeholder="https://..."></textarea>
 <div class="row-actions">
   <button id="start">Start</button>
@@ -298,13 +326,20 @@ button { font: inherit; padding: .3rem .8rem; }
   const chime = () => { try { const c = new AudioContext(); const o = c.createOscillator(); const g = c.createGain();
       o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.35); } catch (e) {} };
   const render = state => {
+    const on = state.auto_submit === true;
+    const sw = document.getElementById('switch'); sw.className = on ? 'on' : 'off';
+    document.getElementById('toggle').textContent = on ? 'Turn auto-submit OFF' : 'Turn auto-submit ON';
+    document.getElementById('switch-text').textContent = on
+        ? 'Auto-submit: ON — the agent submits when the gate passes' : 'Auto-submit: OFF — you press Submit';
+    document.getElementById('warning').hidden = !on;
     const rows = document.getElementById('rows'); rows.replaceChildren();
     for (const j of state.jobs) {
-      const tr = el('tr', undefined, j.status);
+      const ready = !!(j.pause && j.pause.kind === 'ready');
+      const tr = el('tr', undefined, ready ? 'ready' : j.status);
       tr.appendChild(el('td', j.company || ''));
       tr.appendChild(el('td', j.role || ''));
       tr.appendChild(el('td', j.portal || ''));
-      const st = el('td', j.status.replace('_', ' ') + (j.dry ? ' (dry)' : ''), 'status');
+      const st = el('td', (ready ? 'READY — press Submit yourself' : j.status.replace('_', ' ')) + (j.dry ? ' (dry)' : ''), 'status');
       tr.appendChild(st);
       const td = el('td');
       td.appendChild(el('div', j.url, 'muted'));
@@ -359,6 +394,11 @@ button { font: inherit; padding: .3rem .8rem; }
     api('/start', {links, dry: document.getElementById('dry').checked}).then(() => { document.getElementById('links').value = ''; refresh(); });
   });
   document.getElementById('google').addEventListener('click', () => api('/google-login').then(refresh));
+  document.getElementById('toggle').addEventListener('click', () => {
+    const on = document.getElementById('switch').className === 'on';
+    if (!on && !confirm('Turn auto-submit ON? The agent will press Submit itself whenever the gate passes.')) return;
+    api('/auto-submit', {on: !on}).then(refresh);
+  });
   document.getElementById('close').addEventListener('click', () => api('/close-browser', {confirm: false}).then(r => {
     if (r && r.ok === false && r.waiting) { if (confirm(r.waiting + ' job(s) are waiting for you. Close anyway?')) api('/close-browser', {confirm: true}).then(refresh); }
     else refresh(); }));
@@ -469,6 +509,10 @@ class Server:
                     self._json(st.request_close(bool(body.get("confirm")))); return
                 if path == "/google-login":
                     st.request_google_login(); self._json({"ok": True}); return
+                if path == "/auto-submit":
+                    if not isinstance(body.get("on"), bool):
+                        self._deny(HTTPStatus.BAD_REQUEST, "on must be true or false"); return
+                    self._json({"ok": True, "auto_submit": st.set_auto_submit(body["on"])}); return
                 self._deny(HTTPStatus.NOT_FOUND, "no such action")
 
         self.httpd = ThreadingHTTPServer((host, port), Handler)

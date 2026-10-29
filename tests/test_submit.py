@@ -121,7 +121,8 @@ def test_submit_presses_nothing_on_would_stop_and_once_on_would_submit():
         rec["flags"] = [{"ref": by["I agree to the Terms of Service and Privacy Policy"]["ref"],
                          "category": "consent", "reason": "consent"}]
         rec["categories"][by["I agree to the Terms of Service and Privacy Policy"]["ref"]] = "consent"
-        sub = submit.submit_application(page, rec, _Profile(), build_record=lambda: _record(page)[0])
+        sub = submit.submit_application(page, rec, _Profile(), build_record=lambda: _record(page)[0],
+                                        auto_submit=lambda: True)
         clicks = page.evaluate("window.__clicks")
         print(sub.status, sub.reason)
         check(sub.status != "submitted" and not sub.clicked and clicks == [],
@@ -144,7 +145,7 @@ def test_submit_presses_nothing_on_would_stop_and_once_on_would_submit():
             t = by2["I agree to the Terms of Service and Privacy Policy"]["ref"]
             r["flags"], r["categories"][t] = [{"ref": t, "category": "consent", "reason": "consent"}], "consent"
             return r
-        sub = submit.submit_application(page, rec, _Profile(), build_record=rebuild)
+        sub = submit.submit_application(page, rec, _Profile(), build_record=rebuild, auto_submit=lambda: True)
         clicks = page.evaluate("window.__clicks")
         check(sub.status == "submitted" and sub.clicked and clicks == ["Submit application"],
               f"would_submit: the terms box ticked, Submit pressed once ({sub.status}, {sub.reason}, {clicks})")

@@ -2945,3 +2945,18 @@ lists intake.py, accounts.py, wizard.py, google.py plus chooser.py.
 Kept as Jack wrote it. Also noted by the reviewer: the review worktree's
 HEAD was the parent commit; the diff is markdown only, so the tests ran
 on identical code. Later reviews check out the hash.
+
+Commit 62f6488 (fold of item 0's review): VERDICT FLAG, 3 low, records
+only; logged, not folded (a fold commit's non-safety FLAGs): (1) the
+Next-detection bullet overstates has_next_step's gap: its :has-text /
+value*= matches are case-insensitive substrings, so "Save and Continue",
+"Save & Continue" and "Save & Next" on a button / a / role=button /
+input already match on every portal; what it truly lacks is aria-label,
+"Proceed" and "Review". (2) The consent design rule reads narrower than
+the code on the allowlist route: both routes need a required box; the
+policy route also needs terms / privacy wording, the allowlist route
+needs Jack's exact line, whatever its wording. (3) The recorded approval
+of the reviewer wording is the main session's quotation of Jack's brief
+(the brief itself is not in the repo); accepted as the recorded
+approval. Until Jack answers item (2) of 3efc5f6's log, the reviewer
+reports a filler.py change that weakens a check under category 2.

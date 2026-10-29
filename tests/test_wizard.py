@@ -165,7 +165,10 @@ def _profile():
 
 
 def _run(site, start, act=None, portal="generic", method="default", how=pause.TIMED_OUT,
-         mapper=map_from_profile, patches=()):
+         mapper=map_from_profile, patches=(), auto_submit=lambda: True):
+    # The auto-submit switch reads ON here unless a test says otherwise:
+    # these tests prove the ON path, f147f5c's behaviour (Jack, 2026-10-29);
+    # the OFF path is tests/test_auto_submit.py's.
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -184,7 +187,7 @@ def _run(site, start, act=None, portal="generic", method="default", how=pause.TI
                 out = wizard.run_application(page, _profile(), url=f"{HOST}{start}", portal=portal,
                                              portal_method=method, company="Example Co",
                                              role="Engineer", resume=None, posting_text="",
-                                             pauser=jack, echo=lambda *a, **k: None)
+                                             pauser=jack, echo=lambda *a, **k: None, auto_submit=auto_submit)
             clicks = page.evaluate("window.__clicks") if not page.is_closed() else []
             ticks = page.evaluate("window.__ticks ? window.__ticks() : []") if not page.is_closed() else []
             url = page.url

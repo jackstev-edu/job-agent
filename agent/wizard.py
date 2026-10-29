@@ -12,7 +12,11 @@ wizard will press Next on, a required terms / privacy box the gate
 planned as would_tick is ticked through submit.py's own helper and the
 page judged again (Jack, 2026-10-23); then Next is pressed and the page
 must change; a page with Submit and no Next is the final page, which
-submit.py handles. In the terminal a pause blocks; in
+submit.py handles while the auto-submit switch reads ON. With the switch
+OFF (Jack, 2026-10-29: the default) the final page's per-page gate pause
+is skipped, the gate decides on the full record, nothing is ticked or
+pressed, and the job parks as "ready" for Jack to press Submit himself;
+a job parked ready once never auto-submits again. In the terminal a pause blocks; in
 GUI mode it is deferred: the wizard keeps its place, returns "waiting",
 and `resume` picks up where it stopped when Jack presses Continue. Caps:
 25 pages, 60 minutes of the agent's own time (waiting doesn't count).
@@ -58,6 +62,12 @@ FORM_POLL_MS = 500
 FORM_RECHECK_CAP = 3
 
 WAITING = "waiting"
+
+# The ready park's wordings (Jack, 2026-10-29).
+READY_FILLED = "Filled — review and press Submit yourself"
+READY_NO_CONTROLS = ("no Next or Submit found: if this is the last page, submit it yourself; "
+                     "otherwise move on and press Continue")
+READY_SUBMITTED = "confirmation seen: submitted by Jack"
 
 # A control that moves to the next page, as whole normalised text. Never
 # anything that reads as Submit (outcome.SUBMIT_WORDS), checked in the page.
@@ -148,6 +158,9 @@ class Outcome:
     printed: int = 0                         # how many log lines the terminal has shown
     pages_filled: int = 0
     wizard: object = None                    # the Wizard to resume, while waiting
+    pause_kind: str = ""                     # the deferred pause's kind, while waiting
+    submitted_by: str | None = None          # "agent" (submit.py pressed Submit) or "jack" (a confirmation seen after a ready park)
+    gate_run_id: int | None = None           # the ready park's gate_runs row, once apply.py has written it
 
 
 def find_next(page: "Page", portal: str) -> dict:
@@ -193,8 +206,13 @@ class Wizard:
     def __init__(self, page: "Page", prof, *, url: str, portal: str, portal_method: str,
                  company: str, role: str, resume, posting_text: str, pauser, echo=print,
                  clock=time.monotonic, agent_submissions_today=None, reload_profile=None,
-                 on_pause=None, intake_steps=None):
+                 on_pause=None, intake_steps=None, auto_submit=None):
         self.page, self.prof, self.url = page, prof, url
+        # The auto-submit switch, read through this callable at the final
+        # page and never captured here (Jack, 2026-10-29). None is OFF.
+        self.auto_submit = auto_submit
+        self.jack_submits = False               # set at the first ready park: never auto-submit after it
+        self._skipped_gate: tuple | None = None   # (fill, events) of a page whose gate the ready park took over
         self.portal, self.portal_method = portal, portal_method
         self.company, self.role, self.resume = company, role, resume
         self.posting_text, self.pauser, self.echo, self.clock = posting_text, pauser, echo, clock
@@ -259,6 +277,30 @@ class Wizard:
         self.out.log.append(f"parked: {_clean(reason)}")
         self.out.status, self.out.reason = "needs_you", reason
         return self.out
+
+    # -- the auto-submit switch ------------------------------------------------
+    def _submit_allowed(self) -> bool:
+        """
+        May submit.py tick and press on this job, now? Only while the
+        switch reads ON at this moment (a callable that is missing or
+        raises reads OFF) and the job has never parked ready: a ready
+        row never auto-submits, even if the switch is turned ON later
+        (Jack, 2026-10-29).
+        """
+        if self.jack_submits or self.auto_submit is None:
+            return False
+        try:
+            return self.auto_submit() is True
+        except Exception:
+            return False
+
+    def _parks_ready(self) -> bool:
+        """Is this a page the switch sends to the ready park: Submit control, no Next, switch OFF?"""
+        if self._submit_allowed():
+            return False
+        if find_next(self.page, self.portal).get("chosen"):
+            return False
+        return bool(submit_mod.find_submit(self.page).get("chosen"))
 
     # -- pauses ----------------------------------------------------------------
     def _pause(self, kind: str, body: str, *, prompt: str, until=None, hidden: bool = False,
@@ -409,12 +451,15 @@ class Wizard:
             return None
         return {ref for ref, refs in by_field.items() if any(r in hit for r in refs)}
 
-    def _stop_fields(self, fill: pipeline.PageFill | None, result: dict) -> list[dict]:
+    def _stop_fields(self, fill: pipeline.PageFill | None, result: dict, *,
+                     approvable: bool = True) -> list[dict]:
         """
         The GUI's list for a gate stop: each stopped field by label and
         reason, and a read-back value with an approve tick only where
         gui.approvable allows (never a legal, EEO, pay, consent, per-company,
-        checkbox, password or unfilled field).
+        checkbox, password or unfilled field). With `approvable` False (a
+        ready park, where Jack presses Submit himself and no gate judges
+        an approval) every field is label and reason only.
         """
         if fill is None:
             return []
@@ -434,10 +479,10 @@ class Wizard:
             cat = categories.get(f["ref"], "unknown")
             raw = {"field": f, "category": cat, "decision": plan.get(f["ref"]),
                    "result": results.get(f["ref"])}
-            ok = gui_mod.approvable(**raw)
+            ok = approvable and gui_mod.approvable(**raw)
             out.append({"ref": f["ref"], "label": label[:120],
                         "reason": "; ".join(_clean(h.split(": ", 1)[-1]) for h in hits)[:300],
-                        "approvable": ok, "raw": raw,
+                        "approvable": ok, "raw": raw if approvable else None,
                         "value": snapshot.get(f["ref"]) if ok else None})
         return out
 
@@ -642,6 +687,7 @@ class Wizard:
     def _wait(self, info: dict, reason: str) -> Outcome:
         """Hand a deferred pause to the GUI and return "waiting"; `pending` says where to resume."""
         self.out.status, self.out.reason = WAITING, reason
+        self.out.pause_kind = str(info.get("kind") or "")
         self.out.events.append({"kind": "pause", "detail": info["kind"], "handled": None})
         if self.on_pause is not None:
             try:
@@ -826,8 +872,27 @@ class Wizard:
         self._protect_held = False
         self._remap(fill, pending, info)
         carried = list(pending.get("page_events") or [])
-        self._gate_page(fill, carried)
+        self._gate_or_ready(fill, carried)
         return fill, True, carried
+
+    def _gate_or_ready(self, fill: pipeline.PageFill, page_events: list[dict]) -> None:
+        """
+        Judge this page, unless the switch sends it to the ready park: on
+        a page with a Submit control and no Next, with auto-submit OFF,
+        the per-page gate pause is skipped so Jack meets one stop per job
+        (the ready park carries the full-record verdict and its reasons;
+        Jack, 2026-10-29). Nothing is ticked on that page either way
+        (_tick_required_consent ticks only on a page with a Next).
+        """
+        if self._parks_ready():
+            self.out.log.append("auto-submit is off: the final page's verdict goes to the ready park")
+            # Remembered so that, should _advance find a Next after all (a
+            # page that redrew its controls), the page is judged before any
+            # press: no page is ever left by Next without its gate.
+            self._skipped_gate = (fill, page_events)
+            return
+        self._skipped_gate = None
+        self._gate_page(fill, page_events)
 
     def _over_time(self) -> bool:
         return self.active_s + (self.clock() - (self._tick or self.clock())) > TIME_CAP_S
@@ -898,6 +963,12 @@ class Wizard:
                 fill, skip_fill, carried_events = self._resume_fill(pending, info)
             elif kind == "closed":
                 raise _Parked("the tab closed", closed=True)
+            elif kind == "ready":
+                done = self._after_ready(pending)
+                if done is not None:
+                    return done
+                # The tab shows another page: the loop goes on there with
+                # boxes holding a value held, as after a "moved" pause.
             elif kind == "captcha":
                 # Only once the page can be read and shows no CAPTCHA;
                 # otherwise the top of the loop pauses again and the event
@@ -1018,7 +1089,7 @@ class Wizard:
                             if isinstance(b, dict) and b.get("group_ref"):
                                 self.prefill.setdefault(b["group_ref"], []).append(b)
                     self.results.update(fill.step.get("results") or {})
-                    self._gate_page(fill, page_events)
+                    self._gate_or_ready(fill, page_events)
             skip_fill = False
             try:
                 outcome = self._advance(fill)
@@ -1035,6 +1106,9 @@ class Wizard:
         nxt = find_next(page, self.portal)
         sub = submit_mod.find_submit(page)
         if nxt.get("chosen"):
+            skipped, self._skipped_gate = self._skipped_gate, None
+            if skipped is not None and skipped[0] is fill:
+                self._gate_page(*skipped)
             if nxt.get("disabled"):
                 raise _Parked(f"the '{nxt.get('word')}' control is disabled")
             before = follow.read_shape(page)
@@ -1064,6 +1138,8 @@ class Wizard:
         if sub.get("chosen"):
             if fill is None and self.out.pages_filled == 0:
                 raise _Parked("a Submit control with nothing filled; check the page")
+            if not self._submit_allowed():
+                return self._ready(fill, READY_FILLED)
             return self._submit(fill)
         if fill is None:
             # A "choose how to apply" page: one allowed control, or parked
@@ -1081,7 +1157,92 @@ class Wizard:
                 self.out.events.append({"kind": "apply_method", "detail": chosen, "handled": "agent"})
                 return None
             raise _Parked("a page with no fields, no Next and no Submit")
+        if not self._submit_allowed():
+            return self._ready(fill, READY_NO_CONTROLS)
         raise _Parked("no Next or Submit control found after filling the page")
+
+    # -- the ready park (auto-submit OFF) ----------------------------------------
+    def _ready(self, fill: pipeline.PageFill | None, why: str) -> Outcome | None:
+        """
+        Auto-submit is OFF on a page with a Submit control and no Next (or
+        with neither after a fill): the gate decides on the full record,
+        nothing is ticked or pressed, and the job parks as "ready" with
+        the verdict and its reasons for Jack to press Submit himself
+        (Jack, 2026-10-29). From here the job never auto-submits. In the
+        GUI the park waits with Continue; in the terminal one Enter ends
+        it. Returns the Outcome, or None when the tab moved on to another
+        page in Jack's hands (the loop goes on there).
+        """
+        self.jack_submits = True
+        record = self._record(self.out.steps, self.out.events, wizard=True)
+        result = gate.decide(record, self.prof, agent_submissions_today=self.agent_submissions_today)
+        self._log_waived(result)
+        self.out.record, self.out.gate_result, self.out.gate_run_id = record, result, None
+        self.out.evidence = {}
+        if result["content_verdict"] == gate.WOULD_SUBMIT:
+            planned = sum(1 for a in (result.get("consent_actions") or {}).values() if a == "would_tick")
+            verdict = "the gate would submit" + (
+                f" (it planned to tick {planned} consent box(es); tick them yourself)" if planned else "")
+        else:
+            verdict = "the gate would stop: " + "; ".join(_clean(r) for r in result["content_reasons"][:8])
+        self.out.log.append(f"ready: {_clean(why)}; {verdict[:400]}")
+        ev = {"kind": "ready", "detail": why, "handled": None}
+        self.out.events.append(ev)
+        # Field refs of the whole record, for the read-only confirmation check.
+        refs = [r for f in record.get("fields") or [] for r in (f.get("option_refs") or [f.get("ref")]) if r]
+        pending = {"fill": fill, "why": why, "verdict": verdict, "refs": refs,
+                   "shape": follow.read_shape(self.page)}
+        body = (f"{why}. {verdict}. When you have pressed Submit, or moved the page on yourself, "
+                f"press Continue: the page is read again (no click, no navigation).")
+        how = self._pause("ready", body, prompt="Press Enter once you've submitted it (or to leave it): ",
+                          until=lambda: self._moved(pending["shape"]),
+                          fields=self._stop_fields(fill, result, approvable=False), extra=pending)
+        # Terminal mode from here: GUI mode deferred above, and resumes in _after_ready.
+        done = self._after_ready(pending, by_jack=how in (pause_mod.ANSWERED, pause_mod.FINISHED))
+        if done is not None:
+            return done
+        # The page moved on in the terminal: the loop goes on in _loop's
+        # while, so this pass's _advance returns None.
+        return None
+
+    def _after_ready(self, pending: dict, *, by_jack: bool = True) -> Outcome | None:
+        """
+        Jack has acted on a ready park (`by_jack`: Continue in the GUI,
+        Enter or the page moving on in the terminal; a pause that ended
+        any other way leaves the ready event unhandled, which the gate
+        stops on). A confirmation on the page (read-only: the portal's
+        signature or the generic sentence with the form gone) marks the
+        job submitted by him; a tab showing another page lets the loop
+        go on there with boxes holding a value held (None); otherwise it
+        stays ready (GUI: waits again with the same verdict; terminal:
+        parks as needs-you).
+        """
+        if by_jack:
+            self._handled_by_jack("ready", None)
+        confirmed, evidence = submit_mod.confirmation(
+            self.page, portal=self.portal, portal_method=self.portal_method,
+            start_url=self.url, refs=[r for r in pending.get("refs") or [] if extract.is_current(r)])
+        if confirmed:
+            self.out.evidence = evidence
+            self.out.events.append({"kind": "confirmation", "detail": "seen after a ready park", "handled": "jack"})
+            self.out.log.append(f"{READY_SUBMITTED} (not his answer; correct it with apply.py status)")
+            self.out.status, self.out.reason, self.out.submitted_by = "submitted", READY_SUBMITTED, "jack"
+            self.out.wizard = None
+            return self.out
+        if pending.get("shape") is not None and self._moved(pending["shape"]):
+            self.out.log.append("the page moved on in Jack's hands after the ready park: "
+                                "boxes holding a value are held")
+            self._protect_held = True
+            return None
+        why, verdict = pending.get("why") or READY_FILLED, pending.get("verdict") or ""
+        if getattr(self.pauser, "deferring", False):
+            self.out.log.append("still ready: no confirmation seen and the page is unchanged")
+            body = (f"{why}. {verdict}. When you have pressed Submit, or moved the page on yourself, "
+                    f"press Continue: the page is read again (no click, no navigation).")
+            self._pause("ready", body, prompt="", fields=self._stop_fields(pending.get("fill"), self.out.gate_result or {},
+                                                                             approvable=False), extra=pending)
+        self.out.wizard = None
+        return self._parked(f"ready: {why}; {verdict}")
 
     def _submit(self, fill: pipeline.PageFill | None) -> Outcome:
         record = self._record(self.out.steps, self.out.events, wizard=True)
@@ -1091,7 +1252,8 @@ class Wizard:
             submission = submit_mod.submit_application(
                 self.page, record, self.prof,
                 build_record=lambda: self._record(self.out.steps, self.out.events, wizard=True),
-                steps_log=self.out.log, agent_submissions_today=self.agent_submissions_today)
+                steps_log=self.out.log, agent_submissions_today=self.agent_submissions_today,
+                auto_submit=self._submit_allowed)
         self.out.record, self.out.gate_result = record, submission.gate_result
         self.out.evidence = submission.evidence
         if submission.status == "needs_you" and not submission.clicked:
@@ -1112,10 +1274,13 @@ class Wizard:
                 submission = submit_mod.submit_application(
                     self.page, record, self.prof,
                     build_record=lambda: self._record(self.out.steps, self.out.events, wizard=True),
-                    steps_log=self.out.log, agent_submissions_today=self.agent_submissions_today)
+                    steps_log=self.out.log, agent_submissions_today=self.agent_submissions_today,
+                    auto_submit=self._submit_allowed)
             self.out.record, self.out.gate_result = record, submission.gate_result
             self.out.evidence = submission.evidence
         self.out.status, self.out.reason = submission.status, submission.reason
+        if submission.status == "submitted":
+            self.out.submitted_by = "agent"
         self.out.wizard = None
         return self.out
 

@@ -74,6 +74,13 @@ MIGRATIONS: list[tuple[int, str]] = [
     ALTER TABLE applications ADD COLUMN evidence_json TEXT;
     ALTER TABLE applications ADD COLUMN agent_submitted INTEGER NOT NULL DEFAULT 0;
     """),
+    (3, """
+    -- The ready park (Jack, 2026-10-29): who pressed Submit on a logged
+    -- verdict. 'agent' when submit.py did; 'jack' when a confirmation was
+    -- seen after a ready park (not his y/n answer: human_submitted stays
+    -- as it was); NULL when nobody has.
+    ALTER TABLE gate_runs ADD COLUMN submitted_by TEXT;
+    """),
 ]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -221,11 +228,12 @@ def record_gate_run(url: str, *, portal: str, portal_method: str, result: dict,
         cur = conn.execute(
             "INSERT INTO gate_runs (application_url, portal, portal_method, verdict, "
             "reasons_json, enablement_json, record_json, gate_version, agent_submitted, "
-            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "submitted_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (url, portal, portal_method, result.get("content_verdict") or "would_stop",
              json.dumps(result.get("content_reasons") or []), json.dumps(enablement),
              json.dumps(record_json, default=str), result.get("gate_version"),
-             1 if agent_submitted is True else 0, _timestamp()))
+             1 if agent_submitted is True else 0, "agent" if agent_submitted is True else None,
+             _timestamp()))
         return int(cur.lastrowid)
 
 
@@ -241,16 +249,21 @@ def set_evidence(url: str, evidence: dict | None, *, agent_submitted: bool) -> N
 
 
 def set_gate_outcome(run_id: int, *, human_submitted: str, edits: list | None,
-                     capture: str, success_signal: str = "") -> None:
-    """What you actually did after a run: y / n / unknown, and what you changed."""
+                     capture: str, success_signal: str = "", submitted_by: str | None = None) -> None:
+    """
+    What you actually did after a run: y / n / unknown, and what you
+    changed. `submitted_by` ("agent" / "jack") is set only when given: a
+    confirmation seen after a ready park records "jack" with capture
+    "confirmation" on the park's own row (Jack, 2026-10-29).
+    """
     if human_submitted not in ("y", "n", "unknown"):
         human_submitted = "unknown"
     with _connect() as conn:
         conn.execute(
             "UPDATE gate_runs SET human_submitted=?, edits_json=?, capture=?, "
-            "success_signal=?, outcome_at=? WHERE id=?",
+            "success_signal=?, outcome_at=?, submitted_by=COALESCE(?, submitted_by) WHERE id=?",
             (human_submitted, None if edits is None else json.dumps(edits), capture,
-             success_signal, _timestamp(), run_id))
+             success_signal, _timestamp(), submitted_by, run_id))
 
 
 def gate_runs(portal: str | None = None) -> list[dict]:
