@@ -486,7 +486,10 @@ open once anything submits without Jack.
 - **The no-match-lost sweep as a pytest test** (sampled so the default run
   stays under 6 minutes), so the reviewer can rerun it.
 - **Next detection:** by aria-label, and by "Proceed", "Review", "Save and
-  continue", "Save & Next".
+  continue", "Save & Next". Checked 2026-10-29: `wizard.find_next` already
+  matches aria-label (when the control has no visible text) and all of
+  those phrases; only `adapters.has_next_step` (used by `fill`, not the
+  GUI) lacks aria-label and "Proceed". Stays open (Jack, 2026-10-29).
 - **Test clean-ups from earlier rounds:** test_field_text.py (hide d3 or
   select by dom_id / type; drop the v1 docstring claim; an Ashby title with
   a single-value sentinel); test_posting_text.py (both sentinels on the
@@ -2905,3 +2908,18 @@ pick: it stays stopped and Jack pauses again (safe direction). (3) The
 other-dropdown negative's `by_label.get("Country") not in reviewed`
 would pass trivially with the label absent (the positive test proves
 it resolves), and it omits the "1 field(s) touched" detail check.
+
+## Round of 2026-10-29 (the MVP round: auto-submit switch, preflight, crash containment)
+
+Workday deferred by Jack 2026-10-29: no Workday work this round
+(PLAN-workday items 2-9, the phone-code multiselect, snapshot.py's
+navigation crash all stay open); Workday links must still park cleanly.
+MUST FIX unchanged: the 13 items stay open and listed; none built this
+round. Item 4 of the brief (Next detection) was dropped by Jack after the
+check recorded in the MUST FIX bullet above.
+
+Items: 0 records (this), 1 the auto-submit switch (default OFF, ready
+parks, Continue on a ready row), 2 model preflight (404 refuses real
+jobs; a network error or 5xx warns and goes on), 3 crash containment
+(failed: <ExceptionType> in <function>, no Continue on a failed row).
+Reviewer outputs per commit follow below.
