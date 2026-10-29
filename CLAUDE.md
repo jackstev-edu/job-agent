@@ -345,6 +345,14 @@ From the same prompt and Jack's go on the plan (2026-10-29):
   <function>" row (type and function name only, no message text from
   the page), the tab open and the queue running. No Continue on a
   failed row.
+- The reviewer's category 1 wording (Jack, in the 2026-10-29 brief: "Align
+  .claude/agents/rule-reviewer.md category 1 with CLAUDE.md (Jack
+  approves this edit here)"): "any path that clicks Submit" becomes "any
+  path that presses Submit outside submit.py, or with auto-submit OFF,
+  or without would_submit on the full record"; "ticks a checkbox"
+  becomes "ticks a checkbox outside the consent policy"; "any change to
+  filler.py" becomes "any change to filler.py that adds a click, tick,
+  key press or value read". Committed as 3efc5f6.
 - Reviewer loop speed rules: BLOCK → fix as a new commit, re-review;
   the same BLOCK surviving 3 attempts → stop and report. A FLAG is
   folded ONLY if it is a stop-to-pass or safety issue (password, legal /
@@ -382,9 +390,10 @@ From the same prompt and Jack's go on the plan (2026-10-29):
   presses Submit (Jack, 2026-10-29).
 - A consent box is ticked only under the consent policy in the plan (terms /
   privacy wording, never marketing, never a certification), or when its
-  label exactly matches a line in the profile's `consent_allowlist`: a
-  required terms / privacy box mid-wizard as built; on the final page only
-  when auto-submit is ON. Never marketing or opt-ins (Jack, 2026-10-29).
+  label exactly matches a line in the profile's `consent_allowlist`. On
+  either route, a required terms / privacy box is ticked mid-wizard as
+  built, and on the final page only when auto-submit is ON. Never
+  marketing or opt-ins (Jack, 2026-10-29).
 - No page value may reach the model or the network except as already allowed.
 - Never narrow HARD_STOPS, LEGAL_GUARD, PROFILE_PATHS routing or
   SECRET_WORDS, or make any check fail toward a pass.

@@ -489,7 +489,10 @@ open once anything submits without Jack.
   continue", "Save & Next". Checked 2026-10-29: `wizard.find_next` already
   matches aria-label (when the control has no visible text) and all of
   those phrases; only `adapters.has_next_step` (used by `fill`, not the
-  GUI) lacks aria-label and "Proceed". Stays open (Jack, 2026-10-29).
+  GUI) lacks them: it is generic for "Next" and "Continue" only, matches
+  "Save and Continue" for workday / taleo alone, and has no aria-label,
+  "Proceed", "Review" or "Save & Next" anywhere. Stays open (Jack,
+  2026-10-29).
 - **Test clean-ups from earlier rounds:** test_field_text.py (hide d3 or
   select by dom_id / type; drop the v1 docstring claim; an Ashby title with
   a single-value sentinel); test_posting_text.py (both sentinels on the
@@ -2923,3 +2926,22 @@ parks, Continue on a ready row), 2 model preflight (404 refuses real
 jobs; a network error or 5xx warns and goes on), 3 crash containment
 (failed: <ExceptionType> in <function>, no Continue on a failed row).
 Reviewer outputs per commit follow below.
+
+Commit 3efc5f6 (item 0): VERDICT FLAG, 2 medium, 4 low. Folded in the
+next commit (rule text): CLAUDE.md now quotes Jack's brief approving the
+reviewer's category-1 wording; the consent design rule's final-page
+clause is its own sentence covering both routes; the Next-detection
+bullet names every phrase has_next_step lacks. Logged, not folded:
+(1) CLAUDE.md's switch, ready-park and submit.py lines describe item 1
+before it is built; item 1 is the next commit and no real link is run
+before it. (2) The reviewer's filler.py wording leaves out a change that
+weakens an existing check without adding a click, tick, key press or
+read; the reviewer suggests "or weakens a check". Decision for Jack.
+(3) "The 13 MUST FIX items" matches no count in TODO (27 top-level
+bullets, 10 bold); the figure is Jack's. Decision for Jack: name the 13
+or correct the number. (4) Decision 2's module list "(accounts.py,
+intake.py, wizard.py, chooser.py)" is Jack's wording; the design rule
+lists intake.py, accounts.py, wizard.py, google.py plus chooser.py.
+Kept as Jack wrote it. Also noted by the reviewer: the review worktree's
+HEAD was the parent commit; the diff is markdown only, so the tests ran
+on identical code. Later reviews check out the hash.
