@@ -18,6 +18,7 @@ with no fields, no Next and no Submit"; it was this chooser.
 
 Run from anywhere:  .venv/Scripts/python.exe tests/test_chooser.py
 """
+import contextlib
 import io
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -61,6 +62,19 @@ PICKER = f"""<!doctype html><html><head><title>Applying to Engineer | Acme</titl
 <input type="file" id="resumeFile" style="display:none" onchange="window.__files.push('ignored:' + this.files[0].name)">
 </body></html>"""
 
+# Item 2 (Jack, 2026-10-29): a chooser whose From Device takes the file
+# and leaves the page as it was, and one that shows step 2 at the SAME
+# address (fields appear, the URL unchanged).
+STUCK = PICKER.replace("location.href = '/careers/Application?folderId=1&picked=1';", "")
+INLINE = PICKER.replace(
+    "location.href = '/careers/Application?folderId=1&picked=1';",
+    "document.body.appendChild(document.getElementById('step2').content.cloneNode(true));").replace(
+    "</body></html>",
+    """<template id="step2"><form id="f" onsubmit="event.preventDefault(); location.href = '/thanks'">
+<label for="fn">First Name</label><input id="fn" name="first_name" required>
+<label for="em">Email</label><input id="em" name="email" type="email" required>
+<button type="submit">Submit application</button></form></template></body></html>""")
+
 WORKDAY = f"""<!doctype html><html><head><title>Start Your Application - Acme</title></head><body>{CLICKS_JS}
 <h2>Start Your Application</h2>
 <a href="/apply/autofill">Autofill with Resume</a>
@@ -92,7 +106,7 @@ THANKS = "<!doctype html><html><head><title>Acme</title></head><body><h1>Thank y
 
 def _routes():
     site = {"/careers": AVATURE, "/careers/Application": FORM, "/workday": WORKDAY, "/ashby": ASHBY,
-            "/refused": ONLY_REFUSED, "/thanks": THANKS, "/picker": PICKER}
+            "/refused": ONLY_REFUSED, "/thanks": THANKS, "/picker": PICKER, "/stuck": STUCK, "/inline": INLINE}
 
     def handle(route):
         path = route.request.url.split("avature.net", 1)[-1].split("?")[0]
@@ -137,7 +151,7 @@ def test_avatures_from_device_puts_the_resume_in_the_chooser_the_control_opens()
     with mock_page(BLANK, _routes()) as page:
         page.goto(f"{HOST}/careers?folderId=1")
         log: list = []
-        kind = chooser.choose(page, RESUME, log)
+        kind = chooser.choose(page, RESUME, log).kind
         check(kind == "from_device" and page.url.endswith("?folderId=1&parsed=1"),
               f"From Device: the resume went in and the form page followed ({kind}, {page.url})")
         check(log == [f"chose 'From Device' and put {RESUME.name} in the file chooser it opened"], f"the log ({log})")
@@ -156,7 +170,7 @@ def test_a_portal_that_ignores_its_hidden_input_takes_the_file_through_the_contr
     with mock_page(BLANK, _routes()) as page:
         page.goto(f"{HOST}/picker?folderId=1")
         log: list = []
-        kind = chooser.choose(page, RESUME, log)
+        kind = chooser.choose(page, RESUME, log).kind
         reached = True
         try:
             page.wait_for_url("**/careers/Application?folderId=1&picked=1", timeout=5000)
@@ -182,7 +196,7 @@ def test_a_control_that_opens_no_chooser_falls_back_to_the_pages_own_input():
         page.evaluate("() => { document.getElementById('methodButton--file').onclick = () => false; }")
         log: list = []
         with mock.patch.object(chooser, "FILE_CHOOSER_WAIT_MS", 300):
-            kind = chooser.choose(page, RESUME, log)
+            kind = chooser.choose(page, RESUME, log).kind
         check(kind == "from_device" and page.url.endswith("?folderId=1&parsed=1"),
               f"no chooser opened: the page's own input took the file and step 2 followed ({kind}, {page.url})")
         check(log == [f"chose 'From Device' and put {RESUME.name} in the page's file input (the control opened no chooser)"],
@@ -206,7 +220,7 @@ def test_without_a_resume_without_resume_is_pressed_and_refused_options_never():
     with mock_page(BLANK, _routes()) as page:
         page.goto(f"{HOST}/careers?folderId=1")
         log: list = []
-        kind = chooser.choose(page, None, log)
+        kind = chooser.choose(page, None, log).kind
         check(kind == "without_resume" and page.url.endswith("/careers/Application?folderId=1"),
               f"Without Resume pressed, the form page followed ({kind}, {page.url})")
         page.goto(f"{HOST}/careers?folderId=1")
@@ -230,7 +244,7 @@ def test_workdays_apply_manually_is_pressed_and_an_ashby_form_page_is_not_a_choo
     with mock_page(BLANK, _routes()) as page:
         page.goto(f"{HOST}/workday")
         log: list = []
-        kind = chooser.choose(page, RESUME, log)
+        kind = chooser.choose(page, RESUME, log).kind
         check(kind == "apply_manually" and page.url.endswith("/apply/applyManually"),
               f"Apply Manually, never Autofill or the last application ({kind}, {page.url})")
         page.goto(f"{HOST}/ashby")
@@ -268,6 +282,88 @@ def test_the_wizard_takes_the_chooser_and_goes_on_to_the_form():
         check(out.status == wizard.WAITING and "none of which the agent takes" in out.reason
               and "'Apply with Indeed'" in out.reason and w2.pending and w2.pending.get("kind") == "parked",
               f"a chooser with only refused options waits, with them listed ({out.status}, {out.reason})")
+    check.done()
+
+
+def _gui_wizard(page, url, resume):
+    pauser = pause.GuiPauser(notify_fn=lambda t, b, echo=print: None, echo=lambda *a, **k: None)
+    return wizard.Wizard(page, _profile(), url=url, portal="generic", portal_method="default",
+                         company="Acme", role="Engineer", resume=resume, posting_text="", pauser=pauser,
+                         echo=lambda *a, **k: None, auto_submit=lambda: True)
+
+
+def _quick(stack):
+    """The usual patches, with the form wait and the time cap shortened so a loop that never parks ends."""
+    stack.enter_context(mock.patch("agent.classify.classify_fields", classify_by_label))
+    stack.enter_context(mock.patch("agent.mapper.map_fields", map_from_profile))
+    stack.enter_context(mock.patch.object(wizard, "FORM_WAIT_S", 1))
+    stack.enter_context(mock.patch.object(wizard, "TIME_CAP_S", 20))
+    stack.enter_context(redirect_stdout(io.StringIO()))
+
+
+def test_a_chooser_that_never_advances_parks_after_one_choice():
+    # Fails on 59e7533: the loop chose again every pass until the (here
+    # shortened) time cap, and the park names the cap, not the choice.
+    check = Checks()
+    with mock_page(BLANK, _routes()) as page:
+        page.goto(f"{HOST}/stuck?folderId=1")
+        w = _gui_wizard(page, f"{HOST}/stuck?folderId=1", RESUME)
+        with contextlib.ExitStack() as stack:
+            _quick(stack)
+            out = w.run()
+        check(out.status == wizard.WAITING and out.reason == "chose 'From Device' but the page didn't move on"
+              and (w.pending or {}).get("kind") == "parked",
+              f"parked with Continue after one choice ({out.status}, {out.reason})")
+        check(page.evaluate("window.__files") == [f"picker:{RESUME.name}"],
+              f"set_files once ({page.evaluate('window.__files')})")
+        check(page.evaluate("window.__clicks") == ["From Device", ""]
+              and sum(1 for e in out.events if e["kind"] == "apply_method") == 1,
+              f"one choice, one event ({page.evaluate('window.__clicks')})")
+        check(f"chose 'From Device' and put {RESUME.name} in the file chooser it opened" in out.log, f"the log ({out.log})")
+    check.done()
+
+
+def test_continue_on_an_unchanged_page_parks_again_with_no_second_choice():
+    # Fails on 59e7533 at the first park (as the test above): there is no
+    # first park within the cap, so no Continue to make.
+    check = Checks()
+    with mock_page(BLANK, _routes()) as page:
+        page.goto(f"{HOST}/stuck?folderId=1")
+        w = _gui_wizard(page, f"{HOST}/stuck?folderId=1", RESUME)
+        with contextlib.ExitStack() as stack:
+            _quick(stack)
+            out = w.run()
+            check(out.reason == "chose 'From Device' but the page didn't move on", f"the first park ({out.reason})")
+            out = w.continue_from({})
+        check(out.status == wizard.WAITING and (w.pending or {}).get("kind") == "parked"
+              and out.reason == "chose 'From Device' earlier and the page is unchanged since; "
+                                "choose a way to apply yourself in the tab",
+              f"Continue on the unchanged page parks again ({out.status}, {out.reason})")
+        check(page.evaluate("window.__files") == [f"picker:{RESUME.name}"]
+              and page.evaluate("window.__clicks") == ["From Device", ""]
+              and sum(1 for e in out.events if e["kind"] == "apply_method") == 1,
+              f"no second choice: one set_files, one click, one event ({page.evaluate('window.__files')})")
+        check("resumed after a parked pause" in out.log, f"the resume is logged ({out.log[-3:]})")
+    check.done()
+
+
+def test_a_choice_that_shows_step_2_at_the_same_address_counts_as_moved_on():
+    # Jack's addition (2026-10-29): fields appear, the URL is unchanged;
+    # that is progress, not a park. Fails on 59e7533: the file went into
+    # the ignoring input, step 2 never appeared, and the shortened cap
+    # parked the job.
+    check = Checks()
+    with mock_page(BLANK, _routes()) as page:
+        page.goto(f"{HOST}/inline?folderId=1")
+        w = _gui_wizard(page, f"{HOST}/inline?folderId=1", RESUME)
+        with contextlib.ExitStack() as stack:
+            _quick(stack)
+            out = w.run()
+        check("didn't move on" not in out.reason and "unchanged since" not in out.reason
+              and f"chose 'From Device' and put {RESUME.name} in the file chooser it opened" in out.log,
+              f"the choice counted as moved on ({out.status}, {out.reason})")
+        check(out.pages_filled == 1 and any(r.get("label") == "First Name" for r in out.rows),
+              f"and the step-2 form at the same address was filled ({out.pages_filled}, {out.status}, {out.reason})")
     check.done()
 
 

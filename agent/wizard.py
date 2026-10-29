@@ -243,6 +243,11 @@ class Wizard:
         self.active_s = 0.0                     # the agent's own time, pauses excluded
         self.step_cap = STEP_CAP                # raised by one window per Continue on a cap park
         self._tick: float | None = None
+        # The last way-to-apply choice that left the page as it was: its
+        # label and the (address, fields) shape it was made on. The same
+        # choice is never made twice on a page of that shape (Jack,
+        # 2026-10-29); a page that changed clears it.
+        self._last_choice: tuple[str, tuple] | None = None
 
     # -- records ---------------------------------------------------------------
     def _record(self, steps: list[dict], events: list[dict], *, wizard: bool) -> dict:
@@ -1144,17 +1149,31 @@ class Wizard:
         if fill is None:
             # A "choose how to apply" page: one allowed control, or parked
             # with the options shown (never LinkedIn, Indeed, paste or a
-            # previous application).
+            # previous application). A choice that leaves the page as it
+            # was (address and fields) parks, and is never made again on a
+            # page of that shape: Continue rescans, and only a page Jack
+            # changed gets a choice (Jack, 2026-10-29; his Avature run
+            # looped on the same upload every pass until the time cap).
+            before = follow.read_shape(page)
+            key = (before["url"], before["fields"]) if before is not None else None
+            if self._last_choice is not None and key is not None and key == self._last_choice[1]:
+                raise _Parked(f"chose '{self._last_choice[0]}' earlier and the page is unchanged since; "
+                              f"choose a way to apply yourself in the tab")
             try:
                 with self.activity.filling(page):
-                    chosen = chooser.choose(page, self.resume, self.out.log)
+                    choice = chooser.choose(page, self.resume, self.out.log)
             except ValueError as e:
                 raise _Parked(str(e))
-            if chosen is not None:
+            if choice is not None:
                 # The record's uploads map is keyed by file-box ref; a resume
                 # the chooser put in is logged as a step and an event, not
                 # claimed as a box's upload. A later resume box still gets it.
-                self.out.events.append({"kind": "apply_method", "detail": chosen, "handled": "agent"})
+                self.out.events.append({"kind": "apply_method", "detail": choice.kind, "handled": "agent"})
+                if not self._moved(before):
+                    if key is not None:
+                        self._last_choice = (choice.label, key)
+                    raise _Parked(f"chose '{choice.label}' but the page didn't move on")
+                self._last_choice = None
                 return None
             raise _Parked("a page with no fields, no Next and no Submit")
         if not self._submit_allowed():

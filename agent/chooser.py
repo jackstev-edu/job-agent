@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from . import browser as browser_mod
 
@@ -44,6 +44,13 @@ REFUSED = re.compile(r"linkedin|indeed|seek|glassdoor|copy\s*(&|and)\s*paste|pas
                      r"|previous application|autofill|auto-fill|import", re.I)
 
 _ATTR = "data-ja-choice"
+
+
+class Choice(NamedTuple):
+    """What `choose` did: the allowlist kind, and the control's whole label for the log and a park."""
+    kind: str
+    label: str
+
 # How long the allowed control gets to open its file chooser after the click.
 FILE_CHOOSER_WAIT_MS = 4000
 
@@ -116,13 +123,13 @@ def is_chooser(controls: list[tuple[int, str]]) -> bool:
         REFUSED.search(t) and re.search(r"apply|resume|cv|application", t, re.I) for _, t in controls)
 
 
-def choose(page: "Page", resume: Path | None, log: list[str]) -> str | None:
+def choose(page: "Page", resume: Path | None, log: list[str]) -> Choice | None:
     """
     Act on a chooser page: upload the resume through the file chooser the
     allowed control opens (Playwright answers it in place of any native
     dialog; the page's own file input only when the click opens none), or
-    press the allowed control. Returns the kind used, or None when the
-    page is not a chooser. Raises ValueError, with the options shown, when
+    press the allowed control. Returns the Choice made (kind and label),
+    or None when the page is not a chooser. Raises ValueError, with the options shown, when
     it is one and none is allowed.
     """
     controls = options_shown(page)
@@ -143,7 +150,7 @@ def choose(page: "Page", resume: Path | None, log: list[str]) -> str | None:
         page.locator(f"[{_ATTR}='1']").first.click(timeout=4000)
         log.append(f"chose '{text}'")
     browser_mod.settle(page, 1500)
-    return kind
+    return Choice(kind, text)
 
 
 def _upload(page: "Page", index: int, resume: Path) -> str | None:
