@@ -1505,10 +1505,14 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
                     on_wait=lambda w, f, j=job_id: waiting.__setitem__(j, (w, f)))
             except Exception as e:
                 # A crash on resume: a failed row with the type and the
-                # function only, the tab left as it is, the queue going on
+                # function only, no Continue (a pause the crash left drawn
+                # is cleared), the tab left as it is, the queue going on
                 # (Jack, 2026-10-29).
                 status, reason = FAILED, failure_line(e)
                 _park_failed(finish["url"], reason)
+                state.update(job_id, status=status, reason=reason, pause=None)
+                last_busy = clock()
+                continue
             state.update(job_id, status=status, reason=reason)
             last_busy = clock()
         job = state.next_queued()
@@ -1521,7 +1525,7 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
         try:
             existing = tracker.find(job.url)
         except Exception as e:
-            state.update(job.id, status=FAILED, reason=failure_line(e))
+            state.update(job.id, status=FAILED, reason=failure_line(e), pause=None)
             continue
         if (existing and not job.dry and not getattr(args, "force", False)
                 and existing["status"] not in (NEEDS_YOU, "draft")):
@@ -1545,11 +1549,16 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
                 auto_submit=state.auto_submit_on)
         except Exception as e:
             # A crash anywhere in the job (intake, accounts, the wizard):
-            # a failed row with the type and the function only, the tab
+            # a failed row with the type and the function only, no
+            # Continue (a pause the crash left drawn is cleared), the tab
             # left open, the queue going on (Jack, 2026-10-29).
             status, reason = FAILED, failure_line(e)
             if not job.dry:
                 _park_failed(job.url, reason)
+            if job.id not in waiting:
+                state.update(job.id, status=status, reason=reason, pause=None)
+            last_busy = clock()
+            continue
         if job.id not in waiting:
             state.update(job.id, status=status, reason=reason)
         last_busy = clock()

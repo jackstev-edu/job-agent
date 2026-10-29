@@ -64,6 +64,29 @@ def _req(server, method, path, body=None, host=None, origin=None, token="ok"):
     return resp.status, dict(resp.getheaders()), parsed
 
 
+def test_the_landing_line_names_the_form_only_when_a_dry_run_read_it():
+    # Item 4d of 2026-10-29 (afternoon). Fails on bc7343d: the row's view
+    # had no landing line (the page built one itself, and a real run,
+    # which never reports form_found, always read "form with fields: no").
+    check = Checks()
+    state = gui.State()
+    real, dry_yes, dry_no, unopened = state.start([f"{COMPANY}/jobs/1", f"{COMPANY}/jobs/2",
+                                                   f"{COMPANY}/jobs/3", f"{COMPANY}/jobs/4"], dry=False)
+    state.update(real, final_url=f"{COMPANY}/jobs/1/apply")
+    state.update(dry_yes, final_url=f"{COMPANY}/jobs/2/apply", form_found=True)
+    state.update(dry_no, final_url=f"{COMPANY}/jobs/3/apply", form_found=False)
+    views = {j["id"]: j for j in state.snapshot()["jobs"]}
+    check(views[real]["landing"] == f"landed on {COMPANY}/jobs/1/apply",
+          f"a real run's line names the address only ({views[real]['landing']})")
+    check(views[dry_yes]["landing"] == f"landed on {COMPANY}/jobs/2/apply / form with fields: yes"
+          and views[dry_no]["landing"] == f"landed on {COMPANY}/jobs/3/apply / form with fields: no",
+          f"a dry run's line says what it read ({views[dry_yes]['landing']}; {views[dry_no]['landing']})")
+    check(views[unopened]["landing"] == "", "a link that didn't open has no landing line")
+    check("j.landing" in gui._PAGE and "form with fields" not in gui._PAGE,
+          "the page renders the line it is given and builds none itself")
+    check.done()
+
+
 def test_close_job_is_a_route_and_a_state_change():
     # Item 4: POST /close-job closes a job whose pause is of kind "closed"
     # and nothing else; the page draws "Close this job" for that kind.

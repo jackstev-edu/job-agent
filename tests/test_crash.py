@@ -216,6 +216,49 @@ def test_a_tracker_failure_before_a_job_starts_does_not_take_the_loop_down():
     check.done()
 
 
+def test_a_crash_after_a_pause_leaves_a_failed_row_with_no_continue():
+    # Item 4b of 2026-10-29 (afternoon). Fails on bc7343d: the pause the
+    # crash left drawn stayed on the failed row, with an inert Continue.
+    # Two sites: a job whose run pauses then crashes, and a resume whose
+    # wizard pauses then crashes.
+    import apply
+    check = Checks()
+    profile_path = _profile_path("after-pause")
+    state = gui.State()
+    a, b = state.start([f"{HOST}/pause-crash", f"{HOST}/pause-crash-resume"], dry=False)
+    args = Namespace(profile=str(profile_path), resume=None, dry=False)
+
+    def pause_then_boom(ctx, url, prof, args, pauser, *, new_tab=False, report_to=None,
+                        on_pause=None, on_wait=None, auto_submit=None):
+        on_pause({"kind": "gate", "message": "this page needs you", "fields": [], "wants_code": False})
+        raise _Boom(SENTINEL)
+
+    class _PausesThenCrashes:
+        def continue_from(self, info):
+            state.set_pause(b, "gate", "this page needs you again", [])
+            raise _Boom(SENTINEL)
+    # Job b is already waiting on a pause from before, with Continue pressed.
+    state.update(b, status="working")
+    state.set_pause(b, "gate", "this page needs you", [])
+    state.request_continue(b)
+    waiting = {b: (_PausesThenCrashes(), {"url": f"{HOST}/pause-crash-resume", "company": "", "role": "",
+                                          "ats": "", "portal": "generic", "portal_method": "default",
+                                          "resume": ""})}
+    with redirect_stdout(io.StringIO()) as out:
+        apply.gui_loop(None, state, apply.Profile.load(profile_path), args, _quiet(), run=pause_then_boom,
+                       idle_limit_s=1.0, waiting=waiting)
+    jobs = {j["id"]: j for j in state.snapshot()["jobs"]}
+    for job_id, what in ((a, "a run"), (b, "a resume")):
+        check(jobs[job_id]["status"] == "failed" and jobs[job_id]["pause"] is None
+              and jobs[job_id]["reason"].startswith("failed: _Boom in "),
+              f"{what} that paused then crashed: a failed row with no pause ({jobs[job_id]['status']}, "
+              f"{jobs[job_id]['pause'] is None})")
+        check(state.request_continue(job_id) is False, f"  ...and Continue is refused for it")
+    check(b not in waiting, "the crashed resume is not kept to resume again")
+    _no_message(check, out.getvalue(), "the terminal")
+    check.done()
+
+
 def test_failure_line_names_the_innermost_repo_frame_only():
     # A guard for the helper itself (mutation check: with the frame walk
     # dropped it reads "in unknown"; with the message kept it carries the

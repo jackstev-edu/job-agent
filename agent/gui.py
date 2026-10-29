@@ -85,6 +85,12 @@ class Job:
     continue_requested: bool = False
 
     def view(self) -> dict:
+        # The landing line (Jack, 2026-10-29): "form with fields" is a dry
+        # run's reading at intake; a real run never reads it (the form may
+        # render later), so its line names the address only.
+        landing = f"landed on {self.final_url}" if self.final_url else ""
+        if landing and self.form_found is not None:
+            landing += f" / form with fields: {'yes' if self.form_found else 'no'}"
         pause = None
         if self.pause:
             pause = {"kind": self.pause.get("kind"), "message": self.pause.get("message", ""),
@@ -98,7 +104,8 @@ class Job:
         return {"id": self.id, "url": self.url, "dry": self.dry, "company": self.company,
                 "role": self.role, "portal": self.portal, "status": self.status,
                 "reason": self.reason, "final_url": self.final_url,
-                "form_found": self.form_found, "progress": self.progress, "pause": pause,
+                "form_found": self.form_found, "progress": self.progress, "landing": landing,
+                "pause": pause,
                 "code_given": self.code is not None}
 
 
@@ -346,7 +353,7 @@ button { font: inherit; padding: .3rem .8rem; }
       const td = el('td');
       td.appendChild(el('div', j.url, 'muted'));
       if (j.reason) td.appendChild(el('div', j.reason));
-      if (j.final_url) td.appendChild(el('div', 'landed on ' + j.final_url + ' / form with fields: ' + (j.form_found ? 'yes' : 'no'), 'muted'));
+      if (j.landing) td.appendChild(el('div', j.landing, 'muted'));
       if (j.pause) {
         const box = el('div', undefined, 'pause');
         box.appendChild(el('div', j.pause.message));

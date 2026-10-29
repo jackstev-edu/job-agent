@@ -366,6 +366,35 @@ def test_a_confirmation_sentence_in_the_prose_of_the_open_form_never_counts_once
     check.done()
 
 
+def test_continue_landing_mid_render_never_reads_the_form_as_gone():
+    # Item 4a of 2026-10-29 (afternoon). Fails on bc7343d: the structural
+    # read ran at once, saw no field while the page re-rendered its form,
+    # and the prose sentence marked the job submitted by Jack. With the
+    # settle the form is back when it is read, and the job stays ready.
+    check = Checks()
+    profile_path, state, a, waiting = _gui_run("/prose-render", "render")
+    site = _gui_site(); site["/prose-render"] = PROSE
+    with _headless(_routes(site)) as ctx:
+        ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+        _loop_once(state, waiting, ctx, profile_path)
+        job = state.snapshot()["jobs"][0]
+        check(job["pause"] and job["pause"]["kind"] == "ready", "parked ready first")
+        tab = next(p for p in ctx.pages if p.url.endswith("/prose-render"))
+        # The page takes its form out and puts the same element back a
+        # moment later, as a framework re-render does; Continue lands in
+        # that moment.
+        tab.evaluate("() => { const f = document.getElementById('f'); const p = f.parentNode; "
+                     "f.remove(); setTimeout(() => p.appendChild(f), 450); }")
+        state.request_continue(a)
+        _loop_once(state, waiting, ctx, profile_path)
+        job = state.snapshot()["jobs"][0]
+        where = tab.url
+    check(job["status"] == "needs_you" and job["pause"] and job["pause"]["kind"] == "ready" and a in waiting
+          and where.endswith("/prose-render"),
+          f"the job stays ready: the re-rendered form is not gone ({job['status']}, {job['reason'][:80]})")
+    check.done()
+
+
 def test_an_empty_ref_list_is_never_form_gone():
     # Fix of cacfd8a's BLOCK, at the probe itself: with no current refs
     # the form is unknown, never gone, so the generic sentence alone

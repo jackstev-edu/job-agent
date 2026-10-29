@@ -1261,9 +1261,15 @@ class Wizard:
         return None
 
     def _form_gone_since(self, before) -> bool:
-        """Is the form of the shape `before` gone: the page's structure now shares no field with it? Unreadable either way: not gone."""
+        """
+        Is the form of the shape `before` gone: the page's structure now
+        shares no field with it? Unreadable either way: not gone. The page
+        settles first (Jack, 2026-10-29): a Continue landing mid-render
+        must not read an empty field set as "gone".
+        """
         if before is None:
             return False
+        browser_mod.settle(self.page, 600)
         now = follow.read_shape(self.page)
         if now is None or not before.get("fields"):
             return False

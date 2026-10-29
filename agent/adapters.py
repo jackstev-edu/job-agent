@@ -89,6 +89,14 @@ CATALOG: dict[str, ATS] = {
     "smartrecruiters": ATS("SmartRecruiters", "medium", "Reasonably clean modern app."),
     "jobvite": ATS("Jobvite", "medium", "Mixed quality between employers."),
     "bamboohr": ATS("BambooHR", "easy", "Small-company portal, simple forms."),
+    "avature": ATS(
+        "Avature", "medium",
+        "A 'choose an option to apply' page first (Without Resume / From Device / "
+        "Copy & Paste), then a multi-page wizard.",
+        multi_step=True,
+        quirks=["The resume goes in only through the file chooser From Device opens; a "
+                "file set on the page's hidden pre-existing input is ignored."],
+    ),
     "generic": ATS(
         "Unknown or custom", "unknown",
         "No specific knowledge. Falls back to reading the page generically — "
@@ -107,6 +115,7 @@ _URL_SIGNATURES = [
     (r"smartrecruiters\.com", "smartrecruiters"),
     (r"jobvite\.com", "jobvite"),
     (r"bamboohr\.com", "bamboohr"),
+    (r"avature\.net", "avature"),
 ]
 
 

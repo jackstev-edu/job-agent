@@ -117,7 +117,10 @@ def test_detection_method():
              ("https://careers.example.com/apply?ref=greenhouse.io", None, "greenhouse", "url"),
              ("https://careers.example.com/apply", Page("<div>Powered by greenhouse.io</div>"),
               "greenhouse", "html"),
-             ("https://careers.example.com/apply", Page("<p>hello</p>"), "generic", "default")]
+             ("https://careers.example.com/apply", Page("<p>hello</p>"), "generic", "default"),
+             # Item 4c of 2026-10-29 (afternoon); on bc7343d this was generic/default.
+             ("https://acme.avature.net/careers/JobDetail/Engineer/1", None, "avature", "host"),
+             ("https://acme.avature.net/careers/Application?folderId=1", Page("<p>x</p>"), "avature", "host")]
     for url, page, key, method in cases:
         got = adapters.detect_with_method(url, page)
         check((got[0], got[2]) == (key, method), f"{url} -> {key}/{method} (got {got[0]}/{got[2]})")
