@@ -5,14 +5,19 @@ WHAT THIS DOES: When a page offers ways to apply instead of a form
 (Avature: Without Resume / From Device / Copy & Paste; Workday: Autofill
 with Resume / Apply Manually / Use My Last Application), picks by an
 allowlist of whole control labels, in order: Workday's "Apply Manually";
-Avature's "From Device" (the profile's resume goes in through the page's
-own file input, never a native dialog), falling back to "Without Resume"
-when no resume is on file. LinkedIn, Indeed and other third-party
-autofill, "Copy & Paste" and "Use My Last Application" are never chosen.
-With none of the allowed labels on the page, the job is parked with the
-options shown. A page that already has a form is not a chooser.
+Avature's "From Device" (the profile's resume goes into the file chooser
+that control opens, which Playwright answers in place of any native
+dialog; the page's own pre-existing file input only when the click opens
+no chooser), falling back to "Without Resume" when no resume is on file.
+LinkedIn, Indeed and other third-party autofill, "Copy & Paste" and "Use
+My Last Application" are never chosen. With none of the allowed labels on
+the page, the job is parked with the options shown. A page that already
+has a form is not a chooser.
 WHY IT MATTERS: Jack's first GUI run parked Wayfair's Avature step 1 as
-"a page with no fields, no Next and no Submit"; it was this chooser.
+"a page with no fields, no Next and no Submit"; it was this chooser. His
+2026-10-29 run then looped on it: the file went into a hidden
+pre-existing input the page ignores, and the page never moved on; the
+control's own chooser is the one route the portal takes.
 """
 
 from __future__ import annotations
@@ -39,6 +44,8 @@ REFUSED = re.compile(r"linkedin|indeed|seek|glassdoor|copy\s*(&|and)\s*paste|pas
                      r"|previous application|autofill|auto-fill|import", re.I)
 
 _ATTR = "data-ja-choice"
+# How long the allowed control gets to open its file chooser after the click.
+FILE_CHOOSER_WAIT_MS = 4000
 
 # The visible controls that could be a way to apply, with their whole text.
 # Marks nothing; the texts come back for the allowlist compare and, when
@@ -111,11 +118,12 @@ def is_chooser(controls: list[tuple[int, str]]) -> bool:
 
 def choose(page: "Page", resume: Path | None, log: list[str]) -> str | None:
     """
-    Act on a chooser page: upload the resume through the page's file input
-    (or the file chooser the control opens, which Playwright answers in
-    place of any native dialog), or press the allowed control. Returns the
-    kind used, or None when the page is not a chooser. Raises ValueError,
-    with the options shown, when it is one and none is allowed.
+    Act on a chooser page: upload the resume through the file chooser the
+    allowed control opens (Playwright answers it in place of any native
+    dialog; the page's own file input only when the click opens none), or
+    press the allowed control. Returns the kind used, or None when the
+    page is not a chooser. Raises ValueError, with the options shown, when
+    it is one and none is allowed.
     """
     controls = options_shown(page)
     if not is_chooser(controls):
@@ -125,10 +133,10 @@ def choose(page: "Page", resume: Path | None, log: list[str]) -> str | None:
         shown = ", ".join(f"'{t}'" for _, t in controls[:8])
         raise ValueError(f"a choice of ways to apply, none of which the agent takes: {shown}")
     if kind == "from_device":
-        done = _upload(page, index, Path(resume))
-        if not done:
-            raise ValueError("the From Device option gave no file input to put the resume in")
-        log.append(f"chose '{text}' and put {Path(resume).name} in the page's file input")
+        route = _upload(page, index, Path(resume))
+        if route is None:
+            raise ValueError(f"the '{text}' option opened no file chooser and the page has no file input")
+        log.append(f"chose '{text}' and put {Path(resume).name} in {route}")
     else:
         if not page.evaluate(_MARK_JS, [index, _ATTR]):
             raise ValueError(f"couldn't mark the '{text}' control")
@@ -138,21 +146,43 @@ def choose(page: "Page", resume: Path | None, log: list[str]) -> str | None:
     return kind
 
 
-def _upload(page: "Page", index: int, resume: Path) -> bool:
-    """The page's own file input first; else the chooser the control opens."""
+def _upload(page: "Page", index: int, resume: Path) -> str | None:
+    """
+    The chooser the control opens first (Jack, 2026-10-29): the allowed
+    control is clicked under expect_file_chooser and the chooser is
+    answered with the resume. Only when the click went through and opened
+    no chooser, on a page still at the same address, does the resume go
+    into the page's own pre-existing file input (Avature ignores a file
+    set there; a portal whose control is a plain label for that input
+    does not). Returns where the file went, for the log, or None.
+    """
+    if not page.evaluate(_MARK_JS, [index, _ATTR]):
+        return None
     try:
+        here = page.url
+    except Exception:
+        return None
+    clicked = False
+    try:
+        with page.expect_file_chooser(timeout=FILE_CHOOSER_WAIT_MS) as fc:
+            page.locator(f"[{_ATTR}='1']").first.click(timeout=4000)
+            clicked = True
+        fc.value.set_files(str(resume))
+        return "the file chooser it opened"
+    except Exception:
+        if not clicked:
+            return None
+    try:
+        # A click that navigated instead may not have committed yet: the
+        # page is let settle before its address is compared, so the input
+        # of a page being left is never set.
+        browser_mod.settle(page, 300)
+        if page.url != here:
+            return None
         inputs = page.locator("input[type=file]")
         if inputs.count() >= 1:
             inputs.first.set_input_files(str(resume), timeout=15_000)
-            return True
+            return "the page's file input (the control opened no chooser)"
     except Exception:
         pass
-    try:
-        if not page.evaluate(_MARK_JS, [index, _ATTR]):
-            return False
-        with page.expect_file_chooser(timeout=4000) as fc:
-            page.locator(f"[{_ATTR}='1']").first.click(timeout=4000)
-        fc.value.set_files(str(resume))
-        return True
-    except Exception:
-        return False
+    return None

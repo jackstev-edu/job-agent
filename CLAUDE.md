@@ -75,9 +75,11 @@ run as `python apply.py <command>` (no make).
   as "ready" with the full-record verdict, nothing ticked or pressed
   (Jack, 2026-10-29). Caps: 25 pages, 60 minutes.
 - `agent/chooser.py` — "choose how to apply" pages: Workday's Apply
-  Manually, Avature's From Device (the resume through the page's file
-  input) or Without Resume, by whole label; LinkedIn, Indeed, paste and a
-  previous application never; nothing allowed parks with the options shown.
+  Manually, Avature's From Device (the resume through the file chooser
+  the control opens, answered by Playwright; the page's own file input
+  only when the click opens none: Jack, 2026-10-29) or Without Resume,
+  by whole label; LinkedIn, Indeed, paste and a previous application
+  never; nothing allowed parks with the options shown.
 - `agent/submit.py` — the only module that presses Submit: gate, the consent
   ticks the gate allows, gate again, Submit, the confirmation sentence;
   it ticks and presses only while the auto-submit callable it is given

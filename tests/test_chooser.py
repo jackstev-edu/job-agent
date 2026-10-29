@@ -48,6 +48,19 @@ AVATURE = f"""<!doctype html><html><head><title>Applying to Engineer | Acme</tit
 <input type="file" id="resumeFile" style="display:none" onchange="window.__files.push(this.files[0].name); location.href='/careers/Application?folderId=1&parsed=1'">
 </body></html>"""
 
+# Jack's 2026-10-29 run: the portal's hidden, pre-existing file input ignores
+# a file set on it; From Device opens its own chooser through a second
+# input, and only that input's change event moves the page to step 2.
+PICKER = f"""<!doctype html><html><head><title>Applying to Engineer | Acme</title></head><body>{CLICKS_JS}
+<h1>Choose an option to apply</h1>
+<a id="methodButton--later" href="/careers/Application?folderId=1">Without Resume</a>
+<a id="methodButton--file" href="#" onclick="const i = document.createElement('input'); i.type = 'file'; i.style.display = 'none';
+   i.onchange = () => {{ window.__files.push('picker:' + i.files[0].name); location.href = '/careers/Application?folderId=1&picked=1'; }};
+   document.body.appendChild(i); i.click(); return false;">From Device</a>
+<a id="methodButton--paste" href="#" onclick="location.href='/paste'; return false;">Copy &amp; Paste</a>
+<input type="file" id="resumeFile" style="display:none" onchange="window.__files.push('ignored:' + this.files[0].name)">
+</body></html>"""
+
 WORKDAY = f"""<!doctype html><html><head><title>Start Your Application - Acme</title></head><body>{CLICKS_JS}
 <h2>Start Your Application</h2>
 <a href="/apply/autofill">Autofill with Resume</a>
@@ -79,7 +92,7 @@ THANKS = "<!doctype html><html><head><title>Acme</title></head><body><h1>Thank y
 
 def _routes():
     site = {"/careers": AVATURE, "/careers/Application": FORM, "/workday": WORKDAY, "/ashby": ASHBY,
-            "/refused": ONLY_REFUSED, "/thanks": THANKS}
+            "/refused": ONLY_REFUSED, "/thanks": THANKS, "/picker": PICKER}
 
     def handle(route):
         path = route.request.url.split("avature.net", 1)[-1].split("?")[0]
@@ -115,7 +128,11 @@ def test_picking_follows_the_allowlist_and_never_a_refused_control():
     check.done()
 
 
-def test_avatures_from_device_puts_the_resume_in_the_pages_file_input():
+def test_avatures_from_device_puts_the_resume_in_the_chooser_the_control_opens():
+    # Since 2026-10-29 the allowed control is clicked first and the chooser
+    # it opens takes the file (here, through the page's own input, which
+    # the control clicks); the input is set directly only when the click
+    # opens no chooser.
     check = Checks()
     with mock_page(BLANK, _routes()) as page:
         page.goto(f"{HOST}/careers?folderId=1")
@@ -123,9 +140,64 @@ def test_avatures_from_device_puts_the_resume_in_the_pages_file_input():
         kind = chooser.choose(page, RESUME, log)
         check(kind == "from_device" and page.url.endswith("?folderId=1&parsed=1"),
               f"From Device: the resume went in and the form page followed ({kind}, {page.url})")
-        check(log == [f"chose 'From Device' and put {RESUME.name} in the page's file input"], f"the log ({log})")
+        check(log == [f"chose 'From Device' and put {RESUME.name} in the file chooser it opened"], f"the log ({log})")
         page.goto(f"{HOST}/careers?folderId=1")
-        check(page.evaluate("window.__clicks") == [], "the file input was used directly: no link clicked")
+        # The second entry is the page's own programmatic click on its input,
+        # made by the control's handler; the agent clicked the control only.
+        check(page.evaluate("window.__clicks") == ["From Device", "resumeFile"],
+              f"the From Device control was clicked, nothing else ({page.evaluate('window.__clicks')})")
+    check.done()
+
+
+def test_a_portal_that_ignores_its_hidden_input_takes_the_file_through_the_controls_chooser():
+    # Fails on 59e7533: the file went into the hidden pre-existing input,
+    # which ignores it, and step 2 never came (the wait below times out).
+    check = Checks()
+    with mock_page(BLANK, _routes()) as page:
+        page.goto(f"{HOST}/picker?folderId=1")
+        log: list = []
+        kind = chooser.choose(page, RESUME, log)
+        reached = True
+        try:
+            page.wait_for_url("**/careers/Application?folderId=1&picked=1", timeout=5000)
+        except Exception:
+            reached = False
+        check(kind == "from_device" and reached, f"the job reached step 2 ({kind}, {page.url})")
+        check(log == [f"chose 'From Device' and put {RESUME.name} in the file chooser it opened"], f"the log ({log})")
+        page.goto(f"{HOST}/picker?folderId=1")
+        # The empty entry is the page's own click on the input it created.
+        check(page.evaluate("window.__clicks") == ["From Device", ""],
+              f"only the From Device control was clicked ({page.evaluate('window.__clicks')})")
+    check.done()
+
+
+def test_a_control_that_opens_no_chooser_falls_back_to_the_pages_own_input():
+    # The fallback route, kept for a portal whose control is a plain label
+    # for its input: the click opens nothing, the page stays, the input
+    # gets the file. A click that opens nothing on a page that moved, or
+    # with no input, puts the file nowhere.
+    check = Checks()
+    with mock_page(BLANK, _routes()) as page:
+        page.goto(f"{HOST}/careers?folderId=1")
+        page.evaluate("() => { document.getElementById('methodButton--file').onclick = () => false; }")
+        log: list = []
+        with mock.patch.object(chooser, "FILE_CHOOSER_WAIT_MS", 300):
+            kind = chooser.choose(page, RESUME, log)
+        check(kind == "from_device" and page.url.endswith("?folderId=1&parsed=1"),
+              f"no chooser opened: the page's own input took the file and step 2 followed ({kind}, {page.url})")
+        check(log == [f"chose 'From Device' and put {RESUME.name} in the page's file input (the control opened no chooser)"],
+              f"the log says which route carried it ({log})")
+        page.goto(f"{HOST}/careers?folderId=1")
+        page.evaluate("() => { document.getElementById('methodButton--file').onclick = "
+                      "() => { location.href = '/thanks'; return false; }; }")
+        raised = None
+        try:
+            with mock.patch.object(chooser, "FILE_CHOOSER_WAIT_MS", 300):
+                chooser.choose(page, RESUME, log)
+        except ValueError as e:
+            raised = str(e)
+        check(raised is not None and "opened no file chooser" in raised,
+              f"a click that navigated instead is not followed by a set on whatever page came ({raised})")
     check.done()
 
 
