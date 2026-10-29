@@ -608,9 +608,10 @@ open once anything submits without Jack.
   decision 3 of 2026-10-27): the resume goes into a resume box that
   reads empty under the hold; one that holds a file is left alone.
   Residual for Jack (from the review of f1493d5): "reads empty" is the
-  native input's files. A portal that uploads on change and clears the
+  native input's files. If a portal uploads on change and clears the
   input, showing the attached file as a chip (Greenhouse's attach
-  widget, Workday's drop zone), reads empty, so a hold fill after a park
+  widget and Workday's drop zone may; unverified), it reads empty, so a
+  hold fill after a park
   where the wizard made no earlier upload would upload the resume again
   over the file Jack attached. Decide whether a visible file-name chip
   near the box should also hold it.
@@ -2878,3 +2879,10 @@ kept: the fixtures read the
 listener's global name only to keep the refocus armed through the
 agent's own clicks; the decisive assertion is the focus read before
 Jack's click.
+
+Commit 3f8174d (fold of item 3's review): VERDICT FLAG, 2 FLAGs. Folded
+in the next commit: the hold tests assert on the label the scan gave
+the held box (and the empty one), not the fixture's literal, so a
+re-scan that relabelled it could not pass vacuously; the MUST FIX
+residual says "if a portal ... clears the input" and marks the
+Greenhouse / Workday examples unverified.

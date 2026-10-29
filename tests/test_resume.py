@@ -450,9 +450,14 @@ def test_an_empty_resume_box_under_the_hold_still_gets_the_resume():
     cv = TEST_HOME / "hold-resume.pdf"; cv.write_bytes(b"%PDF-1.4 test")
     fill, names, fn, em, seen = _hold_fill_with_resume("/cv", cv)
     check(names == ["hold-resume.pdf"], f"the resume went into the empty box ({names})")
+    # The labels the scan gave the boxes, not the fixture's literals: a
+    # re-scan that relabelled the held box would otherwise pass vacuously
+    # (fold of 3f8174d's review).
+    labels = {f.get("name"): f.get("label") for f in (fill.fields if fill else [])}
     fn_ref = next((f["ref"] for f in (fill.fields if fill else []) if f.get("name") == "first_name"), None)
-    check(fill is not None and fn_ref in fill.held and "First Name" not in seen and "Email" in seen,
-          f"the held box is in `held` and reached no classifier call; the empty one did ({fill and fill.held}, {seen})")
+    check(fill is not None and fn_ref in fill.held and labels.get("first_name")
+          and labels["first_name"] not in seen and labels.get("email") in seen,
+          f"the held box is in `held` and reached no classifier call; the empty one did ({fill and fill.held}, {labels}, {seen})")
     check(fill is not None and fill.uploaded and list(fill.uploaded.values()) == [["hold-resume.pdf"]],
           f"the upload is in the fill's record ({fill and fill.uploaded})")
     check(fn == "Jacques" and em == "test@example.invalid",
@@ -470,7 +475,9 @@ def test_a_resume_box_that_already_holds_a_file_is_left_alone_under_the_hold():
     cv = TEST_HOME / "hold-resume.pdf"; cv.write_bytes(b"%PDF-1.4 test")
     own = TEST_HOME / "jacks-own.pdf"; own.write_bytes(b"%PDF-1.4 own")
     fill, names, fn, em, seen = _hold_fill_with_resume("/cv2", cv, before=lambda page: page.set_input_files("#cv", str(own)))
-    check("First Name" not in seen and "Email" in seen, f"the held box reached no classifier call ({seen})")
+    labels = {f.get("name"): f.get("label") for f in (fill.fields if fill else [])}
+    check(labels.get("first_name") and labels["first_name"] not in seen and labels.get("email") in seen,
+          f"the held box reached no classifier call ({labels}, {seen})")
     check(names == ["jacks-own.pdf"], f"the file already in the box stays ({names})")
     check(fill is not None and not fill.uploaded, f"nothing recorded as uploaded ({fill and fill.uploaded})")
     check(fill is not None and any(line.startswith("left as it is (holds a file, or couldn't be read): 'Resume'")
