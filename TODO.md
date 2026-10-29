@@ -596,6 +596,15 @@ open once anything submits without Jack.
   path holds one of its rows or the dropdown itself. See the round of
   2026-10-26, second, commit 1663f32's entry, and the round of
   2026-10-27, item 6.
+  Residual (from the review of 38ba5b4, accepted hostile-markup class):
+  a page that refocuses a dropdown-style element whose aria-controls /
+  aria-owns names a [role=listbox] wrapping the form, or that puts
+  role=combobox on a wrapper around the form, makes every click in the
+  form count that dropdown as reviewed. Page-authored ARIA on the focused
+  element is needed. One-line narrowing for the first shape: in ownRow,
+  require that the list does not contain the dropdown itself (a real
+  popup list never contains its own combobox). The wrapper-combobox
+  shape has no cheap fix without breaking the inner-box pattern.
 - Resume under the hold (2026-10-27, from the review of 89135f2): a
   fill under protect_held skips the resume upload (pipeline.fill_page),
   and the gate skips file fields, so a page reached after a "moved"
@@ -2886,3 +2895,13 @@ the held box (and the empty one), not the fixture's literal, so a
 re-scan that relabelled it could not pass vacuously; the MUST FIX
 residual says "if a portal ... clears the input" and marks the
 Greenhouse / Workday examples unverified.
+
+Commit 38ba5b4 (fold of item 6's review): VERDICT FLAG, 1 FLAG, 2
+minor. Logged, not folded: (1) the hostile-ARIA residual above (MUST
+FIX bullet; strictly narrower than 97acecf and f1493d5). (2) A combobox
+whose list is an unlinked sibling, or whose link names a wrapper while
+the inner listbox has no id, no longer gets the review mark from a row
+pick: it stays stopped and Jack pauses again (safe direction). (3) The
+other-dropdown negative's `by_label.get("Country") not in reviewed`
+would pass trivially with the label absent (the positive test proves
+it resolves), and it omits the "1 field(s) touched" detail check.
