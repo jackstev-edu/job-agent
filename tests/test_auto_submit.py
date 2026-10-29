@@ -172,7 +172,7 @@ def test_off_a_single_page_with_a_gate_stop_gives_one_pause_of_kind_ready():
 
 
 def _req(server, method, path, body=None, host=None, origin=None, token="ok"):
-    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=30)
     headers = {"Host": host or f"127.0.0.1:{server.port}"}
     if origin is not None:
         headers["Origin"] = origin

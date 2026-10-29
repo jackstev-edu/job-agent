@@ -110,6 +110,49 @@ def check_api_key() -> tuple[str, str]:
     return "ok", ""
 
 
+MODEL_ENV = "JOB_AGENT_MODEL"
+CLASSIFIER_MODEL_ENV = "JOB_AGENT_CLASSIFIER_MODEL"
+
+
+def check_models() -> list[tuple[str, str, str, str]]:
+    """
+    Do the two model IDs exist for this key? One `models.retrieve` call
+    per distinct ID, no completion, before the queue starts (Jack,
+    2026-10-29). Returns one (status, model_id, env_name, detail) per ID:
+      ok         the API knows the model
+      missing    a 404: the ID is wrong or retired; real jobs are refused
+                 (dry runs still run) until the env override names one
+                 that exists
+      unchecked  anything else (offline, an outage, a key the key check
+                 reports on): a warning, and the run goes on, as the key
+                 check does
+    The defaults are not changed here or anywhere.
+    """
+    wanted = [(MODEL, MODEL_ENV), (CLASSIFIER_MODEL, CLASSIFIER_MODEL_ENV)]
+    try:
+        import anthropic          # lazy — see the note in mapper.py
+    except ImportError:
+        return [("unchecked", m, env, "anthropic SDK not installed") for m, env in wanted]
+    try:
+        client = anthropic.Anthropic(max_retries=0, timeout=15.0)
+    except Exception as e:
+        return [("unchecked", m, env, f"{type(e).__name__}: {str(e)[:80]}") for m, env in wanted]
+    seen: dict[str, tuple[str, str]] = {}
+    out = []
+    for model_id, env in wanted:
+        if model_id not in seen:
+            try:
+                client.models.retrieve(model_id)
+                seen[model_id] = ("ok", "")
+            except anthropic.NotFoundError:
+                seen[model_id] = ("missing", "the API returned 404 for this model ID")
+            except Exception as e:
+                seen[model_id] = ("unchecked", f"{type(e).__name__}: {str(e)[:80]}")
+        status, detail = seen[model_id]
+        out.append((status, model_id, env, detail))
+    return out
+
+
 def ensure_dirs() -> None:
     for d in (STATE_DIR, CHROME_PROFILE_DIR, REPORTS_DIR, STATE_DIR / "documents"):
         d.mkdir(parents=True, exist_ok=True)

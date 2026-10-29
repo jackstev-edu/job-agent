@@ -1350,25 +1350,67 @@ def cmd_run(args) -> None:
         pass
 
 
-def _ready_to_fill(prof, force: bool, *, exit_on_key: bool = True) -> bool:
+def preflight_reason(prof, force: bool, *, exit_on_key: bool = True) -> str:
     """
-    The profile and the API key, checked once before anything is filled.
-    `run` exits on a bad key; the GUI (`exit_on_key=False`) keeps its
-    browser and page up and fails the job instead.
+    The profile, the API key and the two model IDs, checked once before
+    anything is filled (the model preflight: Jack, 2026-10-29). Returns
+    "" when real jobs may run, else the one line that says why, already
+    printed. `run` exits on a bad key or a missing model; the GUI
+    (`exit_on_key=False`) keeps its browser and page up and fails the
+    job instead, with that line in the page's notice. A model the API
+    answers 404 for refuses real jobs (dry runs never come here); a
+    network error or a 5xx is a warning and the run goes on, as the key
+    check does.
     """
     blocking = prof.audit()["required"]
     if blocking and not force:
-        print(f"{RED}{len(blocking)} required profile field(s) are blank.{OFF} "
-              f"Run `python apply.py check` first, or --force past this.")
-        return False
+        reason = (f"{len(blocking)} required profile field(s) are blank. "
+                  f"Run `python apply.py check` first, or --force past this.")
+        print(f"{RED}{reason}{OFF}")
+        return reason
     status, detail = config.check_api_key()
     if status in ("rejected", "missing"):
-        print(f"{RED}Anthropic API key {'rejected' if status == 'rejected' else 'not found'}"
-              f"{OFF} ({detail}). Set a new ANTHROPIC_API_KEY and try again.")
+        reason = (f"Anthropic API key {'rejected' if status == 'rejected' else 'not found'} "
+                  f"({detail}). Set a new ANTHROPIC_API_KEY and try again.")
+        print(f"{RED}{reason}{OFF}")
         if exit_on_key:
             sys.exit(1)
-        return False
-    return True
+        return reason
+    for status, model_id, env, detail in config.check_models():
+        if status == "missing":
+            reason = (f"Model '{model_id}' isn't available to this key (404). "
+                      f"Set {env} to a model you can use; dry runs still work.")
+            print(f"{RED}{reason}{OFF}")
+            if exit_on_key:
+                sys.exit(1)
+            return reason
+        if status == "unchecked":
+            print(f"{DIM}  couldn't check model '{model_id}' ({detail}); going on{OFF}")
+    return ""
+
+
+def _ready_to_fill(prof, force: bool, *, exit_on_key: bool = True) -> bool:
+    return preflight_reason(prof, force, exit_on_key=exit_on_key) == ""
+
+
+def checked_runner(state: "gui.State", args):
+    """
+    The GUI's runner: the preflight once per session, on the first real
+    job (a page of dry runs needs neither the profile nor the key nor a
+    model); a session the preflight refused fails every later real job
+    with the same line and keeps the browser and page up.
+    """
+    checked = {"reason": None}
+
+    def run_checked(ctx, url, prof, job_args, pauser, **kw):
+        if not job_args.dry and checked["reason"] is None:
+            checked["reason"] = preflight_reason(prof, bool(getattr(args, "force", False)), exit_on_key=False)
+            if checked["reason"]:
+                state.notice = checked["reason"]
+        if not job_args.dry and checked["reason"]:
+            return FAILED, checked["reason"]
+        return run_one(ctx, url, prof, job_args, pauser, **kw)
+    return run_checked
 
 
 # ---------------------------------------------------------------------------
@@ -1556,17 +1598,7 @@ def cmd_gui(args) -> None:
         with browser_mod.browser() as ctx:
             ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
             state.browser_open = True
-            # The profile and key are needed only once something is filled;
-            # a page of dry runs needs neither.
-            checked = {"ok": None}
-
-            def run_checked(ctx, url, prof, job_args, pauser, **kw):
-                if not job_args.dry and checked["ok"] is None:
-                    checked["ok"] = _ready_to_fill(prof, bool(args.force), exit_on_key=False)
-                if not job_args.dry and not checked["ok"]:
-                    return FAILED, "the profile isn't ready (see the terminal)"
-                return run_one(ctx, url, prof, job_args, pauser, **kw)
-            gui_loop(ctx, state, prof, args, pauser, run=run_checked)
+            gui_loop(ctx, state, prof, args, pauser, run=checked_runner(state, args))
             state.browser_open = False
     finally:
         server.stop()
