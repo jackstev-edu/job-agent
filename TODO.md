@@ -3061,3 +3061,131 @@ second run. The same test failed once for the main session earlier
 alongside two other pytest processes (the 30 s timeout of 17783c9 does
 not cover an abort). To watch; a retry of the one request on
 ConnectionAbortedError would close it.
+
+## Round of 2026-10-29, afternoon (the Avature chooser loop from Jack's live test)
+
+Jack's live test (auto-submit OFF): Greenhouse filled, parked READY, he
+pressed Submit, Continue marked it submitted by Jack (works; left as
+is). Avature's "Choose an option to apply" page looped for the whole
+60-minute cap: the chooser set the resume on a hidden pre-existing
+input the portal ignores, the page never changed, and the loop chose
+again every ~22 s, with the terminal and the row silent (job lines
+printed only at the end).
+
+Items: 1 the chooser clicks From Device under expect_file_chooser and
+answers the chooser (the page's own input only when the click opens
+none); 2 a no-progress guard after any chooser action, the same choice
+never made twice on an unchanged shape, a same-address step 2 counting
+as moved on (Jack's addition); 3 live progress, each job-log line
+printed as it lands and shown in the row, lines exactly as the log
+holds them (Jack's addition); 4 the four approved folds (the settle
+before the form-gone read, pause=None at every crash site, avature.net
+detected, the landing line); 5 tests, push, this record. The 2026-10-29
+brief's own bounds stand: no Workday work, the 13 MUST FIX items open.
+Reviewer outputs per commit follow.
+
+Commit 00b3a09 (item 1): VERDICT FLAG, 5 findings, none a stop-to-pass
+or safety issue; logged, not folded: (1) test quality: the "click
+navigated instead" case lands on a page with no file input, so the
+ValueError comes whether or not the same-address guard in
+chooser._upload exists; the guard is untested. Fix would be a
+navigation to a page that has a file input, asserting the error and an
+empty files list there. (2) Playwright intercepts a file chooser only
+while a filechooser listener is registered; once expect_file_chooser
+times out (FILE_CHOOSER_WAIT_MS) a chooser the control opens late (a
+slow handler, a modal first) opens the headed browser's native OS
+dialog while the fallback sets the pre-existing input underneath it.
+The old code had the same window on its fallback path; this commit
+makes the click the primary route on every From Device page. Fix would
+be page.on("filechooser") before the click, removed when _upload
+returns, answering the resume once. Decision for Jack (the item says
+"never a native dialog"; recommendation: fold next round). (3) The
+chooser page never increments pages_filled, so only the time cap
+bounds a chooser that does not move on: that is item 2, built in the
+next commit. (4) LOW: one reason string ("opened no file chooser and
+the page has no file input") covers three None paths of _upload (mark
+failed, click navigated away, no input); two park with a wrong reason.
+(5) LOW: tests/test_chooser.py's module docstring still says the resume
+goes into Avature's own file input. Verified by the reviewer: the
+click target is the same marked control the old fallback pressed;
+ALLOWED / REFUSED unchanged; no Submit, tick, filler.py change,
+password read or model input; the fixture holds no personal data.
+
+Commit 6d95f6e (item 2): VERDICT FLAG, 4 findings, none a safety
+issue; logged, not folded: (1) the same-address test
+(test_a_choice_that_shows_step_2_at_the_same_address_counts_as_moved_on)
+passes on the actual previous commit 00b3a09 (the chooser route already
+takes the file there, and the next pass fills the inline form); the
+commit message's "fails on 59e7533" names a commit two back. The main
+session ran the mutation check instead, as Jack's 2026-10-27 rule
+allows: with Wizard._moved forced to False the test fails ("chose 'From
+Device' but the page didn't move on"; mutant killed). The test's own
+comment still says 59e7533; correct it next round. (2) After the choice
+the no-progress check is one _moved call (a 1500 ms settle in choose
+plus 600 ms) and then a park: a portal whose upload parses for longer
+than ~2 s before drawing step 2 parks as "didn't move on" and then
+moves on; the old pass waited the 20 s form wait. Safe in direction
+(Continue finds the changed shape and rescans); fix would be to poll
+_moved with FORM_POLL_MS up to FORM_WAIT_S before raising. Decision for
+Jack (recommendation: poll, next round). (3) LOW: when read_shape
+returns None before the choice (mid-navigation) the repeat refusal is
+skipped and _moved(None) reads any readable page as moved, so the
+choice can be made again next pass with no park; the time cap bounds
+it. Fix would be to treat an unreadable "before" as not moved and park.
+(4) LOW: a page that toggles between two shapes on every choice at the
+same address with no fillable field reads as moved each time and is
+chosen again until the time cap; outside Jack's rule, which covers an
+unchanged shape only.
+
+Commit bc7343d (item 3): VERDICT FLAG, 3 findings, none a safety
+issue; logged, not folded: (1) test quality: no test exercises
+_Log._fire's except-and-pass (a hook that raises); fix would be one
+non-browser test with a raising hook, asserting the line is in the log
+and the outcome unchanged. (2) Cosmetic: take_resume does not clear
+`progress`, so a resumed row shows the park's last line (for a ready
+park: "ready: ...") as if current until the resumed run appends one;
+fix would be job.progress = "" in take_resume. (3) Scope note: _fire
+swallows every exception from the print path, an OSError on a closed
+stdout included, so a terminal that has gone away no longer surfaces as
+a job failure; consistent with the brief, logged so the change is
+known. Verified by the reviewer: no log line is altered or added to,
+`printed` advances only in _flush_log, the resume path can only print
+lines not yet shown, no log line carries a password or code value, the
+GUI renders progress as text and local-only.
+
+Commit 9e7bd72 (item 4): VERDICT FLAG, 3 low, none a safety issue;
+logged, not folded: (1) with avature detected by host,
+detect_with_method returns "host" for it, so gate enablement
+(portal_allowlisted: method "host" and the portal in the profile's
+autosubmit_portals) can read True for an Avature link once Jack lists
+"avature" there; before, Avature was generic/default and could never be
+allowlisted. Still behind the profile list, the switch and
+would_submit, so no narrowing; but outcome.detect_success has no
+Avature signature, so a confirmation there is only the generic
+sentence plus form-gone. Decision for Jack: keep Avature off the
+enablement path until a portal signature exists (recommendation: yes;
+do not list it in autosubmit_portals yet; the template comment could
+name it). (2) browser.settle suppresses only its networkidle wait; its
+wait_for_timeout is unwrapped, so _form_gone_since, exception-free
+before, now lets a tab closed between the loop's is_closed check and
+_after_ready propagate as a resume crash ("failed: TargetClosedError in
+_form_gone_since", no Continue) instead of the "closed" park, and every
+ready-row Continue waits up to 15 s for networkidle on a long-polling
+page before the 600 ms. Safe in direction; fix would be the settle
+under contextlib.suppress. (3) test quality: in the crash-after-pause
+test, "Continue is refused" also holds on bc7343d (request_continue
+already refuses any row that is not needs_you); the `pause is None`
+check is the one that fails there. Verified by the reviewer: the
+non-crash resume and run paths pass no `pause`, so a pause on_pause set
+survives them; a crash cannot leave a kept wizard behind a failed row;
+form_found is reported only by the dry-run branch, so the view's
+`is not None` is the right discriminator; the settle runs before the
+confirmation read; no Submit, tick, key press, password read, model
+call or page-text-as-instruction; no pattern narrowed; no personal
+data. Pre-existing and unchanged since eb644b4, noted: a run that
+raises after on_wait registered the job leaves the row needs_you while
+the tracker holds a failed row.
+
+Leftover reviewer worktrees under .claude/worktrees (from this and
+earlier rounds, each at an old commit, unlocked) are the harness's;
+none was touched this round.
