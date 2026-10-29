@@ -47,8 +47,9 @@ TOUCH_ATTR = "data-ja-touched"
 # pointer event the focused element gets it only when that element is a
 # dropdown-style control (an explicit combobox / listbox / option role, a
 # live aria-autocomplete, a select, or a box inside a [role=combobox])
-# AND the click lands on that dropdown or one of its rows ([role=option]
-# or [role=listbox]; Jack, 2026-10-27), never a plain box the agent's
+# AND the click lands on that dropdown or one of its own rows (a
+# [role=option] or [role=listbox] inside it, or in the list it names by
+# aria-controls / aria-owns; Jack, 2026-10-27), never a plain box the agent's
 # fill or the page left focused, and never a dropdown the page moved the
 # focus to when the click is elsewhere. In the wizard a mark waives a
 # stop, so it marks less; in follow mode a mark keeps a field from the
@@ -509,7 +510,8 @@ class FieldLedger:
 # the focus while you pick a row with the mouse), on every trusted event.
 # The same marks go on as REVIEW_ATTR for the wizard, except that on a
 # pointer event the focused element counts only when it is a
-# dropdown-style control. While the agent fills,
+# dropdown-style control and the click lands on it or one of its own
+# rows. While the agent fills,
 # what's typed in, pasted into or changed still gets WHILE_AGENT_ATTR, and
 # Backspace or Delete (which the agent never presses) counts as you. Each
 # touched form field's identity parts (tag, name, id, explicit label; never
@@ -624,9 +626,20 @@ _ACTIVITY_JS = r"""
       // after the pause's baseline must not have a click elsewhere count
       // it as reviewed. A row keeps the focus in the dropdown, so the row
       // is in the event's path while the dropdown is the active element.
+      // Its OWN rows only (fold of 97acecf's review): a row inside the
+      // dropdown, or in the list it names by aria-controls / aria-owns.
+      // A row of another dropdown, or a listbox wrapping the form, is not
+      // its row and counts for nothing.
       const own = picker ? (active.closest('[role=combobox]') || active) : null;
-      const onPicker = picker && path.some(n => n === active || n === own
-          || (n instanceof Element && n.matches('[role=option], [role=listbox]')));
+      const named = picker ? [active, own].flatMap(el => ((el.getAttribute('aria-controls') || '') + ' '
+          + (el.getAttribute('aria-owns') || '')).split(/\s+/)).filter(Boolean) : [];
+      const ownRow = n => {
+        if (!(n instanceof Element) || !n.matches('[role=option], [role=listbox]')) return false;
+        if (own.contains(n)) return true;
+        const list = n.closest('[role=listbox]') || n;
+        return !!list.id && named.includes(list.id);
+      };
+      const onPicker = picker && path.some(n => n === active || n === own || ownRow(n));
       mark(pointer && !onPicker ? targets : [...targets, active], R);
     }, true);
 }

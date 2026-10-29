@@ -774,18 +774,28 @@ def test_a_refocus_slower_than_the_settle_still_marks_nothing_at_jacks_click():
 COMBO2 = f"""<!doctype html><html><head><title>Engineer - Example Co</title></head><body>
 <h1>Step 2 of 3</h1><form id="f2">
 <label for="country">Country</label>
-<input id="country" name="country" role="combobox" aria-expanded="false" autocomplete="off">
+<input id="country" name="country" role="combobox" aria-controls="menu" aria-expanded="false" autocomplete="off">
 <ul id="menu" role="listbox" style="display:none"><li role="option">Canada</li><li role="option">Chile</li></ul>
 <label for="city">City</label><input id="city" name="city" required>
+<label for="colour">Favourite colour</label>
+<input id="colour" name="colour" role="combobox" aria-controls="colours" aria-expanded="false" autocomplete="off">
+<ul id="colours" role="listbox" style="display:none"><li id="blue" role="option">Blue</li></ul>
 <button type="button" onclick="location.href='/apply/3'">Next</button></form>
 <script>
 const menu = document.getElementById('menu'), country = document.getElementById('country');
-const show = () => {{ menu.style.display = ''; country.setAttribute('aria-expanded', 'true'); }};
+const show = () => {{ menu.style.display = ''; country.setAttribute('aria-expanded', 'true');
+  for (const li of menu.querySelectorAll('li')) li.style.display = ''; }};
+const colour = document.getElementById('colour'), colours = document.getElementById('colours');
+colour.addEventListener('click', () => {{ colours.style.display = ''; }});
 country.addEventListener('click', show); country.addEventListener('focus', show);
 country.addEventListener('input', () => {{ const q = country.value.toLowerCase();
   for (const li of menu.querySelectorAll('li')) li.style.display = li.textContent.toLowerCase().includes(q) ? '' : 'none'; }});
 for (const li of menu.querySelectorAll('li')) li.addEventListener('mousedown', e => {{ e.preventDefault();
   country.value = li.textContent; menu.style.display = 'none'; }});
+// The second dropdown's row keeps the focus where it is too (as a widget
+// that picks on mousedown does), so the Country box stays the active element.
+document.getElementById('blue').addEventListener('mousedown', e => {{ e.preventDefault();
+  colour.value = 'Blue'; colours.style.display = 'none'; }});
 // Every blur, until Jack's first click: the agent's own scan and fill blur
 // it too, and the refocus must still be live at the pause's baseline.
 country.addEventListener('blur', () => {{ if (!window.__jackActed) setTimeout(() => country.focus(), 400); }});
@@ -834,6 +844,34 @@ def test_a_dropdown_the_page_refocused_is_not_reviewed_by_a_click_elsewhere():
           f"the city is his, the refocused dropdown is not ({w.human_reviewed}, {by_label})")
     detail = next(e["detail"] for e in out.events if e["kind"] == "gate_pause")
     check(detail.startswith("1 field(s) touched by Jack"), f"one touch counted ({detail})")
+    check.done()
+
+
+def test_a_row_of_another_dropdown_never_counts_the_refocused_one():
+    # Fold of 97acecf's review: the row must be the focused dropdown's
+    # OWN. With the focus back on Country, Jack clicks a row of the
+    # Favourite colour dropdown (its mousedown keeps the focus where it
+    # is), then the City. Country is not his; the City is. On 97acecf
+    # any row in the click's path counted the focused dropdown.
+    from test_wizard import _country_mapper
+    check = Checks()
+    focus_at_click: list = []
+
+    def jack_picks_another_dropdowns_row_then_types_the_city(page, state, job_id):
+        page.wait_for_timeout(700)
+        focus_at_click.append(page.evaluate("document.activeElement && document.activeElement.id"))
+        page.evaluate("document.getElementById('colours').style.display = ''")   # the other list open, as a widget shows it
+        page.click("#blue")
+        focus_at_click.append(page.evaluate("document.activeElement && document.activeElement.id"))
+        page.click("#city")
+        page.keyboard.type("Springfield")
+    out, pauses, url, clicks, w = _drive(_combo_site(), "/apply", [jack_picks_another_dropdowns_row_then_types_the_city],
+                                          mapper=_country_mapper, max_pauses=1)
+    by_label = _refs_by_label(out)
+    check(focus_at_click == ["country", "country"],
+          f"Country held the focus before and after the other row's click ({focus_at_click})")
+    check(by_label.get("City") in w.human_reviewed and by_label.get("Country") not in w.human_reviewed,
+          f"the city is his, the refocused dropdown is not ({w.human_reviewed}, {by_label})")
     check.done()
 
 

@@ -687,7 +687,9 @@ def test_a_misaligned_radio_group_is_never_the_agents():
 
 def test_a_row_click_still_marks_the_focused_dropdown_but_a_click_marks_no_other_focused_box():
     # The wizard's review mark (REVIEW_ATTR, fix of cc17666's BLOCK): a
-    # mouse pick of a dropdown row while its combobox input holds the
+    # mouse pick of a row of the dropdown's own list (named by
+    # aria-controls, as a real combobox names it; Jack, 2026-10-27) while
+    # its combobox input holds the
     # focus marks the input; a click elsewhere while a plain box holds the
     # focus marks only what was clicked. Follow mode's TOUCH_ATTR still
     # marks the focused box. The first half passes on cc17666 too; the
@@ -697,8 +699,8 @@ def test_a_row_click_still_marks_the_focused_dropdown_but_a_click_marks_no_other
     html = TEST_HOME / "pointer-rule.html"
     html.write_text('''<!doctype html><html><body>
 <input id="plain" value="x"><input id="other" value="y">
-<label for="cb">Pick</label><input id="cb" role="combobox" aria-expanded="true" autocomplete="off">
-<ul role="listbox"><li id="row" role="option">Canada</li></ul></body></html>''', encoding="utf-8")
+<label for="cb">Pick</label><input id="cb" role="combobox" aria-controls="menu" aria-expanded="true" autocomplete="off">
+<ul id="menu" role="listbox"><li id="row" role="option">Canada</li></ul></body></html>''', encoding="utf-8")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
@@ -727,26 +729,31 @@ def test_the_review_mark_takes_a_focused_dropdown_only_from_a_click_on_it_or_its
     # aria-autocomplete, a select, a listbox, an option or a box inside a
     # [role=combobox]; never on Bootstrap's form-control box, an input
     # inside an Ant Design-style "...-control" wrapper, or one with
-    # aria-autocomplete="none". TOUCH_ATTR (follow mode) takes the
-    # focused element in every case. On f1493d5 the click elsewhere
-    # marked every dropdown-style element.
+    # aria-autocomplete="none"; and only when the row is the dropdown's
+    # OWN (inside it, or in the list it names by aria-controls): a row of
+    # another list marks nothing (fold of 97acecf's review). TOUCH_ATTR
+    # (follow mode) takes the focused element in every case. On f1493d5
+    # the click elsewhere marked every dropdown-style element; on 97acecf
+    # the other list's row did.
     from playwright.sync_api import sync_playwright
     check = Checks()
     html = TEST_HOME / "pointer-rule-branches.html"
     html.write_text('''<!doctype html><html><body>
-<input id="fc" class="form-control"><div class="ant-form-item-control"><input id="ant"></div>
-<input id="acnone" aria-autocomplete="none"><input id="aclist" aria-autocomplete="list">
-<input id="role" role="combobox"><select id="sel"><option>A</option></select>
-<div role="combobox"><input id="inner"></div>
-<div id="lb" role="listbox" tabindex="0">list</div><div id="op" role="option" tabindex="0">row</div>
+<input id="fc" class="form-control" aria-controls="rows"><div class="ant-form-item-control"><input id="ant" aria-controls="rows"></div>
+<input id="acnone" aria-autocomplete="none" aria-controls="rows"><input id="aclist" aria-autocomplete="list" aria-controls="rows">
+<input id="role" role="combobox" aria-controls="rows"><select id="sel" aria-controls="rows"><option>A</option></select>
+<div role="combobox" aria-controls="rows"><input id="inner"></div>
+<div id="lb" role="listbox" tabindex="0" aria-owns="rows">list</div><div id="op" role="option" tabindex="0" aria-controls="rows">row</div>
 <button id="away" type="button">elsewhere</button>
-<ul role="listbox"><li id="row" role="option">Canada</li></ul>
-<script>document.getElementById('row').addEventListener('mousedown', e => e.preventDefault());</script>
+<ul id="rows" role="listbox"><li id="row" role="option">Canada</li></ul>
+<ul id="others" role="listbox"><li id="otherrow" role="option">Chile</li></ul>
+<script>for (const id of ['row', 'otherrow']) document.getElementById(id).addEventListener('mousedown', e => e.preventDefault());</script>
 </body></html>''', encoding="utf-8")
     on_row = {"fc": False, "ant": False, "acnone": False, "aclist": True, "role": True, "sel": True,
               "inner": True, "lb": True, "op": True}
     got: dict = {}
     got_row: dict = {}
+    got_other: dict = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
@@ -774,6 +781,11 @@ def test_the_review_mark_takes_a_focused_dropdown_only_from_a_click_on_it_or_its
                 click("#row")                                    # the row keeps the focus where it was
                 focused = page.evaluate("document.activeElement && document.activeElement.id")
                 got_row[el_id] = page.evaluate(read, [el_id, ledger.REVIEW_ATTR, ledger.TOUCH_ATTR]) + [focused]
+                page.evaluate(clear, [ledger.REVIEW_ATTR, ledger.TOUCH_ATTR])
+                page.focus(f"#{el_id}")
+                click("#otherrow")                               # another list's row: not its own
+                focused = page.evaluate("document.activeElement && document.activeElement.id")
+                got_other[el_id] = page.evaluate(read, [el_id, ledger.REVIEW_ATTR, ledger.TOUCH_ATTR]) + [focused]
         finally:
             browser.close()
     for el_id, review in on_row.items():
@@ -781,8 +793,10 @@ def test_the_review_mark_takes_a_focused_dropdown_only_from_a_click_on_it_or_its
         check(got[el_id][1] is True, f"#{el_id}: follow mode's touch mark still taken ({got[el_id]})")
         check(got[el_id][2] is False, f"#{el_id}: an untrusted event marks nothing ({got[el_id]})")
         check(got_row[el_id][2] == el_id, f"#{el_id}: the row click left the focus on it ({got_row[el_id]})")
-        check(got_row[el_id][0] is review, f"#{el_id}: a click on a row: review mark {review} ({got_row[el_id]})")
+        check(got_row[el_id][0] is review, f"#{el_id}: a click on its own row: review mark {review} ({got_row[el_id]})")
         check(got_row[el_id][1] is True, f"#{el_id}: follow mode's touch mark on a row click ({got_row[el_id]})")
+        check(got_other[el_id][2] == el_id and got_other[el_id][0] is False and got_other[el_id][1] is True,
+              f"#{el_id}: a click on another list's row marks it for the wizard never, for follow mode still ({got_other[el_id]})")
     check.done()
 
 

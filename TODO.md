@@ -2856,3 +2856,25 @@ baseline in the record (safe direction; the park message doesn't say the
 resume went in); the left-alone path leaves `uploaded` as {} so a later
 page's resume box still gets the resume (pre-existing for the old skip
 path).
+
+Commit 97acecf (item 6): VERDICT FLAG, 1 FLAG, 1 minor. Folded in the
+next commit: the row in the click's path must be the focused
+dropdown's OWN (inside it, or in the list it names by aria-controls /
+aria-owns); any [role=option] / [role=listbox] in the path counted
+before, so a row of another dropdown, a listbox wrapping the form or an
+intercepting option would have counted the refocused dropdown (a
+strict subset of f1493d5's behaviour, and the hostile shapes are the
+accepted class, but the other-dropdown case needs no hostility and is
+against Jack's "one of its rows"). The block comment above the listener
+names the click condition. Tests: the branch test's own-row phase uses
+lists the elements name (aria-controls / aria-owns) and a new phase
+clicks another list's row (fails on 97acecf for the six dropdown-style
+elements); a wizard negative where Jack clicks a row of a second
+dropdown while the page has refocused the first (fails on 97acecf: the
+first was counted). The older row-pick guard's fixture now links its
+list to the combobox by aria-controls, as a real combobox does (it
+encoded the looser rule and failed under ownership). Reviewer's note
+kept: the fixtures read the
+listener's global name only to keep the refocus armed through the
+agent's own clicks; the decisive assertion is the focus read before
+Jack's click.
