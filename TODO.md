@@ -3043,3 +3043,21 @@ sentence (an applications dashboard) counts as this job's. (6) LOW,
 test quality: the two-job prose test never asserts that B's scan
 staled A's refs. (7) The empty-ref test's third check would also fail
 on cacfd8a by TypeError; its first check fails behaviourally.
+
+Commit facea86 (the TODO log of d583f42's review): VERDICT FLAG, 3 low,
+records only; logged: (1) finding 2 of the d583f42 entry misstates the
+ready path's condition: there the never-gone branch is the park's SHAPE
+(no visible field on the page at the park), not the record; the record
+condition (empty refs) is the agent-submit path's. A review-only page
+meets both, so the example and consequences stand. (2) Finding 4
+overstates the residual: an overlay that leaves the form in layout
+keeps every field in the shape; only removing the form or display:none
+defeats the check. (3) Flaky test, not a defect:
+tests/test_auto_submit.py::test_the_endpoint_refuses_a_missing_token_foreign_origin_or_wrong_host
+failed once in the reviewer's non-browser run with ConnectionAbortedError
+(WinError 10053) in http.client's recv on the GUI server's loopback
+socket, under the concurrent full-suite load; it passed alone and on a
+second run. The same test failed once for the main session earlier
+alongside two other pytest processes (the 30 s timeout of 17783c9 does
+not cover an abort). To watch; a retry of the one request on
+ConnectionAbortedError would close it.
