@@ -176,7 +176,7 @@ def test_the_wizard_takes_the_chooser_and_goes_on_to_the_form():
         pauser = pause.GuiPauser(notify_fn=lambda t, b, echo=print: None, echo=lambda *a, **k: None)
         w = wizard.Wizard(page, _profile(), url=f"{HOST}/careers?folderId=1", portal="generic", portal_method="default",
                           company="Acme", role="Engineer", resume=None, posting_text="", pauser=pauser,
-                          echo=lambda *a, **k: None)
+                          echo=lambda *a, **k: None, auto_submit=lambda: True)   # the ON path, as on f147f5c
         with mock.patch("agent.classify.classify_fields", classify_by_label), \
                 mock.patch("agent.mapper.map_fields", map_from_profile), redirect_stdout(io.StringIO()):
             out = w.run()

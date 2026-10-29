@@ -245,7 +245,8 @@ def _gui_pauser():
 def _wizard(page, url, pauser):
     return wizard.Wizard(page, _profile(), url=url, portal="generic", portal_method="default",
                          company="Example Co", role="Engineer", resume=None, posting_text="",
-                         pauser=pauser, echo=lambda *a, **k: None)
+                         pauser=pauser, echo=lambda *a, **k: None,
+                         auto_submit=lambda: True)          # the ON path, as on f147f5c
 
 
 def test_google_is_pressed_ahead_of_the_password_flow():
