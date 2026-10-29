@@ -20,6 +20,7 @@ import re
 import unicodedata
 import sys
 import threading
+import traceback
 import time
 from pathlib import Path
 
@@ -1088,6 +1089,33 @@ def _park(url: str, reason: str, *, company: str = "", role: str = "", ats: str 
     tracker.record(url, company=company, role=role, ats=ats, status=status, notes=reason)
 
 
+def failure_line(e: BaseException) -> str:
+    """
+    The row for a crash: "failed: <ExceptionType> in <function>", the type
+    and the name of the innermost frame of this repo's own code (agent/ or
+    apply.py) it passed through, never the message (a Playwright error
+    can carry page text) (Jack, 2026-10-29).
+    """
+    where = "unknown"
+    for frame in reversed(traceback.extract_tb(getattr(e, "__traceback__", None)) or []):
+        try:
+            rel = Path(frame.filename).resolve().relative_to(config.ROOT)
+        except (ValueError, OSError):
+            continue
+        if rel.parts and (rel.parts[0] == "agent" or rel.name == "apply.py"):
+            where = frame.name
+            break
+    return f"failed: {type(e).__name__} in {where}"
+
+
+def _park_failed(url: str, reason: str) -> None:
+    """A failed row in the tracker; a tracker that itself fails must not take the queue down."""
+    try:
+        _park(url, reason, status=FAILED)
+    except Exception as e:
+        print(f"{DIM}  couldn't log the failure ({type(e).__name__}){OFF}")
+
+
 def dry_report(landing: "intake.Landing", ats: str, role: str = "", company: str = "") -> tuple[str, bool, int]:
     """
     What a dry run says about a link: the final address, the portal, the
@@ -1334,8 +1362,8 @@ def cmd_run(args) -> None:
                 status, reason = run_one(ctx, url, prof, args, pauser,
                                          auto_submit=lambda: bool(getattr(args, "auto_submit", False)))
             except Exception as e:
-                status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
-                _park(url, reason, status=FAILED)
+                status, reason = FAILED, failure_line(e)
+                _park_failed(url, reason)
             colour = (GREEN if status == "submitted" else AMBER if status == NEEDS_YOU
                       else DIM if status == DRY else RED)
             print(f"  {colour}{status}{OFF} {DIM}{reason if status != DRY else ''}{OFF}")
@@ -1460,8 +1488,11 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
                     wiz.continue_from(info), finish,
                     on_wait=lambda w, f, j=job_id: waiting.__setitem__(j, (w, f)))
             except Exception as e:
-                status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
-                _park(finish["url"], reason, status=FAILED)
+                # A crash on resume: a failed row with the type and the
+                # function only, the tab left as it is, the queue going on
+                # (Jack, 2026-10-29).
+                status, reason = FAILED, failure_line(e)
+                _park_failed(finish["url"], reason)
             state.update(job_id, status=status, reason=reason)
             last_busy = clock()
         job = state.next_queued()
@@ -1471,7 +1502,11 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
             time.sleep(GUI_POLL_S)
             continue
         last_busy = clock()
-        existing = tracker.find(job.url)
+        try:
+            existing = tracker.find(job.url)
+        except Exception as e:
+            state.update(job.id, status=FAILED, reason=failure_line(e))
+            continue
         if (existing and not job.dry and not getattr(args, "force", False)
                 and existing["status"] not in (NEEDS_YOU, "draft")):
             # As `run` does: a link already sent isn't applied to twice.
@@ -1493,9 +1528,12 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
                 on_wait=lambda w, f, j=job: waiting.__setitem__(j.id, (w, f)),
                 auto_submit=state.auto_submit_on)
         except Exception as e:
-            status, reason = FAILED, f"{type(e).__name__}: {str(e)[:120]}"
+            # A crash anywhere in the job (intake, accounts, the wizard):
+            # a failed row with the type and the function only, the tab
+            # left open, the queue going on (Jack, 2026-10-29).
+            status, reason = FAILED, failure_line(e)
             if not job.dry:
-                _park(job.url, reason, status=FAILED)
+                _park_failed(job.url, reason)
         if job.id not in waiting:
             state.update(job.id, status=status, reason=reason)
         last_busy = clock()

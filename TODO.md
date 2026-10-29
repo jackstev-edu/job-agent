@@ -2960,3 +2960,20 @@ of the reviewer wording is the main session's quotation of Jack's brief
 (the brief itself is not in the repo); accepted as the recorded
 approval. Until Jack answers item (2) of 3efc5f6's log, the reviewer
 reports a filler.py change that weakens a check under category 2.
+
+Commit cacfd8a (item 1, the auto-submit switch): review pending at the
+time of this note; its output is logged below when it lands.
+
+Commit 17783c9 (item 2, model preflight): VERDICT FLAG, 3 FLAGs, none
+a safety issue; logged, not folded: (1) the `run` path (exit_on_key
+True, a missing model → sys.exit(1)) has no test; the three tests use
+exit_on_key=False. (2) The loopback request timeout in
+tests/test_auto_submit.py went from 5 s to 30 s for one unreproduced
+failure of the endpoint test (seen once in a non-browser run made
+alongside two other pytest processes; six reruns and three full
+non-browser runs passed); the reviewer would revert it until it
+reproduces. (3) state.notice is one string: the Google-login tab notice
+overwrites the preflight banner on the page; every later real job still
+fails with the banner as its reason. Noted: a 404 from a wrong
+ANTHROPIC_BASE_URL path also refuses real jobs (false-positive
+direction; the banner's wording would mislead there).
