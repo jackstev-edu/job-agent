@@ -3189,3 +3189,171 @@ the tracker holds a failed row.
 Leftover reviewer worktrees under .claude/worktrees (from this and
 earlier rounds, each at an old commit, unlocked) are the harness's;
 none was touched this round.
+
+## Round of 2026-10-31 (decisions A and B: pick up from the page shown, overrides recorded, suggestions Jack approves)
+
+Jack's live Avature test (2026-10-29 evening, auto-submit OFF): step 2
+filled badly (dates not_taken, experience entries mixed), he fixed the
+page by hand and pressed the page's own Continue to step 3, and every
+GUI Continue re-gated step 2's old record while the tab showed step 3;
+the GUI also offered approve ticks showing "null". His decisions A and B
+are in CLAUDE.md in his words, with his 2026-10-31 answers.
+
+Items: 1 Continue picks up from whatever page the tab shows (0b81c4e);
+2 five small fixes (9ccf258); 3 overrides recorded through a watch on
+the paused page (2c42879); 4 suggestions Jack approves with one click
+(5737dfd, with the fold 66edf15 of its two safety-direction findings);
+5 this record. Pushed after each item's review. Reviewer outputs per
+commit follow; all FLAG; only item 4's two safety-direction findings
+were folded.
+
+Commit 0b81c4e (item 1): VERDICT FLAG, 3 low; logged, not folded: (1)
+the "moved" pause's strict confirmation check runs only on the GUI
+resume path; the terminal path (Enter after the page moved on) still
+only holds and rescans, so a thank-you page there parks "no fields, no
+Next and no Submit" instead of ending as submitted by Jack (Jack's
+wording covers Continue). Fix would be the same _pick_up call at the
+terminal's moved branch. (2) The gate / final pause's "shape" is read
+with no settle, while _moved settles 600 ms before the resume-time
+read; a shape read mid-render (a validation message adding or removing
+a control) reads as "changed" on Continue and the fill, approvals and
+waivers are dropped for a rescan under the hold (stop direction; the
+same pattern as park_for_continue's read). Fix would be a 600 ms settle
+before each read_shape at a pause. (3) _Finished returns from run()
+without adding the pass's time to active_s; harmless since the job
+ends. Noted by the reviewer: the fails-on-07b3c62 and mutation claims
+are consistent with the code by reading; its own changed-file run was
+cut short at 46 passes with no failure (the main session's run: 6
+passed in tests/test_pick_up.py, 93 passed across the resume, wizard,
+auto-submit and pick-up files).
+
+Commit 9ccf258 (item 2): VERDICT FLAG, 2 low; logged, not folded: (1)
+test quality: in the late-chooser test the "page's own input was left
+alone" check reads window.__files after a goto, and the fixture resets
+it on every load, so that check can never fail; the log-line check
+carries the claim. Fix: persist __files through sessionStorage as
+__clicks is. (2) chooser._Answer sets `answered` before set_files and
+suppresses its failure, so a chooser that opened but could not take the
+file makes _upload report "the file chooser it opened" and the job then
+parks "didn't move on" with a log line claiming an upload that did not
+happen (no safety direction). Fix: set `answered` after set_files
+returns, a separate `failed` flag, and None from _upload on a failed
+answer.
+
+Commit 2c42879 (item 3): VERDICT FLAG, 5 low; logged, not folded: (1)
+every _pause with a fill builds a new Watch, each with its own
+expose_binding and listener pair; a ready row Jack presses Continue on
+without a confirmation re-pauses and adds one per Continue (resource
+growth only). Fix: one Watch per page across re-pauses, or a disarmed
+flag. (2) A ready row resumed with no confirmation and no page change
+re-pauses with the same fill.snapshot as baseline, so a change Jack
+made before his first Continue is logged again on every later Continue
+(duplicate rows; learn's count inflates, postings does not). Fix: carry
+the logged read forward as the next baseline. (3) A box the agent
+planned nothing for that the portal prefilled and Jack then changed is
+logged as `overwrote` with the portal's value as agent_value, where the
+`fill` path logs `filled_blank` with None. Fix: agent_value None when
+planned is empty and there is no filled result. (4) poll_watch runs the
+data-ja-ref presence probe on the paused tab whatever host it shows
+now, Google's included (nothing is read there in practice: no ref is
+present on Google's host, so _SNAPSHOT_JS never runs). Fix: return
+early on google.is_google_host, and in the terminal `until` wrapper.
+Recommendation: fold next round. (5) Negative tests missing: a box Jack
+cleared produces no row; a partly read radio group is listed as unread.
+Verified by the reviewer: no model or network call in corrections.py;
+both read routes go through readable_refs and _SNAPSHOT_JS (nothing
+while a password box is in the document); values nulled unless both
+layers agreed the field was ordinary; the gate's record untouched.
+
+Commit 5737dfd (item 4): VERDICT FLAG, 12 findings; two folded in
+66edf15 as safety-direction (an alias to a true / false line could plan
+a checkbox tick through filler.py's checkbox path; a substring or
+bool_prefix fit with confidence high passed the gate on an ordinary
+dropdown), with the alias key's normalisation (NFKC, casefold, collapsed
+whitespace, one trailing star) and the CLAUDE.md wording ("autofill",
+not "model") in the same fold. Logged, not folded: (4) a value written
+as a plain scalar by ruamel (YAML 1.2) reloads under PyYAML (1.1) as a
+bool for "Yes" / "No" / "On" / "Off" / "y" / "n", so the line's type
+changes and the suggestion stays listed; fix would be a quoted scalar
+string. (5) approve._set would overwrite a whole section or list entry
+if a suggestion line named one (today's lines are leaves); fix: refuse
+when the node at the last part is a dict or list. (6) The stamp check
+and the write are not under one lock: two Apply clicks that both read
+the stamp before either writes both pass and the second drops the
+first line (narrow; backup kept); fix: a write lock from the stamp
+check through the atomic write. (7) "A job already running keeps its
+profile" overstates: the wizard reloads the profile at the end of
+every pause, so a waiting job Jack continues after an Apply fills its
+next page from the new file (safe direction; CLAUDE.md now says so).
+(8) CLAUDE.md's hunk also added the corrections.py bullet that belongs
+to item 3 (doc only). (9) A sensitive suggestion's id has no value, so
+one Dismiss hides every future "edit by hand" note for that line, not
+"for the same value"; decision for Jack. (10) learn.SENSITIVE_PREFIXES
+lacks "per_company." and "work_history." where approve adds
+"per_company." only (cosmetic today: no values are logged for those).
+(11) test quality: the "no EEO value in /state" check was vacuous
+(fixed in the fold with a sentinel-carrying row); no test covered the
+checkbox / bool / substring alias cases (added in the fold). (12) Every
+Apply leaves profile.yaml.bak-<stamp> beside the profile with no
+pruning; keep the last N or say so. Verified by the reviewer: no path
+presses Submit or ticks a consent box; filler.py untouched; the model
+is never consulted by learn / approve / gui; alias answers come only
+from fact-section lines after decide returned "autofill"; a sensitive
+field answered by source "alias" would still stop at the gate; the
+routes sit behind Host, Origin and token; the panel renders text nodes.
+
+Commit 66edf15 (fold of 5737dfd's review): VERDICT FLAG, 3 low and
+one info, records only (a fold commit's non-safety FLAGs are logged,
+never folded): (1) the "substring guess" case never exercises the new
+fit branch: "United States" against ["Australia", "Austria"] fits
+neither way on either commit; fix: an option that contains the value
+("United States of America") asserted not planned. (2) The true /
+false-line case rests on a silent str.replace of the template's exact
+`employed:` line; fix: assert prof.get("current_status.employed") is
+True after the load. (3) At 66edf15 TODO had no entry for the round
+yet (this entry is it). Info: alias_key no longer strips a trailing ":"
+or "?" as learn._norm_label did, so an alias written by 5737dfd the
+same day for a label ending that way stops matching (stop direction;
+re-approve it from the panel). Verified by the reviewer: the checkbox
+refusal covers the filler's one tick path; the bool exclusion runs
+before the fit; "exact" compares the page option to Jack's own value
+only.
+
+Observed, pre-existing (confirmed on 07b3c62): running
+tests/test_auto_submit.py in the same pytest process AFTER
+tests/test_resume.py fails
+test_switch_off_parks_ready_with_nothing_pressed_and_a_gate_runs_row
+(both use the /single address; the tracker is shared across the
+process, so the job is skipped as "already logged"). Alphabetical order
+(the full suite) does not hit it. tests/test_suggestions.py's request
+helper retries once on the loopback ConnectionAbortedError (WinError
+10053) logged in the 2026-10-29 round; it was seen once this round.
+
+Decisions for Jack (2026-10-31):
+- Item 1, decision 5 in practice: after a pick-up, the dropped page's
+  fill-time verdict stands in the full record, so the ready row (switch
+  OFF) says "the gate would stop: 'City': required, but empty" for a
+  box he filled by hand before moving on, and with the switch ON the
+  final page pauses on it. The override watch (item 3) now holds the
+  read that shows his value there. Counting that read as his review
+  (so the full-record gate stops neither on "left blank" nor on
+  "required, but empty" for a box the watch saw him fill) would be a
+  check failing toward a pass and needs his word. Recommendation: not
+  yet; with the switch OFF it is one line of reason text and he presses
+  Submit himself.
+- Fold reviewer finding (4) of 2c42879 (no page call on Google's host
+  from the watch) next round: recommendation yes, one line each in
+  poll_watch and the terminal wrapper.
+- Fold reviewer finding (2) of 9ccf258 (a failed chooser answer logged
+  as an upload): recommendation yes, next round.
+- The terminal (`run`) keeps the old resume behaviour after a moved
+  pause (reviewer finding 1 of 0b81c4e): recommendation fold next round
+  for consistency; Jack's wording covered Continue.
+- A sensitive ("edit this line by hand") suggestion has no value, so
+  one Dismiss hides every later note for that line (reviewer finding 9
+  of 5737dfd). Recommendation: keep it (the note is a reminder, not a
+  change; `apply.py learn` still lists the line), and say so in the
+  panel text next round.
+- The two test-quality findings on the fold (the substring case and the
+  bool-line case): recommendation, fix both next round in one test
+  commit.
