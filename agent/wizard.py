@@ -18,7 +18,11 @@ is skipped, the gate decides on the full record, nothing is ticked or
 pressed, and the job parks as "ready" for Jack to press Submit himself;
 a job parked ready once never auto-submits again. In the terminal a pause blocks; in
 GUI mode it is deferred: the wizard keeps its place, returns "waiting",
-and `resume` picks up where it stopped when Jack presses Continue. Caps:
+and `resume` picks up where it stopped when Jack presses Continue: on the
+same page, where it stopped; on a page whose shape changed under the
+pause, from the page the tab shows (decision A, Jack, 2026-10-29
+evening: the fill in hand is dropped, a confirmation ends the job as
+submitted by him, anything else is scanned afresh under the hold). Caps:
 25 pages, 60 minutes of the agent's own time (waiting doesn't count).
 WHY IT MATTERS: This is the one place Next is pressed and the order of
 every check is decided. Nothing here submits; submit.py does, after the
@@ -214,6 +218,14 @@ def _same(a, b) -> bool:
     """The same text once whitespace is collapsed (what filler.py counts as filled)."""
     norm = lambda v: re.sub(r"\s+", " ", str("" if v in (None, False) else v)).strip()
     return norm(a) == norm(b)
+
+
+class _Finished(Exception):
+    """The job ended inside a resume (a confirmation seen on a page that changed under a pause)."""
+
+    def __init__(self, outcome: "Outcome"):
+        super().__init__(outcome.reason)
+        self.outcome = outcome
 
 
 class _Parked(Exception):
@@ -690,7 +702,8 @@ class Wizard:
                           prompt="Press Enter when you've answered: ",
                           fields=self._stop_fields(fill, result),
                           extra={"fill": fill, "page_events": page_events or [],
-                                 "marked_before": marked_before})
+                                 "marked_before": marked_before,
+                                 "shape": follow.read_shape(self.page)})
         if how != pause_mod.ANSWERED:
             self.out.events.append({"kind": "gate_pause", "detail": how, "handled": None})
             self.out.gate_result = result
@@ -711,6 +724,8 @@ class Wizard:
         self._tick = self.clock()
         try:
             return self._loop()
+        except _Finished as e:
+            return e.outcome
         except _Parked as e:
             if getattr(self.pauser, "deferring", False):
                 return self.park_for_continue(str(e), after_fill=e.after_fill,
@@ -887,6 +902,65 @@ class Wizard:
         self.out.log.append(f"re-scanned after other jobs ran: {len(pairs)} of {len(fill.fields)} "
                             f"fields matched")
 
+    # -- Continue picks up from the page the tab shows (Jack, 2026-10-29 evening) --
+    def _changed_since(self, pending: dict) -> bool:
+        """Does the tab show another shape than the paused page's (address or fields, after a settle)? Unreadable then or now: changed."""
+        return pending.get("shape") is None or self._moved(pending["shape"])
+
+    def _no_fields_now(self) -> bool | None:
+        """Does the page show no fillable control now (the form wait's own probe)? None if it can't be read."""
+        try:
+            return not bool(self.page.evaluate(_HAS_FIELDS_JS))
+        except Exception:
+            return None
+
+    def _confirmed_strict(self, shape, refs: list[str]) -> tuple[bool, dict]:
+        """
+        The read-only confirmation check for a page that changed under a
+        pause other than ready (Jack, 2026-10-31): the portal's signature
+        counts; the generic sentence counts only with the form of the
+        paused shape gone AND no fillable field on the page now, so a
+        step whose prose says "received" beside its boxes is filled,
+        never marked submitted. The ready park keeps its own check
+        (_after_ready).
+        """
+        confirmed, evidence = submit_mod.confirmation(
+            self.page, portal=self.portal, portal_method=self.portal_method, start_url=self.url,
+            refs=[r for r in refs if extract.is_current(r)], form_gone=self._form_gone_since(shape))
+        by_signature = evidence.get("portal_signal") == "match"
+        by_sentence = (bool(evidence.get("generic_text")) and bool(evidence.get("form_gone"))
+                       and self._no_fields_now() is True)
+        return (confirmed and (by_signature or by_sentence)), evidence
+
+    def _pick_up(self, pending: dict, info: dict, *, what: str) -> None:
+        """
+        A pause's page changed before Jack pressed Continue (decision A,
+        2026-10-29 evening): the fill in hand is dropped with its
+        resume-time read, GUI approvals and review waivers (the fill-time
+        read-backs stay in the record, as every earlier page's do: Jack,
+        2026-10-31), nothing is remapped or re-gated, and the page shown
+        is taken from the top. A confirmation (the strict check) ends the
+        job as submitted by Jack, with the full record's verdict for its
+        gate_runs row; otherwise the loop runs afresh under the hold (a box
+        holding a value is never typed over, never sent to a model, never
+        counted as his; the gate judges it).
+        """
+        fill = pending.get("fill")
+        info.pop("approved", None)
+        self.out.log.append(f"the page changed since the {what}: picked up from the page shown")
+        refs = [r for f in (fill.fields if fill is not None else []) for r in (f.get("option_refs") or [f.get("ref")]) if r]
+        confirmed, evidence = self._confirmed_strict(pending.get("shape"), refs)
+        if confirmed:
+            record = self._record(self.out.steps, self.out.events, wizard=True)
+            result = gate.decide(record, self.prof, agent_submissions_today=self.agent_submissions_today)
+            self.out.record, self.out.gate_result, self.out.evidence = record, result, evidence
+            self.out.events.append({"kind": "confirmation", "detail": f"seen after a {what}", "handled": "jack"})
+            self.out.log.append(f"{READY_SUBMITTED} (not his answer; correct it with apply.py status)")
+            self.out.status, self.out.reason, self.out.submitted_by = "submitted", READY_SUBMITTED, "jack"
+            self.out.wizard = None
+            raise _Finished(self.out)
+        self._protect_held = True
+
     def _resume_fill(self, pending: dict, info: dict) -> tuple:
         """
         Where a pause that held a fill resumes. The page was filled before
@@ -895,18 +969,15 @@ class Wizard:
         goes back to Next / Submit for that fill, never a second fill of
         it, its events riding along for a later park. If Jack moved the
         page on, or its shape couldn't be read then or now, the fill is
-        not vouched for: the page is scanned afresh, and that scan leaves
-        every box that holds a value alone (protect_held: never typed
-        over, never sent to a model, never counted as his; the gate
-        judges it as any other box). Returns (fill or None, skip_fill,
-        carried events).
+        not vouched for (_pick_up): a confirmation ends the job, or the
+        page is scanned afresh under the hold. Returns (fill or None,
+        skip_fill, carried events).
         """
         fill = pending.get("fill")
         if fill is None:
             return None, False, []
-        if pending.get("shape") is None or self._moved(pending["shape"]):
-            self.out.log.append("the page changed since the park: scanned afresh")
-            self._protect_held = True
+        if self._changed_since(pending):
+            self._pick_up(pending, info, what=f"{pending.get('kind')} pause")
             return None, False, []
         # The same page, judged again: no fresh scan follows, so a hold
         # ordered earlier (a CAPTCHA pass) must not reach the next page.
@@ -974,24 +1045,33 @@ class Wizard:
                     self._pause("moved", pending["body"], prompt="Press Enter when it has moved on: ",
                                 until=lambda: self._moved(pending["before"]),
                                 extra={"before": pending["before"], "body": pending["body"]})
-                # Jack moved the page on himself and may have typed on the
-                # page it shows now: the next fill leaves every box that
+                # Jack moved the page on himself: a confirmation ends the
+                # job (the strict check), else he may have typed on the
+                # page it shows now, so the next fill leaves every box that
                 # holds a value alone, as after a park (Jack, 2026-10-26).
+                self._pick_up({"shape": pending["before"], "fill": None}, info, what="moved pause")
                 self.out.log.append("the page moved on in Jack's hands: boxes holding a value are held")
-                self._protect_held = True
             elif kind in ("gate", "final"):
                 fill = pending.get("fill")
-                self._remap(fill, pending, info)
-                if fill is not None:
-                    self._after_pause(fill, pending.get("marked_before"), info.get("approved") or {})
-                if kind == "gate":
-                    self._gate_page(fill, pending.get("page_events") or [])
-                else:
+                if kind == "final":
                     # Continue ends the final pause the way Enter does in the
                     # terminal: the stop's event becomes Jack's, and the gate
                     # judges the page again before anything is pressed.
                     self._handled_by_jack("gate_pause", "final page")
-                skip_fill = True
+                if fill is not None and self._changed_since(pending):
+                    # Decision A (Jack, 2026-10-29 evening): the page the
+                    # tab shows is taken up; the stop's record is not
+                    # re-gated (his Avature run re-gated step 2 on every
+                    # Continue while the tab showed step 3).
+                    self._pick_up(pending, info, what=f"{kind} pause")
+                    fill = None
+                else:
+                    self._remap(fill, pending, info)
+                    if fill is not None:
+                        self._after_pause(fill, pending.get("marked_before"), info.get("approved") or {})
+                    if kind == "gate":
+                        self._gate_page(fill, pending.get("page_events") or [])
+                    skip_fill = True
             elif kind == "parked":
                 # A cap park resumed: Jack's Continue grants one more window
                 # (Jack, 2026-10-26); the cap itself is unchanged.
@@ -1344,7 +1424,8 @@ class Wizard:
                                        f"in the browser, then press Enter.",
                               prompt="Press Enter when it's ready to submit: ",
                               fields=self._stop_fields(fill, submission.gate_result or {}),
-                              extra={"fill": fill, "marked_before": marked_before})
+                              extra={"fill": fill, "marked_before": marked_before,
+                                     "shape": follow.read_shape(self.page)})
             self.out.events[-1]["handled"] = "jack" if how == pause_mod.ANSWERED else None
             if how == pause_mod.ANSWERED and fill is not None:
                 self._after_pause(fill, marked_before, {})

@@ -362,6 +362,40 @@ From the same prompt and Jack's go on the plan (2026-10-29):
   submits); every other FLAG is one line in TODO. A fold commit's
   non-safety FLAGs are logged, never folded.
 
+Added by Jack on 2026-10-29 (evening, after his Avature live test with
+auto-submit OFF: step 2 filled badly, he fixed it by hand and moved to
+step 3, and every Continue re-gated step 2's old record), in his words:
+
+- A. "If I manually override something, it should record and learn from
+  my manual override, and when I click continue it should pick up from
+  whatever page I'm on."
+- B. Learning is "suggest, I approve": every correction is recorded; the
+  GUI lists suggestions; one click from Jack applies each one; nothing
+  is reused until he approves it. Legal, eligibility, EEO and pay
+  suggestions are never one-click: shown as "edit this line by hand",
+  with no value.
+
+Jack's go of 2026-10-31 on the plan for those (items 1-5: pick up from
+the page shown; small fixes; overrides recorded; suggestions he
+approves; report), with his answers:
+
+- Continue after any pause other than "ready": when the tab's shape
+  differs from the paused page's (follow.read_shape: address or fields,
+  after a settle), the fill in hand, its resume-time read, GUI approvals
+  and review waivers are dropped; the fill-time read-backs stay in the
+  record, as every earlier page's do. The confirmation check there
+  counts only a portal signature, or the generic sentence AND a page
+  that now shows no fillable fields (the form wait's probe finds none).
+  The ready pause keeps its existing check. Unchanged shape: as before.
+- The override watch uses the existing outcome.Capture hook on the
+  paused page as well as the 2 s poll, so a correction made during
+  another job's fill is not lost.
+- ruamel.yaml is added to requirements.txt for the round-trip profile
+  write. Apply runs on the GUI's request thread (atomic replace, the
+  profile reloaded before the next job; a job already running keeps the
+  profile it started with). MIN_POSTINGS is 1 for the CLI report too,
+  with the count shown.
+
 ## Design rules — do not relax these
 
 - The model never answers legal questions. Eligibility, EEO and compensation

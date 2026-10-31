@@ -297,7 +297,7 @@ def test_a_park_after_a_fill_is_judged_again_before_next_and_rescanned_if_the_pa
     kinds = [p["pause"]["kind"] for p in pauses]
     check(kinds == ["parked", "gate"] and out.status == "submitted" and clicks == ["Next", "Submit application"],
           f"the moved page was scanned afresh and the run went on ({kinds}, {out.status}, {out.reason}, {clicks})")
-    check("the page changed since the park: scanned afresh" in out.log and out.pages_filled == 3,
+    check("the page changed since the parked pause: picked up from the page shown" in out.log and out.pages_filled == 3,
           f"the fresh scan is logged; three pages filled ({out.pages_filled}, {out.log})")
     check.done()
 
@@ -340,8 +340,11 @@ def test_a_resume_on_a_closed_tab_or_an_unknown_shape_is_safe():
     kinds = [p["pause"]["kind"] for p in pauses]
     # The fresh scan leaves the boxes that hold a value alone and the gate
     # stops for Jack on them (nothing proves who wrote them): no Submit.
-    check(kinds == ["parked", "gate"] and "the page changed since the park: scanned afresh" in out.log
-          and out.pages_filled == 2 and clicks == [] and _field(pauses[1], "First Name"),
+    # Since decision A (2026-10-29 evening) a gate pause whose shape can't
+    # be read is picked up afresh on Continue too, so the harness's second
+    # Continue scans a third time.
+    check(kinds == ["parked", "gate"] and "the page changed since the parked pause: picked up from the page shown" in out.log
+          and out.pages_filled == 3 and clicks == [] and _field(pauses[1], "First Name"),
           f"an unreadable shape: scanned afresh, then the gate stops on the held boxes ({kinds}, {out.reason}, {clicks})")
     check.done()
 
@@ -384,7 +387,7 @@ def test_a_fresh_scan_after_a_park_leaves_boxes_that_hold_a_value_alone():
             view = state.snapshot()["jobs"][0]
         finally:
             browser.close(); p.stop()
-    check(out.status == wizard.WAITING and "the page changed since the park: scanned afresh" in out.log,
+    check(out.status == wizard.WAITING and "the page changed since the parked pause: picked up from the page shown" in out.log,
           f"scanned afresh ({out.status}, {out.reason}, {out.log})")
     check(value == "Jacques", f"Jack's correction was not typed over ({value!r})")
     check(any(line.startswith("left as it is (holds a value, or couldn't be read): 'First Name'") for line in out.log),
@@ -570,7 +573,7 @@ def test_the_hold_survives_a_pass_that_fills_nothing():
             value = page.input_value("#fn")
         finally:
             browser.close(); p.stop()
-    check(out.status == wizard.WAITING and "the page changed since the park: scanned afresh" in out.log
+    check(out.status == wizard.WAITING and "the page changed since the parked pause: picked up from the page shown" in out.log
           and waits["n"] >= 3, f"scanned afresh after a wait pass ({out.status}, {out.reason}, {waits})")
     check(value == "Jacques" and out.pages_filled == 2,
           f"Jack's correction survived the fill after the wait pass ({value!r}, {out.pages_filled})")
