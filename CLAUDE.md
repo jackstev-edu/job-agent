@@ -31,7 +31,18 @@ run as `python apply.py <command>` (no make).
   `submit.py`.
 - `agent/browser.py` — launches Playwright's bundled Chromium on a persistent
   profile; CAPTCHA and login-wall detection.
-- `agent/learn.py` — report-only suggestions from the corrections log.
+- `agent/learn.py` — suggestions from the corrections log, as text for
+  `apply.py learn` and as structured rows (edit / add / alias; sensitive
+  ones with no value) for the GUI's Suggestions panel; writes nothing.
+- `agent/corrections.py` — the corrections.jsonl row builder (shared by
+  `fill`'s logger and the wizard) and the override watch on a paused
+  page: the snapshot read policy, polled every 2 s and hooked for Jack's
+  own Next / Submit press; diffed when the pause ends (decision A).
+- `agent/approve.py` — Jack's one click: one profile line written with
+  comments and order kept (ruamel.yaml, a timestamped backup first, a
+  changed file refused), an alias into `aliases.yaml` beside the profile
+  (ordinary lines only), a dismissed suggestion's id. The router consults
+  an alias only after `sensitive.decide` said "model" (decision B).
 - `agent/follow.py` — follow mode's step detection (structure only).
 - `agent/ledger.py` — follow mode's never-overwrite ledger, activity guard
   and classification cache.

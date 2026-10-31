@@ -31,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
-from . import gate, sensitive
+from . import approve, gate, learn, sensitive
 
 QUEUED, WORKING, NEEDS_YOU, SUBMITTED, FAILED, DRY, DONE, CLOSED = (
     "queued", "working", "needs_you", "submitted", "failed", "dry", "done", "closed")
@@ -128,6 +128,106 @@ class State:
         # never persisted; the wizard reads it at the final page through
         # auto_submit_on, never captured at job start.
         self.auto_submit = False
+        # The Suggestions panel (decision B, Jack, 2026-10-29 evening):
+        # what learn.py suggests from corrections.jsonl, listed with an
+        # Apply / Dismiss per row; a sensitive one carries no value and no
+        # Apply. `profile_path` is set by cmd_gui; without it the panel
+        # stays empty. `profile_stamp` is the file as it was when the list
+        # was made: an Apply against a changed file refuses.
+        self.profile_path = None
+        self.suggestions: list[dict] = []
+        self.profile_stamp = ""
+        self.profile_changed = False
+
+    # -- suggestions (decision B) ---------------------------------------------
+    def refresh_suggestions(self) -> list[dict]:
+        """Read corrections.jsonl, the profile and the dismissed ids, and list what learn suggests. Never raises."""
+        with self.lock:
+            if self.profile_path is None:
+                self.suggestions = []
+                return []
+            try:
+                import yaml
+                rows, _ = learn.load_rows(learn.corrections_path())
+                path = self.profile_path
+                data = yaml.safe_load(path.read_text(encoding="utf-8")) if path.exists() else {}
+                stamp = approve.profile_stamp(path)
+                self.suggestions = learn.suggestions(rows, data if isinstance(data, dict) else {},
+                                                     approve.load_dismissed(path))
+                self.profile_stamp = stamp
+            except Exception:
+                self.suggestions, self.profile_stamp = [], ""
+            return list(self.suggestions)
+
+    def _suggestion_views(self) -> list[dict]:
+        out = []
+        for s in self.suggestions:
+            sensitive_ = s.get("kind") == learn.SENSITIVE
+            applicable = s.get("kind") in (learn.EDIT, learn.ADD, learn.ALIAS) and not sensitive_
+            out.append({"id": s["id"], "kind": s["kind"], "text": s.get("text", ""),
+                        "line": s.get("line"), "label": s.get("label"),
+                        # A sensitive suggestion never carries a value, here or anywhere.
+                        "value": None if sensitive_ else s.get("value"),
+                        "current": None if sensitive_ else s.get("current"),
+                        "count": s.get("count", 0), "postings": s.get("postings", 0),
+                        "applicable": applicable})
+        return out
+
+    def apply_suggestion(self, suggestion_id: str) -> dict:
+        """
+        Jack clicked Apply: one profile line written with comments and
+        order kept after a backup, or one alias recorded; a sensitive
+        suggestion is refused here as well as never offered. Runs on the
+        request thread (Jack, 2026-10-31): the write is atomic, and the
+        queue loop reloads the profile before the next job.
+        """
+        with self.lock:
+            s = next((x for x in self.suggestions if x["id"] == suggestion_id), None)
+            path, stamp = self.profile_path, self.profile_stamp
+        if s is None or path is None:
+            return {"ok": False, "error": "no such suggestion"}
+        if s.get("kind") == learn.SENSITIVE or s.get("kind") not in (learn.EDIT, learn.ADD, learn.ALIAS):
+            return {"ok": False, "error": "edit this line by hand"}
+        try:
+            if s["kind"] == learn.ALIAS:
+                approve.add_alias(path, s["label"], s["line"])
+                done = f"alias recorded: {s['label']!r} -> {s['line']}"
+            else:
+                backup = approve.apply_profile_line(path, s["line"], s["value"], stamp)
+                done = f"`{s['line']}` written; backup {backup.name}"
+            with self.lock:
+                self.profile_changed = True
+                self.notice = done
+        except approve.Changed as e:
+            with self.lock:
+                self.notice = str(e)
+            self.refresh_suggestions()
+            return {"ok": False, "error": str(e)}
+        except approve.Refused as e:
+            return {"ok": False, "error": str(e)}
+        except Exception as e:
+            return {"ok": False, "error": f"couldn't apply it ({type(e).__name__})"}
+        self.refresh_suggestions()
+        return {"ok": True, "done": done}
+
+    def dismiss_suggestion(self, suggestion_id: str) -> dict:
+        with self.lock:
+            s = next((x for x in self.suggestions if x["id"] == suggestion_id), None)
+            path = self.profile_path
+        if s is None or path is None:
+            return {"ok": False, "error": "no such suggestion"}
+        try:
+            approve.dismiss(path, suggestion_id)
+        except Exception as e:
+            return {"ok": False, "error": f"couldn't record the dismissal ({type(e).__name__})"}
+        self.refresh_suggestions()
+        return {"ok": True}
+
+    def take_profile_changed(self) -> bool:
+        """Did an Apply write the profile since the loop last asked? Cleared on read."""
+        with self.lock:
+            changed, self.profile_changed = self.profile_changed, False
+            return changed
 
     def set_auto_submit(self, on: bool) -> bool:
         with self.lock:
@@ -282,7 +382,8 @@ class State:
     def snapshot(self) -> dict:
         with self.lock:
             return {"jobs": [j.view() for j in self.jobs], "browser_open": self.browser_open,
-                    "notice": self.notice, "auto_submit": self.auto_submit is True}
+                    "notice": self.notice, "auto_submit": self.auto_submit is True,
+                    "suggestions": self._suggestion_views()}
 
     def _job(self, job_id: str) -> Job | None:
         return next((j for j in self.jobs if j.id == job_id), None)
@@ -314,6 +415,9 @@ tr.failed td.status { color: #9b2226; }
 button { font: inherit; padding: .3rem .8rem; }
 .row-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .4rem; }
 .muted { color: #5b6875; font-size: .9em; }
+#suggestions { margin-top: 1.2rem; padding: .6rem .9rem; border: 1px solid #d5dae0; border-radius: .4rem; background: #fff; }
+#suggestions li { margin: .3rem 0; }
+#suggestions .byhand { color: #a65a00; }
 </style></head>
 <body>
 <h1>job-agent</h1>
@@ -333,6 +437,8 @@ button { font: inherit; padding: .3rem .8rem; }
 </div>
 <table><thead><tr><th>Company</th><th>Role</th><th>Portal</th><th>Status</th><th>Details</th></tr></thead>
 <tbody id="rows"></tbody></table>
+<div id="suggestions" hidden><strong>Suggestions</strong> <span class="muted">from your corrections; nothing is reused until you press Apply</span>
+<ul id="suggestion-rows"></ul></div>
 <script nonce="%(nonce)s">
 (() => {
   const TOKEN = %(token)s;
@@ -405,6 +511,23 @@ button { font: inherit; padding: .3rem .8rem; }
       tr.appendChild(td); rows.appendChild(tr);
     }
     document.getElementById('notice').textContent = (state.browser_open ? 'browser open' : 'browser closed') + (state.notice ? ' · ' + state.notice : '');
+    const sugg = state.suggestions || [];
+    document.getElementById('suggestions').hidden = sugg.length === 0;
+    const sl = document.getElementById('suggestion-rows'); sl.replaceChildren();
+    for (const s of sugg) {
+      const li = el('li');
+      li.appendChild(el('span', s.text + ' ', s.kind === 'sensitive' ? 'byhand' : undefined));
+      li.appendChild(el('span', '(' + s.count + ' correction' + (s.count === 1 ? '' : 's') + ' on ' + s.postings + ' posting' + (s.postings === 1 ? '' : 's') + ') ', 'muted'));
+      if (s.applicable) {
+        const ap = el('button', 'Apply');
+        ap.addEventListener('click', () => api('/suggestion/apply', {id: s.id}).then(refresh));
+        li.appendChild(ap); li.appendChild(el('span', ' '));
+      }
+      const dm = el('button', 'Dismiss');
+      dm.addEventListener('click', () => api('/suggestion/dismiss', {id: s.id}).then(refresh));
+      li.appendChild(dm);
+      sl.appendChild(li);
+    }
   };
   const refresh = () => fetch('/state', {headers: {'X-Token': TOKEN}}).then(r => r.json()).then(render).catch(() => {});
   document.getElementById('start').addEventListener('click', () => {
@@ -531,6 +654,10 @@ class Server:
                     if not isinstance(body.get("on"), bool):
                         self._deny(HTTPStatus.BAD_REQUEST, "on must be true or false"); return
                     self._json({"ok": True, "auto_submit": st.set_auto_submit(body["on"])}); return
+                if path == "/suggestion/apply":
+                    self._json(st.apply_suggestion(str(body.get("id", ""))[:64])); return
+                if path == "/suggestion/dismiss":
+                    self._json(st.dismiss_suggestion(str(body.get("id", ""))[:64])); return
                 self._deny(HTTPStatus.NOT_FOUND, "no such action")
 
         self.httpd = ThreadingHTTPServer((host, port), Handler)

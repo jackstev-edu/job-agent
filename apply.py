@@ -1474,6 +1474,7 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
                 last_busy = clock()
                 continue
             state.update(job_id, status=status, reason=reason)
+            state.refresh_suggestions()
             last_busy = clock()
         # The override watch of every waiting job (decision A): a read-only
         # poll on the main thread, Playwright's, rate-limited by the watch;
@@ -1483,6 +1484,13 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
                 wiz.poll_watch()
             except Exception:
                 pass
+        if state.take_profile_changed():
+            # An Apply wrote profile.yaml (Jack, 2026-10-31): the next job
+            # starts on the new file; one already running keeps its own.
+            try:
+                prof = Profile.load(args.profile)
+            except Exception as e:
+                state.notice = f"couldn't reload the profile ({type(e).__name__})"
         job = state.next_queued()
         if job is None:
             if idle_limit_s is not None and clock() - last_busy > idle_limit_s:
@@ -1529,6 +1537,7 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
             continue
         if job.id not in waiting:
             state.update(job.id, status=status, reason=reason)
+        state.refresh_suggestions()         # the job may have logged corrections
         last_busy = clock()
 
 
@@ -1616,6 +1625,10 @@ def cmd_gui(args) -> None:
 
     prof = Profile.load(args.profile)
     state = gui.State()
+    # The Suggestions panel reads corrections.jsonl beside this profile and
+    # writes, on Jack's click only, one line of it or an alias beside it.
+    state.profile_path = prof.path
+    state.refresh_suggestions()
     server = gui.Server(state).start()
     print(f"\n{BOLD}GUI:{OFF} {server.url}")
     print(f"{DIM}Paste links there. A job that needs you waits in its tab until you press "

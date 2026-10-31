@@ -122,8 +122,11 @@ def test_learn_report():
     check("no single suggestion" in after("'Pronouns'"), "inconsistent answers -> no suggestion")
     check("nothing to suggest" in after("'How did you hear"),
           "hand-answered, unlogged values -> nothing to suggest")
-    check("Favourite colour" not in out and "Fax number" not in out,
-          "one-posting corrections ignored")
+    # Since 2026-10-31 (Jack's answer 4: MIN_POSTINGS 1) a single occurrence
+    # is shown too, with its count and postings, never applied by itself.
+    check("'Favourite colour' — 1 correction(s) on 1 posting(s)" in out
+          and "'Fax number' — 2 correction(s) on 1 posting(s)" in out,
+          "one-posting corrections are shown with their counts")
 
     check(_snapshot(*watched) == before, "profile, log and agent code unchanged")
     check(sorted(home.rglob("*")) == files_before, "no new files in JOB_AGENT_HOME")

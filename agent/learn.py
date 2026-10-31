@@ -1,15 +1,18 @@
 """
 learn.py — what your corrections keep saying.
 
-WHAT THIS DOES: Reads every correction `fill` has logged, keeps the ones that
-recur across postings, groups them by the profile line involved (or, when no
-line is known, by the question), and prints a suggested edit for each. It
-writes nothing: not to profile.yaml, not to the code, not to the log.
+WHAT THIS DOES: Reads every correction `fill` and the wizard's override
+watch have logged, groups them by the profile line involved (or, when no
+line is known, by the question), and suggests an edit for each, with its
+count and postings: as text for `apply.py learn`, and as structured rows
+for the GUI's Suggestions panel (decision B, Jack, 2026-10-29 evening),
+where one click applies one through approve.py. It writes nothing itself:
+not to profile.yaml, not to the code, not to the log.
 
 WHY IT MATTERS: The same fix typed by hand on five forms is a profile gap or a
-wrong profile line, and that's worth knowing. But a value typed on one form
-isn't a general fact about you, and eligibility, EEO and compensation answers
-are yours alone, so those are only ever flagged, never suggested.
+wrong profile line, and that's worth knowing; a single one is shown as such.
+Eligibility, EEO and compensation answers are yours alone, so those are
+only ever flagged ("edit this line by hand"), never suggested with a value.
 """
 
 from __future__ import annotations
@@ -22,9 +25,10 @@ from typing import Any
 
 from . import config, sensitive
 
-# A fix has to show up on this many different postings before it means
-# anything beyond "that one form was odd".
-MIN_POSTINGS = 2
+# Since 2026-10-31 (Jack's answer 4) a single occurrence is reported too,
+# with its count and postings shown, and nothing is applied until he
+# clicks Apply in the GUI.
+MIN_POSTINGS = 1
 
 # The corrections log's format. Version 2 reads custom dropdowns from what
 # they display, and stops logging diffs that are only formatting or an
@@ -270,6 +274,94 @@ def analyse(rows: list[dict], profile_data: dict | None) -> dict:
             "set_aside": dict(set_aside)}
 
 
+EDIT, ADD, ALIAS, SENSITIVE, NOTE = "edit", "add", "alias", "sensitive", "note"
+
+
+def suggestion_id(kind: str, target: str, value: Any) -> str:
+    """A stable id for one suggestion: its kind, target line or label, and value; a dismissal is for exactly this."""
+    import hashlib
+    return hashlib.sha256(f"{kind}|{_norm(target).casefold()}|{_norm(value)}".encode("utf-8")).hexdigest()[:16]
+
+
+def suggestions(rows: list[dict], profile_data: dict | None, dismissed=()) -> list[dict]:
+    """
+    The structured suggestions the GUI lists (decision B: one click from
+    Jack applies each, nothing is reused before). Each carries its kind
+    (edit: an existing line to a new value; add: a blank template line;
+    alias: a question's wording -> a line the profile already holds the
+    value of; sensitive: a legal, eligibility, EEO or pay line, shown as
+    "edit this line by hand" with NO value; note: a question no line
+    answers, nothing to apply), its count and postings, and an id a
+    dismissal is keyed by. Dismissed ids are left out.
+    """
+    facts = profile_facts(profile_data)
+    kept = [r for r in rows if not set_aside_reason(r)]
+    by_line: dict[str, list[dict]] = defaultdict(list)
+    by_question: dict[str, list[dict]] = defaultdict(list)
+    shown_label: dict[str, str] = {}
+    for row in kept:
+        line, _ = _line_for(row, facts)
+        if line:
+            by_line[line].append(row)
+        else:
+            key = _norm_label(row.get("label"))
+            if key:
+                by_question[key].append(row)
+                shown_label.setdefault(key, _norm(row.get("label")).strip("* "))
+    out: list[dict] = []
+
+    def base(kind, target, value, group):
+        return {"id": suggestion_id(kind, target, value), "kind": kind, "count": len(group),
+                "postings": _postings(group), "kinds": sorted({r.get("kind") or "changed" for r in group})}
+
+    for line, group in sorted(by_line.items()):
+        if any(_is_sensitive(r, line) for r in group):
+            out.append({**base(SENSITIVE, line, "", group), "line": line, "label": None, "value": None,
+                        "current": None, "text": f"`{line}`: edit this line by hand"})
+            continue
+        if any(r.get("final_value") is None for r in group):
+            continue
+        finals = {_norm(r.get("final_value")) for r in group}
+        if len(finals) != 1:
+            continue
+        final = next(iter(finals))
+        if not final:
+            continue
+        current = facts.get(line)
+        if current is not None and _norm(current) == final:
+            continue
+        kind = EDIT if current is not None else ADD
+        out.append({**base(kind, line, final, group), "line": line, "label": None, "value": final,
+                    "current": None if current is None else _norm(current),
+                    "text": (f"set `{line}` to {_quote(final)}" if kind == ADD
+                             else f"change `{line}` from {_quote(current)} to {_quote(final)}")})
+    for key, group in sorted(by_question.items()):
+        label = shown_label[key]
+        if any(_is_sensitive(r, None) for r in group):
+            out.append({**base(SENSITIVE, label, "", group), "line": None, "label": label, "value": None,
+                        "current": None, "text": f"{label!r}: edit the profile line by hand"})
+            continue
+        if any(r.get("final_value") is None for r in group):
+            continue
+        finals = {_norm(r.get("final_value")) for r in group}
+        if len(finals) != 1:
+            continue
+        final = next(iter(finals))
+        if not final:
+            continue
+        held = _lines_holding(final, facts)
+        if len(held) == 1:
+            out.append({**base(ALIAS, label, held[0], group), "line": held[0], "label": label, "value": final,
+                        "current": None,
+                        "text": f"questions worded {label!r} are answered by `{held[0]}` ({_quote(final)})"})
+        elif not held:
+            out.append({**base(NOTE, label, final, group), "line": None, "label": label, "value": final,
+                        "current": None,
+                        "text": f"you typed {_quote(final)} for {label!r}; no profile line matches: add one by hand"})
+    skip = {str(d) for d in dismissed}
+    return [s for s in out if s["id"] not in skip]
+
+
 def render(rows: list[dict], bad: int, result: dict, path: Path) -> str:
     out = [f"Corrections log: {path}",
            f"{len(rows)} correction(s) from {_postings(rows)} posting(s)"
@@ -302,7 +394,7 @@ def render(rows: list[dict], bad: int, result: dict, path: Path) -> str:
     section("By profile line", result["by_line"], quote_name=False)
     section("By question (no profile line known)", result["by_question"], quote_name=True)
     if not result["by_line"] and not result["by_question"]:
-        out.append(f"\nNothing recurs on {MIN_POSTINGS}+ postings yet.")
-    out.append("\nNothing was changed. Edit profile.yaml or the code yourself if a "
-               "suggestion holds up.")
+        out.append("\nNothing to suggest yet.")
+    out.append("\nNothing was changed. Apply a suggestion from the GUI's Suggestions panel, or "
+               "edit profile.yaml yourself if it holds up.")
     return "\n".join(out)

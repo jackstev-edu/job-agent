@@ -20,7 +20,7 @@ from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import (adapters, browser as browser_mod, classify, extract, filler, mapper, outcome,
+from . import (adapters, browser as browser_mod, classify, extract, filler, learn, mapper, outcome,
                sensitive, shadow)
 
 if TYPE_CHECKING:
@@ -100,9 +100,45 @@ def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str]
         elif verdict["action"] == "fill":
             plan[field["ref"]] = verdict
         else:
+            aliased = _by_alias(field, verdict, prof) if verdict["action"] == "autofill" else None
+            if aliased is not None:
+                plan[field["ref"]] = aliased
+                continue
             field["_draft"] = verdict["action"] == "draft"
             for_model.append(field)
     return plan, flags, for_model
+
+
+def _by_alias(field: dict, verdict: dict, prof) -> dict | None:
+    """
+    An alias Jack approved (approve.py) answers this field from the
+    profile line it names, instead of the model: consulted only after
+    sensitive.decide said "autofill" (a draft stays the model's: it is
+    adapted, not copied), so the field has already cleared the
+    classifier's routing, HARD_STOPS, the secret layers and LEGAL_GUARD;
+    an alias never moves a field out of "me", and the line it names is
+    never a sensitive one (load_aliases drops those). None when no alias
+    matches the question's wording, the line is blank, or the value
+    doesn't fit the widget.
+    """
+    try:
+        aliases = prof.aliases() if hasattr(prof, "aliases") else {}
+    except Exception:
+        aliases = {}
+    if not aliases:
+        return None
+    key = learn._norm_label(field.get("label") or "")
+    line = aliases.get(key) if key else None
+    if not line:
+        return None
+    raw = prof.get(line)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    value = sensitive.fit_to_widget(raw, field)
+    if value is None:
+        return None
+    return {**verdict, "action": "fill", "value": value, "source": "alias", "profile_path": line,
+            "confidence": "high"}
 
 
 def ask_mapper(for_model: list[dict], prof, posting_text: str,

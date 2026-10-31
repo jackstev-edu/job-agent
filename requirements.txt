@@ -6,3 +6,5 @@ anthropic>=0.40
 PyYAML>=6.0
 # keyring    — Windows Credential Manager, for the portal passwords the agent stores
 keyring>=25.0
+# ruamel.yaml — rewrites one line of profile.yaml with comments and order kept, on a click in the GUI
+ruamel.yaml>=0.18

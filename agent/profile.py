@@ -176,6 +176,24 @@ class Profile:
         return {k: v for k, v in raw.items()
                 if isinstance(v, str) and v.strip() not in _BLANK}
 
+    # -- aliases Jack approved (approve.py) -----------------------------------
+
+    def aliases(self) -> dict[str, str]:
+        """
+        Normalised question wording -> the ordinary profile line that
+        answers it, from aliases.yaml beside this profile (written only by
+        a click in the GUI; a line that is sensitive or outside the fact
+        sections is ignored even if hand-edited in). Loaded once per
+        Profile, so a job keeps the aliases it started with.
+        """
+        if not hasattr(self, "_aliases"):
+            from . import approve
+            try:
+                self._aliases = approve.load_aliases(self.path)
+            except Exception:
+                self._aliases = {}
+        return self._aliases
+
     # -- completeness ------------------------------------------------------
 
     def audit(self) -> dict[str, list[str]]:
