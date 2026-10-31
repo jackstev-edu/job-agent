@@ -33,6 +33,7 @@ reads the page again (Jack, 2026-10-26).
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from collections import Counter
@@ -532,7 +533,9 @@ class Wizard:
             cat = categories.get(f["ref"], "unknown")
             raw = {"field": f, "category": cat, "decision": plan.get(f["ref"]),
                    "result": results.get(f["ref"])}
-            ok = approvable and gui_mod.approvable(**raw)
+            # No read-back value, no tick: there is nothing to approve, and
+            # the row must never show "null" (Jack, 2026-10-29 evening).
+            ok = approvable and gui_mod.approvable(**raw) and gui_mod.has_value(snapshot.get(f["ref"]))
             out.append({"ref": f["ref"], "label": label[:120],
                         "reason": "; ".join(_clean(h.split(": ", 1)[-1]) for h in hits)[:300],
                         "approvable": ok, "raw": raw if approvable else None,
@@ -717,6 +720,25 @@ class Wizard:
         if now is None or before is None:
             return now is not before
         return (now["url"], now["fields"]) != (before["url"], before["fields"])
+
+    def _moved_within(self, before, limit_s: float) -> bool:
+        """
+        _moved, polled every FORM_POLL_MS for up to `limit_s` (Jack,
+        2026-10-31): a portal that parses an upload for a few seconds
+        before drawing the next step is given the form wait's time before
+        the "didn't move on" park. Clicks nothing; the first read that
+        shows a change ends the poll.
+        """
+        start = time.monotonic()
+        while True:
+            if self._moved(before):
+                return True
+            if time.monotonic() - start >= limit_s:
+                return False
+            try:
+                self.page.wait_for_timeout(FORM_POLL_MS)
+            except Exception:
+                return False
 
     # -- the loop --------------------------------------------------------------
     def run(self) -> Outcome:
@@ -1271,8 +1293,13 @@ class Wizard:
             # changed gets a choice (Jack, 2026-10-29; his Avature run
             # looped on the same upload every pass until the time cap).
             before = follow.read_shape(page)
-            key = (before["url"], before["fields"]) if before is not None else None
-            if self._last_choice is not None and key is not None and key == self._last_choice[1]:
+            if before is None:
+                # Nothing to compare a choice against (Jack, 2026-10-31):
+                # an unreadable shape would read any page as moved on, and
+                # the same choice could be made again every pass.
+                raise _Parked("the page couldn't be read before the choice")
+            key = (before["url"], before["fields"])
+            if self._last_choice is not None and key == self._last_choice[1]:
                 raise _Parked(f"chose '{self._last_choice[0]}' earlier and the page is unchanged since; "
                               f"choose a way to apply yourself in the tab")
             try:
@@ -1285,9 +1312,8 @@ class Wizard:
                 # the chooser put in is logged as a step and an event, not
                 # claimed as a box's upload. A later resume box still gets it.
                 self.out.events.append({"kind": "apply_method", "detail": choice.kind, "handled": "agent"})
-                if not self._moved(before):
-                    if key is not None:
-                        self._last_choice = (choice.label, key)
+                if not self._moved_within(before, FORM_WAIT_S):
+                    self._last_choice = (choice.label, key)
                     raise _Parked(f"chose '{choice.label}' but the page didn't move on")
                 self._last_choice = None
                 return None
@@ -1349,7 +1375,10 @@ class Wizard:
         """
         if before is None:
             return False
-        browser_mod.settle(self.page, 600)
+        # A tab closed between the loop's check and this read makes the
+        # settle raise: not gone, never a crash (Jack, 2026-10-31).
+        with contextlib.suppress(Exception):
+            browser_mod.settle(self.page, 600)
         now = follow.read_shape(self.page)
         if now is None or not before.get("fields"):
             return False

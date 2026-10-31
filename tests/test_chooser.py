@@ -75,6 +75,15 @@ INLINE = PICKER.replace(
 <label for="em">Email</label><input id="em" name="email" type="email" required>
 <button type="submit">Submit application</button></form></template></body></html>""")
 
+# Item 2 (Jack, 2026-10-31): a From Device whose chooser opens late (a
+# slow handler), and a step 2 that is drawn a few seconds after the file
+# is taken, at the same address.
+LATE = PICKER.replace("document.body.appendChild(i); i.click(); return false;",
+                      "document.body.appendChild(i); setTimeout(() => i.click(), 400); return false;")
+SLOW_INLINE = INLINE.replace(
+    "document.body.appendChild(document.getElementById('step2').content.cloneNode(true));",
+    "setTimeout(() => document.body.appendChild(document.getElementById('step2').content.cloneNode(true)), 3000);")
+
 WORKDAY = f"""<!doctype html><html><head><title>Start Your Application - Acme</title></head><body>{CLICKS_JS}
 <h2>Start Your Application</h2>
 <a href="/apply/autofill">Autofill with Resume</a>
@@ -106,7 +115,8 @@ THANKS = "<!doctype html><html><head><title>Acme</title></head><body><h1>Thank y
 
 def _routes():
     site = {"/careers": AVATURE, "/careers/Application": FORM, "/workday": WORKDAY, "/ashby": ASHBY,
-            "/refused": ONLY_REFUSED, "/thanks": THANKS, "/picker": PICKER, "/stuck": STUCK, "/inline": INLINE}
+            "/refused": ONLY_REFUSED, "/thanks": THANKS, "/picker": PICKER, "/stuck": STUCK, "/inline": INLINE,
+            "/late": LATE, "/slow": SLOW_INLINE}
 
     def handle(route):
         path = route.request.url.split("avature.net", 1)[-1].split("?")[0]
@@ -364,6 +374,75 @@ def test_a_choice_that_shows_step_2_at_the_same_address_counts_as_moved_on():
               f"the choice counted as moved on ({out.status}, {out.reason})")
         check(out.pages_filled == 1 and any(r.get("label") == "First Name" for r in out.rows),
               f"and the step-2 form at the same address was filled ({out.pages_filled}, {out.status}, {out.reason})")
+    check.done()
+
+
+def test_a_chooser_that_opens_late_is_answered_and_the_fallback_input_left_alone():
+    # Item 2(b) (Jack, 2026-10-31). Fails on 0b81c4e: once expect_file_chooser
+    # timed out there was no listener, the fallback set the ignored input
+    # and the chooser that opened during the fallback's settle went
+    # unanswered (step 2 never came).
+    check = Checks()
+    with mock_page(BLANK, _routes()) as page:
+        page.goto(f"{HOST}/late?folderId=1")
+        log: list = []
+        with mock.patch.object(chooser, "FILE_CHOOSER_WAIT_MS", 100), \
+                mock.patch.object(chooser, "FALLBACK_SETTLE_MS", 1500, create=True):
+            kind = chooser.choose(page, RESUME, log).kind
+        reached = True
+        try:
+            page.wait_for_url("**/careers/Application?folderId=1&picked=1", timeout=5000)
+        except Exception:
+            reached = False
+        check(kind == "from_device" and reached, f"the late chooser was answered and step 2 came ({kind}, {page.url})")
+        check(log == [f"chose 'From Device' and put {RESUME.name} in the file chooser it opened (late)"],
+              f"the log says the chooser took it, late ({log})")
+        page.goto(f"{HOST}/late?folderId=1")
+        files = page.evaluate("window.__files")
+        check(not any(str(f).startswith("ignored:") for f in files),
+              f"the page's own input was left alone ({files})")
+    check.done()
+
+
+def test_a_step_2_drawn_a_few_seconds_after_the_choice_is_not_a_park():
+    # Item 2(c) (Jack, 2026-10-31). Fails on 0b81c4e: one _moved read ~2 s
+    # after the choice found the page unchanged and parked "didn't move
+    # on"; now _moved is polled up to FORM_WAIT_S.
+    check = Checks()
+    with mock_page(BLANK, _routes()) as page:
+        page.goto(f"{HOST}/slow?folderId=1")
+        w = _gui_wizard(page, f"{HOST}/slow?folderId=1", RESUME)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch("agent.classify.classify_fields", classify_by_label))
+            stack.enter_context(mock.patch("agent.mapper.map_fields", map_from_profile))
+            stack.enter_context(mock.patch.object(wizard, "FORM_WAIT_S", 8))
+            stack.enter_context(mock.patch.object(wizard, "TIME_CAP_S", 60))
+            stack.enter_context(redirect_stdout(io.StringIO()))
+            out = w.run()
+        check("didn't move on" not in out.reason and out.pages_filled == 1 and out.status == "submitted",
+              f"step 2 came within the wait and was filled ({out.status}, {out.reason}, {out.pages_filled})")
+        check(sum(1 for e in out.events if e["kind"] == "apply_method") == 1, "one choice made")
+    check.done()
+
+
+def test_an_unreadable_shape_before_the_choice_parks_with_no_choice_made():
+    # Item 2(e) (Jack, 2026-10-31). Fails on 0b81c4e: with no shape to compare
+    # against the choice was made anyway (and the page read as moved or
+    # not by chance).
+    check = Checks()
+    with mock_page(BLANK, _routes()) as page:
+        page.goto(f"{HOST}/picker?folderId=1")
+        w = _gui_wizard(page, f"{HOST}/picker?folderId=1", RESUME)
+        with contextlib.ExitStack() as stack:
+            _quick(stack)
+            stack.enter_context(mock.patch("agent.follow.read_shape", lambda target: None))
+            out = w.run()
+        check(out.status == wizard.WAITING and out.reason == "the page couldn't be read before the choice"
+              and (w.pending or {}).get("kind") == "parked",
+              f"parked before any choice ({out.status}, {out.reason})")
+        check(page.evaluate("window.__clicks") == [] and page.evaluate("window.__files") == []
+              and not any(e["kind"] == "apply_method" for e in out.events),
+              f"nothing clicked, no file set, no choice event ({page.evaluate('window.__clicks')})")
     check.done()
 
 

@@ -61,9 +61,14 @@ def approvable(field: dict, category: str | None, decision: dict | None,
             or sensitive.legal_guard(field) is not None
             or field.get("raw_stop") or field.get("raw_legal") or field.get("secret")):
         return False
-    if not decision or decision.get("value") is None or decision.get("source") == "human":
+    if not decision or not has_value(decision.get("value")) or decision.get("source") == "human":
         return False
     return bool((result or {}).get("filled"))
+
+
+def has_value(value) -> bool:
+    """Is there something to approve: a planned or read-back value that isn't None, False or blank?"""
+    return value is not None and value is not False and str(value).strip() != ""
 
 
 @dataclass
@@ -235,8 +240,12 @@ class State:
             shaped = []
             for f in fields or []:
                 raw = f.get("raw") if isinstance(f.get("raw"), dict) else None
-                ok = bool(raw) and approvable(raw.get("field") or {}, raw.get("category"),
-                                              raw.get("decision"), raw.get("result"))
+                # A field with no planned value, or no read-back value to
+                # show, is never offered: nothing to approve, and "null" is
+                # never drawn (Jack, 2026-10-29 evening).
+                ok = (bool(raw) and approvable(raw.get("field") or {}, raw.get("category"),
+                                               raw.get("decision"), raw.get("result"))
+                      and has_value(f.get("value")))
                 shaped.append({"ref": f.get("ref"), "label": f.get("label", ""),
                                "reason": f.get("reason", ""), "approvable": ok,
                                "value": f.get("value") if ok else None})
@@ -362,7 +371,7 @@ button { font: inherit; padding: .3rem .8rem; }
           for (const f of j.pause.fields) {
             const li = el('li');
             li.appendChild(el('span', f.label + ': ' + f.reason));
-            if (f.approvable) {
+            if (f.approvable && f.value !== null && f.value !== undefined && String(f.value).trim() !== '') {
               const lab = el('label'); const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = f.approved;
               cb.addEventListener('change', () => api('/approve', {job: j.id, ref: f.ref, on: cb.checked}).then(refresh));
               lab.appendChild(cb); lab.appendChild(el('span', ' approve "' + f.value + '"'));

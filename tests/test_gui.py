@@ -226,6 +226,39 @@ def test_only_ordinary_filled_fields_get_an_approve_tick():
     check.done()
 
 
+def test_a_field_with_no_value_is_never_offered_for_approval():
+    # Item 2(a) (Jack, 2026-10-29 evening: ticks showing "null" for fields
+    # the agent left empty). Fails on 0b81c4e: a planned "" passed the
+    # `is None` test, and a field whose read-back was missing was offered
+    # with value None, which the page drew as "null".
+    check = Checks()
+    plain = {"ref": "f1", "type": "text", "label": "City"}
+    filled = {"filled": True}
+    check(gui.approvable(plain, "personal_fact", {"value": "", "source": "model"}, filled) is False,
+          "a planned empty string: never")
+    check(gui.approvable(plain, "personal_fact", {"value": "  ", "source": "model"}, filled) is False,
+          "a planned blank: never")
+    check(gui.approvable(plain, "personal_fact", {"value": "Springfield", "source": "model"}, filled) is True,
+          "a planned value: approvable (guard)")
+    state = gui.State()
+    [job_id] = state.start(["https://a.example/3"], dry=False)
+    raw_ok = {"field": plain, "category": "personal_fact",
+              "decision": {"value": "Springfield", "source": "model"}, "result": filled}
+    state.set_pause(job_id, "gate", "needs you", fields=[
+        {"ref": "f1", "label": "City", "reason": "unconfirmed", "value": None, "raw": raw_ok},
+        {"ref": "f2", "label": "Town", "reason": "unconfirmed", "value": "", "raw": {**raw_ok, "field": {**plain, "ref": "f2"}}},
+        {"ref": "f3", "label": "County", "reason": "unconfirmed", "value": "Shire", "raw": {**raw_ok, "field": {**plain, "ref": "f3"}}}])
+    view = state.snapshot()["jobs"][0]["pause"]["fields"]
+    by_ref = {f["ref"]: f for f in view}
+    check(by_ref["f1"]["approvable"] is False and by_ref["f2"]["approvable"] is False,
+          f"no read-back value (None or blank): no tick ({by_ref['f1']}, {by_ref['f2']})")
+    check(by_ref["f3"]["approvable"] is True and by_ref["f3"]["value"] == "Shire", "a read-back value: a tick (guard)")
+    check(state.approve(job_id, "f1", True) is False and state.approve(job_id, "f3", True) is True,
+          "only the field with a value can be ticked")
+    check("f.value !== null" in gui._PAGE, "the page itself never draws a tick for a null value")
+    check.done()
+
+
 def test_markup_in_a_label_is_rendered_as_text():
     from playwright.sync_api import sync_playwright
     check = Checks()

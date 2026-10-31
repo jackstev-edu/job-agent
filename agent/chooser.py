@@ -6,9 +6,10 @@ WHAT THIS DOES: When a page offers ways to apply instead of a form
 with Resume / Apply Manually / Use My Last Application), picks by an
 allowlist of whole control labels, in order: Workday's "Apply Manually";
 Avature's "From Device" (the profile's resume goes into the file chooser
-that control opens, which Playwright answers in place of any native
-dialog; the page's own pre-existing file input only when the click opens
-no chooser), falling back to "Without Resume" when no resume is on file.
+that control opens, which a listener registered before the click answers
+in place of any native dialog, a late chooser included; the page's own
+pre-existing file input only when the click opens no chooser), falling
+back to "Without Resume" when no resume is on file.
 LinkedIn, Indeed and other third-party autofill, "Copy & Paste" and "Use
 My Last Application" are never chosen. With none of the allowed labels on
 the page, the job is parked with the options shown. A page that already
@@ -22,7 +23,9 @@ control's own chooser is the one route the portal takes.
 
 from __future__ import annotations
 
+import contextlib
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -51,8 +54,42 @@ class Choice(NamedTuple):
     kind: str
     label: str
 
-# How long the allowed control gets to open its file chooser after the click.
+# How long the allowed control gets to open its file chooser after the click,
+# and how long the page is let settle before the fallback input is used.
 FILE_CHOOSER_WAIT_MS = 4000
+FALLBACK_SETTLE_MS = 300
+
+
+class _Answer:
+    """
+    The one answer to a file chooser the allowed control opens: the resume,
+    once. Registered as a filechooser listener before the click and removed
+    when _upload is done (Jack, 2026-10-31), so a chooser that opens late
+    (a slow handler, a modal first, while the fallback is being weighed) is
+    answered by Playwright and never reaches a native dialog.
+    """
+
+    def __init__(self, resume: Path):
+        self.resume, self.answered = resume, False
+
+    def __call__(self, chooser) -> None:
+        if self.answered:
+            return
+        self.answered = True
+        with contextlib.suppress(Exception):
+            chooser.set_files(str(self.resume))
+
+
+@contextlib.contextmanager
+def answering(page: "Page", resume: Path):
+    """A filechooser listener that answers once with `resume`, alive for the block."""
+    answer = _Answer(resume)
+    page.on("filechooser", answer)
+    try:
+        yield answer
+    finally:
+        with contextlib.suppress(Exception):
+            page.remove_listener("filechooser", answer)
 
 # The visible controls that could be a way to apply, with their whole text.
 # Marks nothing; the texts come back for the allowlist compare and, when
@@ -155,13 +192,16 @@ def choose(page: "Page", resume: Path | None, log: list[str]) -> Choice | None:
 
 def _upload(page: "Page", index: int, resume: Path) -> str | None:
     """
-    The chooser the control opens first (Jack, 2026-10-29): the allowed
-    control is clicked under expect_file_chooser and the chooser is
-    answered with the resume. Only when the click went through and opened
-    no chooser, on a page still at the same address, does the resume go
-    into the page's own pre-existing file input (Avature ignores a file
-    set there; a portal whose control is a plain label for that input
-    does not). Returns where the file went, for the log, or None.
+    The chooser the control opens first (Jack, 2026-10-29): a filechooser
+    listener is registered before the click and answers the chooser with
+    the resume; it stays registered until this returns (Jack, 2026-10-31),
+    so a chooser that opens late, while the fallback is being weighed, is
+    answered too, and the fallback input is then left alone. Only when the
+    click went through and opened no chooser within the wait, on a page
+    still at the same address, does the resume go into the page's own
+    pre-existing file input (Avature ignores a file set there; a portal
+    whose control is a plain label for that input does not). Returns where
+    the file went, for the log, or None.
     """
     if not page.evaluate(_MARK_JS, [index, _ATTR]):
         return None
@@ -169,27 +209,33 @@ def _upload(page: "Page", index: int, resume: Path) -> str | None:
         here = page.url
     except Exception:
         return None
-    clicked = False
-    try:
-        with page.expect_file_chooser(timeout=FILE_CHOOSER_WAIT_MS) as fc:
+    with answering(page, resume) as answer:
+        try:
             page.locator(f"[{_ATTR}='1']").first.click(timeout=4000)
-            clicked = True
-        fc.value.set_files(str(resume))
-        return "the file chooser it opened"
-    except Exception:
-        if not clicked:
+        except Exception:
             return None
-    try:
-        # A click that navigated instead may not have committed yet: the
-        # page is let settle before its address is compared, so the input
-        # of a page being left is never set.
-        browser_mod.settle(page, 300)
-        if page.url != here:
-            return None
-        inputs = page.locator("input[type=file]")
-        if inputs.count() >= 1:
-            inputs.first.set_input_files(str(resume), timeout=15_000)
-            return "the page's file input (the control opened no chooser)"
-    except Exception:
-        pass
+        # The listener's answer lands while the page is waited on.
+        start = time.monotonic()
+        while not answer.answered and (time.monotonic() - start) * 1000 < FILE_CHOOSER_WAIT_MS:
+            try:
+                page.wait_for_timeout(100)
+            except Exception:
+                return None
+        if answer.answered:
+            return "the file chooser it opened"
+        try:
+            # A click that navigated instead may not have committed yet: the
+            # page is let settle before its address is compared, so the input
+            # of a page being left is never set.
+            browser_mod.settle(page, FALLBACK_SETTLE_MS)
+            if answer.answered:
+                return "the file chooser it opened (late)"
+            if page.url != here:
+                return None
+            inputs = page.locator("input[type=file]")
+            if inputs.count() >= 1 and not answer.answered:
+                inputs.first.set_input_files(str(resume), timeout=15_000)
+                return "the page's file input (the control opened no chooser)"
+        except Exception:
+            pass
     return None

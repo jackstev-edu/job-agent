@@ -227,6 +227,34 @@ def test_the_endpoint_refuses_a_missing_token_foreign_origin_or_wrong_host():
     check.done()
 
 
+def test_the_form_gone_read_survives_a_settle_that_raises():
+    # Item 2(d) (Jack, 2026-10-31). Fails on 0b81c4e: the settle's own
+    # wait_for_timeout raised out of _form_gone_since (a tab closed between
+    # the loop's check and the ready-row Continue read as a resume crash).
+    check = Checks()
+
+    class _Dead:
+        url = f"{HOST}/dead"
+
+        def wait_for_load_state(self, *a, **k):
+            raise RuntimeError("target closed")
+
+        def wait_for_timeout(self, ms):
+            raise RuntimeError("target closed")
+
+        def evaluate(self, *a, **k):
+            raise RuntimeError("target closed")
+
+    w = wizard.Wizard.__new__(wizard.Wizard)
+    w.page = _Dead()
+    try:
+        gone = w._form_gone_since({"url": "x", "fields": (("input", "text", "fn", "", "", "", ""),), "count": 1})
+    except Exception as e:
+        gone = f"raised {type(e).__name__}"
+    check(gone is False, f"a settle that raises reads as not gone, never a crash ({gone!r})")
+    check.done()
+
+
 def test_continue_after_a_confirmation_marks_submitted_by_jack():
     # Fails on 62f6488 (no ready park: the agent submitted). Jack presses
     # Submit in the tab himself; Continue sees the confirmation.
