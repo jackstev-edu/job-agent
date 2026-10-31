@@ -3269,9 +3269,10 @@ Commit 5737dfd (item 4): VERDICT FLAG, 12 findings; two folded in
 66edf15 as safety-direction (an alias to a true / false line could plan
 a checkbox tick through filler.py's checkbox path; a substring or
 bool_prefix fit with confidence high passed the gate on an ordinary
-dropdown), with the alias key's normalisation (NFKC, casefold, collapsed
-whitespace, one trailing star) and the CLAUDE.md wording ("autofill",
-not "model") in the same fold. Logged, not folded: (4) a value written
+dropdown); (3) the alias key's normalisation (NFKC, casefold,
+collapsed whitespace, one trailing star, nothing else) folded with them,
+and the CLAUDE.md wording ("autofill", not "model") in the same fold.
+Logged, not folded: (4) a value written
 as a plain scalar by ruamel (YAML 1.2) reloads under PyYAML (1.1) as a
 bool for "Yes" / "No" / "On" / "Off" / "y" / "n", so the line's type
 changes and the suggestion stays listed; fix would be a quoted scalar
