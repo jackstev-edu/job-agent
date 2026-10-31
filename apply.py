@@ -24,7 +24,7 @@ import traceback
 import time
 from pathlib import Path
 
-from agent import (accounts, adapters, browser as browser_mod, classify, config, extract,
+from agent import (accounts, adapters, browser as browser_mod, classify, config, corrections, extract,
                    filler, follow, gate, google, gui, intake, learn, ledger, letters, mapper,
                    outcome, pages, pause, pipeline, report, score, secrets_store, sensitive, shadow,
                    snapshot, template, tracker, wizard)
@@ -873,51 +873,11 @@ def _log_corrections(page, url, fields, plan, categories, final=None) -> None:
         except Exception as e:
             print(f"{DIM}  couldn't read the final form ({str(e)[:60]}){OFF}")
             return
-
-    norm = lambda v: "" if v in (None, False) else str(v).strip()
-    rows = []
-    for f in fields:
-        if f.get("type") == "file" or extract.is_secret(f):
-            continue
-        if f["ref"] not in final:
-            continue        # not read back; logging it as cleared would be false
-        agent = (plan.get(f["ref"]) or {}).get("value")
-        now = final.get(f["ref"])
-        if norm(agent) == norm(now):
-            continue
-        # Judged on the real values, before sensitive ones are dropped: a
-        # reformatted phone number or a dropdown that reads back blank isn't
-        # you correcting anything, and logging it teaches learn the wrong thing.
-        if (learn.same_answer(agent, now, f.get("type"))
-                or learn.unreadable(agent, now, f.get("type"))):
-            continue
-        cat = categories.get(f["ref"], "unknown")
-        # Values are only kept for fields both layers agreed were ordinary --
-        # the same test that let the model near them in the first place.
-        safe = (classify.action_for(cat) in ("autofill", "draft")
-                and sensitive.stop_reason(sensitive._question_text(f)) is None
-                and sensitive.legal_guard(f) is None)
-        # Which profile line the question belongs to: the one that filled it,
-        # else the one its wording maps to. Only the line's name is kept, never
-        # its value, so this is safe to log for sensitive questions too.
-        line = ((plan.get(f["ref"]) or {}).get("profile_path")
-                or next(iter(sensitive.profile_lines(sensitive._question_text(f))), None))
-        rows.append({
-            "url": url, "label": f.get("label"), "type": f.get("type"),
-            "category": cat,
-            "kind": "filled_blank" if norm(agent) == "" else "overwrote",
-            "agent_value": agent if safe else None,
-            "final_value": now if safe else None,
-            "profile_path": line,
-            "logged_at": tracker._timestamp(),
-            "log_version": learn.LOG_VERSION,
-        })
-
+    # The row builder lives in agent/corrections.py since the 2026-10-31
+    # round (the wizard's override watch writes the same shape).
+    rows, _ = corrections.rows_for(url, fields, plan, categories, final)
     if rows:
-        path = config.STATE_DIR / "corrections.jsonl"
-        with path.open("a", encoding="utf-8") as fh:
-            for r in rows:
-                fh.write(json.dumps(r, default=str) + "\n")
+        path = corrections.append(rows)
         print(f"{DIM}  logged {len(rows)} correction(s) to {path}{OFF}")
 
 
@@ -1515,6 +1475,14 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
                 continue
             state.update(job_id, status=status, reason=reason)
             last_busy = clock()
+        # The override watch of every waiting job (decision A): a read-only
+        # poll on the main thread, Playwright's, rate-limited by the watch;
+        # the hook on the page covers the time another job is being filled.
+        for wiz, _ in list(waiting.values()):
+            try:
+                wiz.poll_watch()
+            except Exception:
+                pass
         job = state.next_queued()
         if job is None:
             if idle_limit_s is not None and clock() - last_busy > idle_limit_s:

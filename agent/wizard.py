@@ -40,8 +40,8 @@ from collections import Counter
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
-from . import (accounts, browser as browser_mod, chooser, extract, follow, gate, google, gui as gui_mod, intake,
-               ledger, pages, pause as pause_mod, pipeline, submit as submit_mod)
+from . import (accounts, browser as browser_mod, chooser, corrections, extract, follow, gate, google,
+               gui as gui_mod, intake, ledger, pages, pause as pause_mod, pipeline, submit as submit_mod)
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -366,15 +366,60 @@ class Wizard:
         what to show, and raise Deferred so the queue moves on; `continue_from`
         re-enters the loop at `pending` when Jack presses Continue.
         """
+        extra = dict(extra or {})
+        fill = extra.get("fill")
+        if fill is not None and getattr(fill, "fields", None) and extra.get("watch") is None:
+            # The override watch on this page (decision A): read-only, the
+            # snapshot policy, polled while the pause lasts and hooked for
+            # Jack's own Next / Submit press; diffed when the pause ends.
+            try:
+                extra["watch"] = corrections.Watch(self.page, fill.fields)
+            except Exception:
+                extra["watch"] = None
+        watch = extra.get("watch")
         if getattr(self.pauser, "deferring", False):
-            self.pending = {"kind": kind, **(extra or {})}
+            self.pending = {"kind": kind, **extra}
             raise pause_mod.Deferred("job-agent needs you", body, prompt=prompt, hidden=hidden,
                                      wants_code=wants_code, until=until,
                                      info={"kind": kind, "message": body, "wants_code": wants_code,
                                            "fields": fields or []})
+        if watch is not None:
+            # The terminal's wait polls `until` every half second: the
+            # watch reads on the same beat (rate-limited to OVERRIDE_POLL_S).
+            inner = until
+
+            def until(inner=inner):
+                watch.poll(self.page)
+                return bool(inner()) if inner is not None else False
         _, how = self.pauser.wait("job-agent needs you", body, prompt=prompt, hidden=hidden,
                                   until=until, wants_code=wants_code)
+        if watch is not None:
+            self._log_overrides({"watch": watch, "fill": fill})
         return how
+
+    def _log_overrides(self, pending: dict) -> None:
+        """The pause on a filled page ended: one last read if the form is still there, then the diff to corrections.jsonl."""
+        watch, fill = pending.get("watch"), pending.get("fill")
+        if watch is None or fill is None:
+            return
+        try:
+            if not self.page.is_closed():
+                watch.poll(self.page, force=True)
+        except Exception:
+            pass
+        corrections.log_overrides(watch, fill, url=self.url, portal=self.portal, log=self.out.log)
+        pending["watch"] = None
+
+    def poll_watch(self) -> None:
+        """GUI mode: one read of the paused page's watch, if any (the queue loop calls this while the job waits)."""
+        watch = (self.pending or {}).get("watch")
+        if watch is None:
+            return
+        try:
+            if not self.page.is_closed():
+                watch.poll(self.page)
+        except Exception:
+            pass
 
     def _handled_by_jack(self, kind: str, detail: str | None) -> int:
         """
@@ -1059,6 +1104,11 @@ class Wizard:
                 raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
             kind = pending.get("kind")
             self.out.log.append(f"resumed after a {kind} pause")
+            # Jack's overrides under the pause, from the watch's last good
+            # read (the page now if it still shows the form, else the last
+            # poll or his own press before it moved on), before anything
+            # below reads, drops or re-judges the fill.
+            self._log_overrides(pending)
             if kind == "account" and pending.get("wants_code") and info.get("code"):
                 accounts.enter_code(page, info["code"], self.out.log)
                 browser_mod.settle(page, 800)
