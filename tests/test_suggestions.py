@@ -129,7 +129,11 @@ def _sensitive_rows():
     return [_row(A, "Gender", "eeo", "overwrote", None, None, profile_path="eeo.gender"),
             _row(A, "Are you legally authorized to work in the US?", "work_authorization", "overwrote", None, None),
             # The plan named the (blank) line, as a profile-routed field's does.
-            _row(B, "Middle name", "personal_fact", "filled_blank", None, "Q.", profile_path="personal.middle_name")]
+            _row(B, "Middle name", "personal_fact", "filled_blank", None, "Q.", profile_path="personal.middle_name"),
+            # A sensitive line logged WITH a value (a mis-classified row): the
+            # view must strip it (fold of 5737dfd's review).
+            _row(B, "Veteran status", "personal_fact", "overwrote", "SENTINEL-OLD", "SENTINEL-EEO",
+                 profile_path="eeo.veteran_status")]
 
 
 def test_a_sensitive_suggestion_has_no_apply_and_no_value_anywhere():
@@ -148,12 +152,13 @@ def test_a_sensitive_suggestion_has_no_apply_and_no_value_anywhere():
         sugg = body.get("suggestions") or []
         kinds = {s["kind"] for s in sugg}
         sens = [s for s in sugg if s["kind"] == "sensitive"]
-        check(status == 200 and len(sens) == 2 and "add" in kinds,
-              f"two sensitive suggestions and one addition are listed ({[(s['kind'], s['line'] or s['label']) for s in sugg]})")
+        check(status == 200 and len(sens) == 3 and "add" in kinds,
+              f"three sensitive suggestions and one addition are listed ({[(s['kind'], s['line'] or s['label']) for s in sugg]})")
         check(all(s["value"] is None and s["current"] is None and s["applicable"] is False
                   and "by hand" in s["text"] for s in sens), f"edit by hand, no value, no Apply ({sens})")
         text = json.dumps(body)
-        check("Decline" not in text and "Prefer not" not in text, "no EEO value anywhere in /state")
+        check("SENTINEL" not in text and "Decline" not in text and "Prefer not" not in text,
+              "no EEO value anywhere in /state, even one a row carried")
         before = path.read_text(encoding="utf-8")
         status, body = _req(server, "POST", "/suggestion/apply", {"id": sens[0]["id"]},
                             origin=f"http://127.0.0.1:{server.port}")
@@ -221,6 +226,30 @@ def test_an_aliased_field_hard_stops_catches_still_comes_to_jack():
     # A draft field is left to the model (it is adapted, not copied).
     plan, flags, for_model = pipeline.route([fields[0]], {"g1-f0": "free_text"}, prof, set())
     check("g1-f0" not in plan and any(f["ref"] == "g1-f0" for f in for_model), "a draft field is not aliased")
+    # Fold of 5737dfd's review: never a checkbox, never a true / false line,
+    # never a loose fit; the allowed normalisation only.
+    stamp = approve.profile_stamp(path)
+    approve.apply_profile_line(path, "current_status.situation", "Student", stamp)
+    approve.aliases_path(path).write_text(
+        "currently employed: current_status.employed\nsituation: current_status.situation\n"
+        "country: personal.country\nnick name  *: personal.preferred_name\n", encoding="utf-8")
+    text = path.read_text(encoding="utf-8").replace("  employed:                    # true / false", "  employed: true")
+    path.write_text(text, encoding="utf-8")
+    prof = Profile.load(path)
+    boxes = [{"ref": "g1-f5", "label": "Currently employed", "type": "checkbox", "name": "emp"},
+             {"ref": "g1-f6", "label": "Currently employed", "type": "select", "name": "emp2", "options": ["Yes", "No"]},
+             {"ref": "g1-f7", "label": "Country", "type": "select", "name": "c", "options": ["Australia", "Austria"]},
+             {"ref": "g1-f8", "label": "Country", "type": "select", "name": "c2", "options": ["Canada", "United States"]},
+             {"ref": "g1-f9", "label": "Situation", "type": "checkbox", "name": "sit"},
+             {"ref": "g1-f10", "label": "NICK NAME *", "type": "text", "name": "nn"}]
+    cats = {f["ref"]: "personal_fact" for f in boxes}
+    plan, flags, for_model = pipeline.route(boxes, cats, prof, set())
+    check("g1-f5" not in plan and "g1-f6" not in plan and "g1-f9" not in plan,
+          f"a checkbox, and a true / false line on any widget, are never aliased ({plan})")
+    check("g1-f7" not in plan and plan.get("g1-f8", {}).get("value") == "United States",
+          f"only an exact option takes an alias; a substring guess is left to the model ({plan})")
+    check(plan.get("g1-f10", {}).get("value") == "Tee", "NFKC, casefold, collapsed whitespace and one trailing * match")
+    check(all(any(f["ref"] == r for f in for_model) for r in ("g1-f6", "g1-f7")), "the refused ones go to the model as before")
     check.done()
 
 

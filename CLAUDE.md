@@ -42,7 +42,11 @@ run as `python apply.py <command>` (no make).
   comments and order kept (ruamel.yaml, a timestamped backup first, a
   changed file refused), an alias into `aliases.yaml` beside the profile
   (ordinary lines only), a dismissed suggestion's id. The router consults
-  an alias only after `sensitive.decide` said "model" (decision B).
+  an alias only after `sensitive.decide` said "autofill" (the classifier's
+  own routing; a draft stays the model's), never for a checkbox or a
+  true / false line, and takes only an exact or verbatim fit (decision B).
+  A waiting job Jack continues after an Apply reloads the profile at the
+  end of its pause, as every pause does; a job mid-fill keeps its own.
 - `agent/follow.py` — follow mode's step detection (structure only).
 - `agent/ledger.py` — follow mode's never-overwrite ledger, activity guard
   and classification cache.

@@ -40,6 +40,20 @@ ALIASES_FILE = "aliases.yaml"
 DISMISSED_FILE = "suggestions-dismissed.json"
 
 
+def alias_key(label: Any) -> str:
+    """
+    The key an alias is matched on: NFKC, casefold, whitespace collapsed,
+    one trailing required '*' dropped. Nothing else (the allowed
+    normalisation; fold of 5737dfd's review).
+    """
+    import unicodedata
+    text = unicodedata.normalize("NFKC", str(label or "")).casefold()
+    text = re.sub(r"\s+", " ", text).strip()
+    if text.endswith("*"):
+        text = text[:-1].rstrip()
+    return text
+
+
 class Refused(Exception):
     """The write is not allowed: a sensitive line, an unknown section, a malformed path."""
 
@@ -179,14 +193,14 @@ def load_aliases(profile_path: Path) -> dict[str, str]:
             check_line(line)
         except Refused:
             continue
-        out[learn._norm_label(label)] = line
+        out[alias_key(label)] = line
     return out
 
 
 def add_alias(profile_path: Path, label: str, line: str) -> Path:
     """Record that questions worded `label` are answered by `line`. Refuses a sensitive or unknown line."""
     check_line(line)
-    key = learn._norm_label(label)
+    key = alias_key(label)
     if not key:
         raise Refused("an alias needs the question's wording")
     at = aliases_path(profile_path)

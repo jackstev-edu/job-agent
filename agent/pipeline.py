@@ -20,7 +20,7 @@ from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import (adapters, browser as browser_mod, classify, extract, filler, learn, mapper, outcome,
+from . import (adapters, browser as browser_mod, classify, extract, filler, mapper, outcome,
                sensitive, shadow)
 
 if TYPE_CHECKING:
@@ -127,18 +127,27 @@ def _by_alias(field: dict, verdict: dict, prof) -> dict | None:
         aliases = {}
     if not aliases:
         return None
-    key = learn._norm_label(field.get("label") or "")
+    # Never a checkbox and never a true / false line: an alias answers
+    # with text, and no plan-driven path outside the consent policy may
+    # tick a box (fold of 5737dfd's review).
+    if (field.get("type") or "").lower() == "checkbox":
+        return None
+    from . import approve
+    key = approve.alias_key(field.get("label") or "")
     line = aliases.get(key) if key else None
     if not line:
         return None
     raw = prof.get(line)
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
+    if raw is None or isinstance(raw, bool) or (isinstance(raw, str) and not raw.strip()):
         return None
-    value = sensitive.fit_to_widget(raw, field)
-    if value is None:
+    # Only the strict fits: the value as written in a box, or an option
+    # equal to it. A substring or prefix guess at an option is left to
+    # the model's own, reviewed answer (missing beats plausible).
+    value, fit = sensitive.fit_with_kind(raw, field)
+    if value is None or fit not in ("exact", "verbatim"):
         return None
     return {**verdict, "action": "fill", "value": value, "source": "alias", "profile_path": line,
-            "confidence": "high"}
+            "confidence": "high", "fit": fit}
 
 
 def ask_mapper(for_model: list[dict], prof, posting_text: str,
