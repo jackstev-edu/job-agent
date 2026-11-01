@@ -1355,11 +1355,21 @@ class Wizard:
                                   extra={"before": before, "body": body})
                 if not self._moved(before):
                     raise _Parked(f"the page didn't move on after '{nxt.get('word')}' ({how})")
-                # The same pick-up as the GUI's Continue (fold of 0b81c4e's
-                # finding 1): a confirmation ends the job as submitted by
-                # Jack; otherwise the page shown is taken up under the hold.
-                self._pick_up({"shape": before, "fill": None}, {}, what="moved pause")
-                self.out.log.append("the page moved on in Jack's hands: boxes holding a value are held")
+                if how == pause_mod.ANSWERED:
+                    # Jack ended the pause with Enter: the same pick-up as
+                    # the GUI's Continue (fold of 0b81c4e's finding 1): a
+                    # confirmation ends the job as submitted by him;
+                    # otherwise the page shown is taken up under the hold.
+                    self._pick_up({"shape": before, "fill": None}, {}, what="moved pause")
+                    self.out.log.append("the page moved on in Jack's hands: boxes holding a value are held")
+                else:
+                    # The page moved on by itself, with no Enter from Jack
+                    # (Jack, 2026-11-01, fold round, decision 3): no
+                    # pick-up, nothing counted as his. The hold as before
+                    # db933fc: boxes holding a value are left alone, the
+                    # loop goes on, and a thank-you page parks for him.
+                    self.out.log.append("the page moved on by itself while waiting: boxes holding a value are held")
+                    self._protect_held = True
             return None
         if sub.get("chosen"):
             if fill is None and self.out.pages_filled == 0:

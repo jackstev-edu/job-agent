@@ -5,11 +5,14 @@ WHAT THIS DOES: (a) the override watch's poll makes no page call on
 Google's host or a job board; (b) the chooser's file-chooser answer
 counts only once set_files went through, and a chooser that refuses the
 file parks with a reason that says so instead of logging an upload;
-(c) the terminal's "moved" pause picks up from the page shown when the
-pause ends, as the GUI's Continue does: a thank-you page ends the job as
-submitted by Jack.
+(c) the terminal's "moved" pause picks up from the page shown when Jack
+ends it with Enter, as the GUI's Continue does: a thank-you page ends
+the job as submitted by Jack; a pause that ends because the page moved
+on by itself picks nothing up: the hold, the loop, and the thank-you
+page parks for him (decision 3 of the 2026-11-01 fold round).
 WHY IT MATTERS: Three reviewer findings of the 2026-10-31 round that
-Jack asked to fold (2c42879's 4, 9ccf258's 2, 0b81c4e's 1).
+Jack asked to fold (2c42879's 4, 9ccf258's 2, 0b81c4e's 1), and Jack's
+decision 3 on the report of the 2026-11-01 round.
 
 Run from anywhere:  .venv/Scripts/python.exe tests/test_small_fixes_2026_11_01.py
 """
@@ -121,7 +124,9 @@ class _JackFixesThenSubmits(pause.Pauser):
 def test_the_terminals_moved_pause_picks_up_the_page_shown():
     # Fails on 23999d0: the terminal held and rescanned the thank-you page,
     # parking it "no fields, no Next and no Submit" (needs_you) instead of
-    # ending it as submitted by Jack, as Continue does in the GUI.
+    # ending it as submitted by Jack, as Continue does in the GUI. Since
+    # 24d5a45's successor (decision 3 of the 2026-11-01 fold round) this is
+    # the Enter ending only: the pauser below returns pause.ANSWERED.
     check = Checks()
     html = STEPS.replace("CITY", CITY_OPTIONAL).replace("PROSE", "").replace("EXTRA", "")
     # Step 2's Next does nothing until Jack arms it: the agent's press
@@ -146,6 +151,50 @@ def test_the_terminals_moved_pause_picks_up_the_page_shown():
     check(out.status == "submitted" and out.submitted_by == "jack" and out.reason == wizard.READY_SUBMITTED,
           f"the terminal picked up the page shown: submitted by Jack ({out.status}, {out.submitted_by}, {out.reason})")
     check(any("picked up from the page shown" in l for l in out.log), f"the log says so ({out.log[-4:]})")
+    check.done()
+
+
+class _PageMovesByItself(_JackFixesThenSubmits):
+    """The terminal: the page moves on (and lands on the thank-you page) while the wait watches it; no Enter."""
+
+    def wait(self, title, body, *, prompt, hidden=False, until=None, wants_code=False):
+        super().wait(title, body, prompt=prompt, hidden=hidden, until=until, wants_code=wants_code)
+        return None, pause.FINISHED
+
+
+def test_the_terminals_moved_pause_that_ends_without_enter_picks_nothing_up():
+    # Fails on 24d5a45: the pick-up ran on every ending of the moved pause, so
+    # a page that moved on by itself ended the job as submitted by Jack.
+    # Decision 3 of the 2026-11-01 fold round: only Enter picks up; a page
+    # that moved by itself takes the pre-db933fc path (the hold, the loop,
+    # and the thank-you page parks for him).
+    check = Checks()
+    html = STEPS.replace("CITY", CITY_OPTIONAL).replace("PROSE", "").replace("EXTRA", "")
+    html = html.replace('id="n2" onclick="show(3)"', 'id="n2" onclick="if (window.__armed) show(3)"')
+    assert 'window.__armed' in html
+    with _headless(_routes({"/steps": html})) as ctx:
+        ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+        page = ctx.new_page()
+        page.goto(f"{HOST}/steps")
+        pauser = _PageMovesByItself(page)
+        with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                mock.patch("agent.mapper.map_fields", map_from_profile), \
+                mock.patch.object(wizard, "FORM_WAIT_S", 1), redirect_stdout(io.StringIO()):
+            w = wizard.Wizard(page, _profile(), url=f"{HOST}/steps", portal="generic", portal_method="default",
+                              company="Example Co", role="Engineer", resume=None, posting_text="",
+                              pauser=pauser, echo=lambda *a, **k: None, auto_submit=lambda: False)
+            out = w.run()
+        heading = _heading(page)
+    check(len(pauser.seen) == 1 and "didn't move on" in pauser.seen[0], f"one pause, the moved one ({pauser.seen})")
+    check(heading == "Done", "the tab is on the thank-you page")
+    check(out.status != "submitted" and out.submitted_by != "jack" and out.reason != wizard.READY_SUBMITTED,
+          f"nothing counted as Jack's: not submitted by him ({out.status}, {out.submitted_by}, {out.reason})")
+    check(out.status == "needs_you" and "no fields, no Next and no Submit" in (out.reason or ""),
+          f"the thank-you page parks for him, as before db933fc ({out.status}, {out.reason})")
+    check(not any("picked up from the page shown" in l for l in out.log)
+          and any("moved on by itself" in l and "held" in l for l in out.log),
+          f"the log says the page moved by itself under the hold, no pick-up ({out.log[-4:]})")
+    check(not any(e.get("kind") == "confirmation" for e in out.events), "no confirmation event")
     check.done()
 
 
