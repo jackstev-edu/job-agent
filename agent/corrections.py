@@ -16,8 +16,9 @@ it is diffed against what the agent planned and filled, and each field
 Jack changed, filled where the agent left it blank, or filled after a
 failed fill becomes one row. Formatting-only differences are skipped as
 the `fill` logger skips them. Local only: no model, no network.
-WHY IT MATTERS: learn.py suggests only from what is recorded here, and
-nothing is reused until Jack approves a suggestion (decision B). A row
+WHY IT MATTERS: `apply.py learn` reports from what is recorded here, and
+the same changes feed learned memory (memory.py, Jack, 2026-11-01),
+where his own answers are kept for the identical question. A row here
 never carries a password (never read) or a legal, EEO or pay value.
 """
 

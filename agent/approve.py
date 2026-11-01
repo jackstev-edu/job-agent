@@ -1,65 +1,54 @@
 """
-approve.py — the one click that applies a suggestion Jack approved.
+approve.py — the one writer of profile.yaml: Jack's "Save to profile" click.
 
-WHAT THIS DOES: Writes what the GUI's Apply button asks for (decision B,
-Jack, 2026-10-29 evening: "suggest, I approve"): one profile line to a
-new value, with profile.yaml's comments and order kept (ruamel.yaml's
-round-trip loader), after a timestamped backup beside it, refusing when
-the file changed since the suggestion was listed; a label -> profile-line
-alias into aliases.yaml beside the profile; and a dismissed suggestion's
-id into suggestions-dismissed.json so it never comes back for that value.
-Every write goes to a temporary file first and is swapped in atomically.
-WHY IT MATTERS: Nothing learned is reused until Jack applies it, and a
-legal, eligibility, EEO or pay line is never written by a click: those
-suggestions are "edit this line by hand" and this module refuses them.
-An alias can only point at a non-sensitive line, and the router consults
-it only for a field both layers already let the model answer.
+WHAT THIS DOES: Writes one ordinary profile line to a new value, with
+profile.yaml's comments and order kept (ruamel.yaml's round-trip loader),
+the value as a quoted string, after a timestamped backup beside it (the
+last five kept), under one lock from the file check to the atomic
+replace, refusing a file that changed since the stamp was taken, a
+mapping or list node, and every legal, eligibility, EEO, pay, DoD or
+per-company line (Jack, 2026-11-01: "profile.yaml is NEVER changed
+automatically... only Jack's click writes the profile"). Also retires
+the aliases.yaml of the 2026-10-31 Suggestions panel: counted, renamed
+`aliases.yaml.retired`, nothing learned from it (Jack, 2026-11-01).
+WHY IT MATTERS: Learning (memory.py) never touches the profile; this
+module is the only code path that does, and only on Jack's click.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from . import learn, sensitive
 
-# Lines a click never writes, and an alias never points at.
+# Lines a click never writes.
 SENSITIVE_PREFIXES = learn.SENSITIVE_PREFIXES + ("per_company.",)
 # The only sections a click may write into (learn's own fact sections).
 WRITABLE_SECTIONS = learn._FACT_SECTIONS
 
 ALIASES_FILE = "aliases.yaml"
-DISMISSED_FILE = "suggestions-dismissed.json"
+RETIRED_SUFFIX = ".retired"
+KEEP_BACKUPS = 5
 
-
-def alias_key(label: Any) -> str:
-    """
-    The key an alias is matched on: NFKC, casefold, whitespace collapsed,
-    one trailing required '*' dropped. Nothing else (the allowed
-    normalisation; fold of 5737dfd's review).
-    """
-    import unicodedata
-    text = unicodedata.normalize("NFKC", str(label or "")).casefold()
-    text = re.sub(r"\s+", " ", text).strip()
-    if text.endswith("*"):
-        text = text[:-1].rstrip()
-    return text
+# One lock from the file check to the write: a second click, or a save
+# while the queue loop reads the file, waits here and then sees the new
+# stamp (Jack, 2026-11-01; finding 6 of 5737dfd's review).
+LOCK = threading.RLock()
 
 
 class Refused(Exception):
-    """The write is not allowed: a sensitive line, an unknown section, a malformed path."""
+    """The write is not allowed: a sensitive line, an unknown section, a malformed path, a mapping or list node."""
 
 
 class Changed(Exception):
-    """profile.yaml changed since the suggestion was listed: nothing written."""
+    """profile.yaml changed since the stamp was taken: nothing written."""
 
 
 def profile_stamp(path: Path) -> str:
@@ -86,7 +75,7 @@ def _parts(line: str) -> list[tuple[str, int | None]]:
 
 
 def check_line(line: str) -> list[tuple[str, int | None]]:
-    """A line a click may write or an alias may point at: a known fact section, never a sensitive one, never a PROFILE_PATHS target."""
+    """A line a click may write: a known fact section, never a sensitive one, never a PROFILE_PATHS target."""
     parts = _parts(line)
     if line.startswith(SENSITIVE_PREFIXES) or parts[0][0] not in WRITABLE_SECTIONS:
         raise Refused(f"`{line}` is yours to edit by hand; a click never writes it")
@@ -96,7 +85,11 @@ def check_line(line: str) -> list[tuple[str, int | None]]:
 
 
 def _set(node: Any, parts: list[tuple[str, int | None]], value: Any) -> None:
-    """Set the value at the dotted path inside a ruamel round-trip tree, creating missing dict keys only."""
+    """
+    Set the value at the dotted path inside a ruamel round-trip tree,
+    creating missing dict keys only. A node that is a mapping or a list
+    is never overwritten with a scalar (finding 5 of 5737dfd's review).
+    """
     from ruamel.yaml.comments import CommentedMap
     for i, (key, idx) in enumerate(parts):
         last = i == len(parts) - 1
@@ -107,11 +100,15 @@ def _set(node: Any, parts: list[tuple[str, int | None]], value: Any) -> None:
             if not isinstance(seq, list) or idx >= len(seq):
                 raise Refused(f"`{key}[{idx}]` is not in profile.yaml")
             if last:
+                if isinstance(seq[idx], (dict, list)):
+                    raise Refused(f"`{key}[{idx}]` is a whole entry, not one line; a click never overwrites it")
                 seq[idx] = value
                 return
             node = seq[idx]
             continue
         if last:
+            if isinstance(node.get(key), (dict, list)):
+                raise Refused(f"`{key}` is a section or a list, not one line; a click never overwrites it")
             node[key] = value
             return
         if node.get(key) is None:
@@ -130,111 +127,96 @@ def _atomic_write(path: Path, text: str) -> None:
             os.unlink(tmp)
 
 
+def backups_of(path: Path) -> list[Path]:
+    """The timestamped backups beside the profile, oldest first."""
+    return sorted(Path(path).parent.glob(Path(path).name + ".bak-*"))
+
+
+def _prune_backups(path: Path, keep: int = KEEP_BACKUPS) -> None:
+    for old in backups_of(path)[:-keep] if keep > 0 else backups_of(path):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
 def apply_profile_line(path: Path, line: str, value: str, expected_stamp: str) -> Path:
     """
-    Write `line` = `value` into profile.yaml at `path`, comments and order
-    kept, after a timestamped backup beside it. Refuses a sensitive line
-    (Refused) and a file that changed since `expected_stamp` was taken
-    (Changed). Returns the backup's path.
+    Write `line` = `value` (a quoted string) into profile.yaml at `path`,
+    comments and order kept, after a timestamped backup beside it (the
+    last KEEP_BACKUPS kept). Refuses a sensitive line, a mapping or list
+    node (Refused) and a file that changed since `expected_stamp` was
+    taken (Changed). The check and the write happen under LOCK. Returns
+    the backup's path.
     """
     from ruamel.yaml import YAML
+    from ruamel.yaml.scalarstring import DoubleQuotedScalarString
     path = Path(path)
     parts = check_line(line)
     if not isinstance(value, str) or not value.strip():
-        raise Refused("nothing to write: the suggested value is empty")
-    if profile_stamp(path) != expected_stamp or not expected_stamp:
-        raise Changed("profile.yaml changed since the suggestion was listed; it is listed again, nothing written")
-    text = path.read_text(encoding="utf-8")
-    rt = YAML()
-    rt.preserve_quotes = True
-    rt.width = 4096
-    # The template's own layout: list items indented under their key
-    # ("  - institution:"), so a round trip moves nothing.
-    rt.indent(mapping=2, sequence=4, offset=2)
-    data = rt.load(text)
-    if data is None:
-        raise Refused("profile.yaml is empty")
-    _set(data, parts, value)
-    backup = path.with_name(f"{path.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
-    backup.write_text(text, encoding="utf-8")
-    from io import StringIO
-    out = StringIO()
-    rt.dump(data, out)
-    # ruamel writes "- " for an empty list item where the template has "-":
-    # trailing blanks mean nothing in YAML, so every line's are dropped and
-    # the only line that differs is the one written.
-    text_out = "\n".join(line.rstrip() for line in out.getvalue().splitlines()) + "\n"
-    _atomic_write(path, text_out)
+        raise Refused("nothing to write: the value is empty")
+    if "\n" in value or "\r" in value:
+        raise Refused("a profile line holds one line of text")
+    with LOCK:
+        if profile_stamp(path) != expected_stamp or not expected_stamp:
+            raise Changed("profile.yaml changed since this was listed; nothing written")
+        text = path.read_text(encoding="utf-8")
+        rt = YAML()
+        rt.preserve_quotes = True
+        rt.width = 4096
+        # The template's own layout: list items indented under their key
+        # ("  - institution:"), so a round trip moves nothing.
+        rt.indent(mapping=2, sequence=4, offset=2)
+        data = rt.load(text)
+        if data is None:
+            raise Refused("profile.yaml is empty")
+        # Quoted, so a value that reads like YAML ("yes", "1e3", "# x")
+        # stays the text Jack typed (finding 4 of 5737dfd's review).
+        _set(data, parts, DoubleQuotedScalarString(value.strip()))
+        stamp = time.strftime('%Y%m%d-%H%M%S')
+        # A second save within the second gets the next number after the
+        # highest present, so the names keep their order through pruning.
+        same = [b.name[len(f"{path.name}.bak-{stamp}"):] for b in backups_of(path)
+                if b.name.startswith(f"{path.name}.bak-{stamp}")]
+        n = max([1] + [int(s[1:]) for s in same if s[1:].isdigit()] + ([1] if "" in same else [0]))
+        backup = path.with_name(f"{path.name}.bak-{stamp}" + ("" if not same else f"-{n + 1:02d}"))
+        backup.write_text(text, encoding="utf-8")
+        from io import StringIO
+        out = StringIO()
+        rt.dump(data, out)
+        # ruamel writes "- " for an empty list item where the template has "-":
+        # trailing blanks mean nothing in YAML, so every line's are dropped and
+        # the only line that differs is the one written.
+        text_out = "\n".join(line_.rstrip() for line_ in out.getvalue().splitlines()) + "\n"
+        _atomic_write(path, text_out)
+        _prune_backups(path)
     return backup
 
 
-# --- aliases: a question's wording -> the non-sensitive profile line that answers it ---
+# --- the retired aliases of the Suggestions panel (2026-10-31) --------------
 
 def aliases_path(profile_path: Path) -> Path:
     return Path(profile_path).parent / ALIASES_FILE
 
 
-def load_aliases(profile_path: Path) -> dict[str, str]:
+def retire_aliases(profile_path: Path) -> int | None:
     """
-    The aliases beside the profile, normalised label -> line. A line
-    that fails check_line (hand-edited to a sensitive one, say) is left
-    out here too: the file can only add mappings to ordinary lines.
+    Rename aliases.yaml beside the profile to aliases.yaml.retired and
+    say how many entries it held; nothing is learned from it (Jack,
+    2026-11-01: "a frozen copy of a line's value would go stale when I
+    edit my profile"). None when there was no file.
     """
+    import yaml
     at = aliases_path(profile_path)
+    if not at.exists():
+        return None
     try:
-        raw = yaml.safe_load(at.read_text(encoding="utf-8")) if at.exists() else {}
+        raw = yaml.safe_load(at.read_text(encoding="utf-8"))
+        count = len(raw) if isinstance(raw, dict) else 0
     except (OSError, yaml.YAMLError):
-        return {}
-    out: dict[str, str] = {}
-    for label, line in (raw or {}).items() if isinstance(raw, dict) else []:
-        if not isinstance(label, str) or not isinstance(line, str):
-            continue
-        try:
-            check_line(line)
-        except Refused:
-            continue
-        out[alias_key(label)] = line
-    return out
-
-
-def add_alias(profile_path: Path, label: str, line: str) -> Path:
-    """Record that questions worded `label` are answered by `line`. Refuses a sensitive or unknown line."""
-    check_line(line)
-    key = alias_key(label)
-    if not key:
-        raise Refused("an alias needs the question's wording")
-    at = aliases_path(profile_path)
-    current = {}
-    if at.exists():
-        try:
-            current = yaml.safe_load(at.read_text(encoding="utf-8")) or {}
-        except yaml.YAMLError:
-            current = {}
-    if not isinstance(current, dict):
-        current = {}
-    current[key] = line
-    header = ("# Aliases Jack approved in the GUI: a question's wording -> the profile\n"
-              "# line that answers it. Only ordinary lines; eligibility, EEO, pay and\n"
-              "# per-company lines are never accepted here.\n")
-    _atomic_write(at, header + yaml.safe_dump(current, allow_unicode=True, sort_keys=True))
-    return at
-
-
-# --- dismissed suggestions ----------------------------------------------------
-
-def dismissed_path(profile_path: Path) -> Path:
-    return Path(profile_path).parent / DISMISSED_FILE
-
-
-def load_dismissed(profile_path: Path) -> set[str]:
-    at = dismissed_path(profile_path)
-    try:
-        raw = json.loads(at.read_text(encoding="utf-8")) if at.exists() else []
-    except (OSError, ValueError):
-        return set()
-    return {str(x) for x in raw} if isinstance(raw, list) else set()
-
-
-def dismiss(profile_path: Path, suggestion_id: str) -> None:
-    ids = load_dismissed(profile_path) | {str(suggestion_id)}
-    _atomic_write(dismissed_path(profile_path), json.dumps(sorted(ids), indent=0) + "\n")
+        count = 0
+    target = at.with_name(at.name + RETIRED_SUFFIX)
+    if target.exists():
+        target = at.with_name(f"{at.name}{RETIRED_SUFFIX}-{time.strftime('%Y%m%d-%H%M%S')}")
+    os.replace(at, target)
+    return count

@@ -25,10 +25,11 @@ import traceback
 import time
 from pathlib import Path
 
-from agent import (accounts, adapters, browser as browser_mod, classify, config, corrections, extract,
-                   filler, follow, gate, google, gui, intake, joblog, learn, ledger, letters, mapper, memory,
-                   outcome, pages, pause, pipeline, report, score, secrets_store, sensitive, shadow,
-                   snapshot, template, tracker, wizard)
+from agent import (accounts, adapters, approve, browser as browser_mod, classify, config,
+                   corrections, extract, filler, follow, gate, google, gui, intake, joblog,
+                   learn, ledger, letters, mapper, memory, outcome, pages, pause, pipeline,
+                   report, score, secrets_store, sensitive, shadow, snapshot, template, tracker,
+                   wizard)
 from agent.profile import Profile
 
 # Terminal colours. Harmless if your terminal ignores them.
@@ -1496,7 +1497,6 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
                 last_busy = clock()
                 continue
             state.update(job_id, status=status, reason=reason)
-            state.refresh_suggestions()
             last_busy = clock()
         # The override watch of every waiting job (decision A): a read-only
         # poll on the main thread, Playwright's, rate-limited by the watch;
@@ -1507,8 +1507,9 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
             except Exception:
                 pass
         if state.take_profile_changed():
-            # An Apply wrote profile.yaml (Jack, 2026-10-31): the next job
-            # starts on the new file; one already running keeps its own.
+            # A Save to profile wrote profile.yaml (Jack, 2026-11-01): the
+            # next job starts on the new file; one already running reloads
+            # before its next page (wizard._reload_if_changed).
             try:
                 prof = Profile.load(args.profile)
             except Exception as e:
@@ -1559,7 +1560,6 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
             continue
         if job.id not in waiting:
             state.update(job.id, status=status, reason=reason)
-        state.refresh_suggestions()         # the job may have logged corrections
         last_busy = clock()
 
 
@@ -1647,10 +1647,18 @@ def cmd_gui(args) -> None:
 
     prof = Profile.load(args.profile)
     state = gui.State()
-    # The Suggestions panel reads corrections.jsonl beside this profile and
-    # writes, on Jack's click only, one line of it or an alias beside it.
+    # Save to profile (the Memory page) writes one line of this file, on
+    # Jack's click only; learning never does.
     state.profile_path = prof.path
-    state.refresh_suggestions()
+    # The aliases of the retired Suggestions panel (Jack, 2026-11-01):
+    # counted and renamed, nothing learned from them.
+    try:
+        retired = approve.retire_aliases(prof.path)
+    except OSError:
+        retired = None
+    if retired is not None:
+        print(f"{DIM}  aliases.yaml retired ({retired} entr{'y' if retired == 1 else 'ies'}, renamed "
+              f"{approve.ALIASES_FILE}{approve.RETIRED_SUFFIX}; nothing learned from it){OFF}")
     # Job logs older than 60 days go (Jack, 2026-11-01); the rest are
     # read back by the page's "View log".
     try:

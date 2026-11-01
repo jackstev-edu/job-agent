@@ -40,8 +40,9 @@ from collections import Counter
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
-from . import (accounts, browser as browser_mod, chooser, corrections, extract, follow, gate, google,
-               gui as gui_mod, intake, ledger, pages, pause as pause_mod, pipeline, submit as submit_mod)
+from . import (accounts, approve, browser as browser_mod, chooser, corrections, extract,
+               follow, gate, google, gui as gui_mod, intake, ledger, pages, pause as pause_mod,
+               pipeline, submit as submit_mod)
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -263,6 +264,10 @@ class Wizard:
         self.posting_text, self.pauser, self.echo, self.clock = posting_text, pauser, echo, clock
         self.agent_submissions_today = agent_submissions_today
         self.reload_profile = reload_profile
+        # The profile file as this job loaded it: a Save to profile click
+        # or Jack's editor changes the stamp, and the next page is filled
+        # from the new file (Jack, 2026-11-01).
+        self._profile_stamp = self._stamp_of(prof)
         self.on_pause = on_pause                # GUI mode: told what the page should show
         self.guard = extract.ReadGuard()
         # The activity listener's agent flag: while the filler works, its
@@ -396,6 +401,25 @@ class Wizard:
         if watch is not None:
             self._log_overrides({"watch": watch, "fill": fill, "marked_before": extra.get("marked_before")})
         return how
+
+    @staticmethod
+    def _stamp_of(prof) -> str:
+        path = getattr(prof, "path", None)
+        return approve.profile_stamp(path) if path else ""
+
+    def _reload_if_changed(self) -> bool:
+        """profile.yaml changed since this job last loaded it: reload it before this page (Jack, 2026-11-01)."""
+        if self.reload_profile is None or not getattr(self.prof, "path", None):
+            return False
+        if self._stamp_of(self.prof) == self._profile_stamp:
+            return False
+        try:
+            self.prof = self.reload_profile()
+        except Exception:
+            return False
+        self._profile_stamp = self._stamp_of(self.prof)
+        self.out.log.append("profile.yaml changed since this job loaded it: reloaded before this page")
+        return True
 
     def _log_overrides(self, pending: dict) -> None:
         """The pause on a filled page ended: one last read if the form is still there, then the diff to corrections.jsonl."""
@@ -609,6 +633,7 @@ class Wizard:
         if self.reload_profile is not None:
             try:
                 self.prof = self.reload_profile()      # Jack may have edited profile.yaml
+                self._profile_stamp = self._stamp_of(self.prof)
             except Exception:
                 pass
         try:
@@ -1257,6 +1282,7 @@ class Wizard:
                 # a fill, never by a pass that fills nothing (a form wait,
                 # an account page), and never carries to a later page.
                 protect, self._protect_held = self._protect_held, False
+                self._reload_if_changed()
                 with self.activity.filling(page):
                     try:
                         fill = pipeline.fill_page(page, self.prof, guard=self.guard,
