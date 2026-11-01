@@ -63,9 +63,9 @@ run as `python apply.py <command>` (no make).
   that gained his touch mark (the override watch reads the marks at
   every poll) is learned: a value the page set itself is recorded in
   corrections.jsonl but never learned. Reuse happens in `pipeline.route`
-  after `sensitive.decide` (the wizard's page fill; `fill` learns
-  ordinary entries only, with no marks to go by, and does not reuse;
-  follow mode neither learns nor reuses); the gate trusts a "learned"
+  after `sensitive.decide` (the wizard's page fill; `fill` and follow
+  mode neither learn, having no touch marks to go by, nor reuse); the
+  gate trusts a "learned"
   legal answer only when the key it recomputes from the record's field
   equals the key the decision carries. The GUI's Memory page (item 4)
   edits and deletes entries.

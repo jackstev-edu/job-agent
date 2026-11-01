@@ -867,8 +867,10 @@ def _log_corrections(page, url, fields, plan, categories, final=None, prof=None)
     Record what you changed after the agent finished. Values are kept only for
     ordinary fields; for anything sensitive we log THAT you answered, not WHAT.
     `final` is the watcher's last read of the form, taken before it was
-    submitted away; without one, the page is read now. Your entries also go
-    to learned memory (Jack, 2026-11-01), legal ones included, there only.
+    submitted away; without one, the page is read now. Nothing is learned
+    here: `fill` has no activity listener, so no touch mark says a changed
+    value is yours; learned memory (Jack, 2026-11-01) is fed only under the
+    wizard's pause, from boxes carrying your mark (fix of ab9cb55's BLOCK).
     """
     if final is None:
         try:
@@ -882,16 +884,6 @@ def _log_corrections(page, url, fields, plan, categories, final=None, prof=None)
     if rows:
         path = corrections.append(rows)
         print(f"{DIM}  logged {len(rows)} correction(s) to {path}{OFF}")
-    # No touch marks in `fill`: an ordinary change is taken as yours (as
-    # the corrections log always has), a legal, EEO or pay one is not
-    # learned here (fix of fe30a9a's BLOCK; the wizard learns those under
-    # a pause, from a box that carries your touch mark).
-    found, _ = corrections.changes(fields, plan, final, source="fill", categories=categories)
-    found = [ch for ch in found if not memory.is_legal(ch["field"], ch["category"])]
-    lines: list[str] = []
-    corrections.learn_from(found, url=url, portal="", prof=prof, log=lines)
-    for line in lines:
-        print(f"{DIM}  {line}{OFF}")
 
 
 def _print_dry_run(fields, plan, flags) -> None:

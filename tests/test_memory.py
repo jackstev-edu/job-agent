@@ -329,8 +329,9 @@ def test_dod_and_clearance_questions_are_never_learned_or_answered():
     check.done()
 
 
-def test_fill_learns_ordinary_entries_only():
-    # Fails on fe30a9a: `fill`'s logger learned the legal change too.
+def test_fill_learns_nothing():
+    # Fails on fe30a9a (both learned) and on ab9cb55 (the ordinary one learned):
+    # `fill` has no touch marks, so nothing it sees is known to be Jack's.
     import apply
     check = Checks()
     prof = _prof()
@@ -344,8 +345,7 @@ def test_fill_learns_ordinary_entries_only():
     with redirect_stdout(io.StringIO()):
         apply._log_corrections(None, URL_A, fields, plan, categories, final={"f1": "TP", "g1": "No"}, prof=prof)
     store = memory.Learned.load(at)
-    check([e["question"] for e in store.entries] == ["Nickname"], f"the ordinary entry only ({[e['question'] for e in store.entries]})")
-    check("veteran" not in at.read_text(encoding="utf-8").lower(), "nothing of the legal answer in the store")
+    check(store.entries == [] and not at.exists(), f"nothing learned, no store written ({[e['question'] for e in store.entries]})")
     check.done()
 
 
