@@ -79,6 +79,12 @@ def never_reason(field: dict, category: str) -> str | None:
         return f"a {category.replace('_', ' ')} field is never learned"
     if sensitive.stop_reason(sensitive._question_text(field)) is not None or field.get("raw_stop"):
         return "a hard-stop question is never learned"
+    if {"dod", "clearance"} & set(sensitive.legal_guard_kinds(field)):
+        # Every Department of Defense question, and a clearance question
+        # outside its two profile lines, is Jack's (2026-10-20, second
+        # set); decision 4 of 2026-11-01 did not name them, so memory
+        # neither learns nor answers one (fold of fe30a9a's review).
+        return "a Department of Defense or clearance question is always yours"
     if not _norm(field.get("label")):
         return "a question with no label has no key"
     return None

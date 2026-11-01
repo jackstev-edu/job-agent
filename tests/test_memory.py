@@ -282,6 +282,73 @@ def test_no_module_but_approve_can_write_the_profile():
     check.done()
 
 
+def test_a_value_the_page_sets_under_a_pause_is_recorded_but_never_learned():
+    # Fails on fe30a9a: the planted value was learned as Jack's (no touch mark needed).
+    from agent import corrections, wizard
+    from test_pick_up import CITY_REQUIRED, _page, _run
+    check = Checks()
+    at = memory.path()
+    at.unlink(missing_ok=True)
+    corrections.path().unlink(missing_ok=True)
+    with _run(_page(city=CITY_REQUIRED), auto_submit=lambda: False) as (page, w):
+        out = w.run()
+        check(out.status == wizard.WAITING and w.pending["kind"] == "gate", f"the gate pause on step 2 ({out.status})")
+        # The page itself puts a value in the box: no trusted input, no touch mark.
+        page.evaluate("() => { document.getElementById('city').value = 'Planted'; }")
+        w.poll_watch()
+        page.evaluate("() => show(3)")
+        out = w.continue_from({})
+    store = memory.Learned.load(at)
+    check(store.entries == [], f"nothing learned from a value with no touch mark ({[(e['question'], e['answer']) for e in store.entries]})")
+    rows = [l for l in corrections.path().read_text(encoding="utf-8").splitlines() if l.strip()] if corrections.path().exists() else []
+    check(any('"City"' in r and "Planted" in r for r in rows), "the corrections log still records the change")
+    check(any(l.startswith("1 change(s) under the pause carried no touch mark") for l in out.log),
+          f"the job log says why ({[l for l in out.log if 'touch' in l or 'learn' in l]})")
+    check.done()
+
+
+def test_dod_and_clearance_questions_are_never_learned_or_answered():
+    # Fails on fe30a9a: both were learned and reused on the exact key.
+    check = Checks()
+    prof, store = _prof(), _store("dod")
+    for what, field in (("a Department of Defense question",
+                         {"ref": "d1", "type": "select", "label": "Have you worked for the Department of Defense?",
+                          "options": ["Yes", "No"]}),
+                        ("a clearance question",
+                         {"ref": "d2", "type": "select", "label": "Do you hold a security clearance?",
+                          "options": ["Yes", "No"]})):
+        learned = memory.learn([_change(field, "No", category="work_authorization")], url=URL_A, portal="generic",
+                               prof=prof, store=store)
+        check(learned == [] and memory.never_reason(field, "work_authorization"), f"{what}: never learned")
+        store.entries.append({"id": "planted", "kind": memory.ANSWER, "key": gate.question_key(field), "question": field["label"],
+                              "type": "select", "options": field["options"], "answer": "No", "line": None, "legal": True,
+                              "scope": memory.ANY, "host": "", "portal": "", "first_seen": "t", "last_seen": "t"})
+        decision, flags, for_model = _route(field, "work_authorization", prof, store, "x.example")
+        check(decision is None and flags and flags[0]["source"] == "human" and not for_model,
+              f"{what}: an entry planted in the file is not reused; the question is Jack's")
+    check.done()
+
+
+def test_fill_learns_ordinary_entries_only():
+    # Fails on fe30a9a: `fill`'s logger learned the legal change too.
+    import apply
+    check = Checks()
+    prof = _prof()
+    at = memory.path()
+    at.unlink(missing_ok=True)
+    fields = [{"ref": "f1", "type": "text", "label": "Nickname"}, VETERAN]
+    plan = {"f1": {"value": None}, "g1": {"value": None}}
+    categories = {"f1": "personal_fact", "g1": "eeo"}
+    from contextlib import redirect_stdout
+    import io
+    with redirect_stdout(io.StringIO()):
+        apply._log_corrections(None, URL_A, fields, plan, categories, final={"f1": "TP", "g1": "No"}, prof=prof)
+    store = memory.Learned.load(at)
+    check([e["question"] for e in store.entries] == ["Nickname"], f"the ordinary entry only ({[e['question'] for e in store.entries]})")
+    check("veteran" not in at.read_text(encoding="utf-8").lower(), "nothing of the legal answer in the store")
+    check.done()
+
+
 def test_a_box_jack_fills_under_a_pause_is_learned_and_fills_next_time():
     from agent import wizard
     from test_pick_up import CITY_REQUIRED, _page, _run

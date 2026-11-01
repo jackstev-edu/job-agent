@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 
 from agent import (accounts, adapters, browser as browser_mod, classify, config, corrections, extract,
-                   filler, follow, gate, google, gui, intake, joblog, learn, ledger, letters, mapper,
+                   filler, follow, gate, google, gui, intake, joblog, learn, ledger, letters, mapper, memory,
                    outcome, pages, pause, pipeline, report, score, secrets_store, sensitive, shadow,
                    snapshot, template, tracker, wizard)
 from agent.profile import Profile
@@ -881,7 +881,12 @@ def _log_corrections(page, url, fields, plan, categories, final=None, prof=None)
     if rows:
         path = corrections.append(rows)
         print(f"{DIM}  logged {len(rows)} correction(s) to {path}{OFF}")
+    # No touch marks in `fill`: an ordinary change is taken as yours (as
+    # the corrections log always has), a legal, EEO or pay one is not
+    # learned here (fix of fe30a9a's BLOCK; the wizard learns those under
+    # a pause, from a box that carries your touch mark).
     found, _ = corrections.changes(fields, plan, final, source="fill", categories=categories)
+    found = [ch for ch in found if not memory.is_legal(ch["field"], ch["category"])]
     lines: list[str] = []
     corrections.learn_from(found, url=url, portal="", prof=prof, log=lines)
     for line in lines:

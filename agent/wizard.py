@@ -394,7 +394,7 @@ class Wizard:
         _, how = self.pauser.wait("job-agent needs you", body, prompt=prompt, hidden=hidden,
                                   until=until, wants_code=wants_code)
         if watch is not None:
-            self._log_overrides({"watch": watch, "fill": fill})
+            self._log_overrides({"watch": watch, "fill": fill, "marked_before": extra.get("marked_before")})
         return how
 
     def _log_overrides(self, pending: dict) -> None:
@@ -407,8 +407,13 @@ class Wizard:
                 watch.poll(self.page, force=True)
         except Exception:
             pass
+        # His touch marks under the pause: every field the watch saw marked
+        # at any poll, less the pause's baseline. No baseline (the page
+        # kept the focus, an unreadable page) means nothing is his.
+        before = pending.get("marked_before")
+        touched = (watch.marks - before) if isinstance(before, set) else set()
         corrections.log_overrides(watch, fill, url=self.url, portal=self.portal, log=self.out.log,
-                                  prof=self.prof)
+                                  prof=self.prof, touched=touched)
         pending["watch"] = None
 
     def poll_watch(self) -> None:

@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import classify, config, extract, learn, memory, outcome, sensitive, tracker
+from . import classify, config, extract, learn, ledger, memory, outcome, sensitive, tracker
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -197,6 +197,14 @@ class Watch:
         self.fields = [dict(f) for f in fields]
         self.items = extract.read_items(self.fields)
         self.refs = [r for f in self.fields for r in (f.get("option_refs") or [f.get("ref")]) if r]
+        # Each field's ref -> the refs a touch of it can land on (its own
+        # and its options'); `marks` is every field seen carrying Jack's
+        # touch mark at any poll of the pause (the union: a mark gone
+        # with a re-render still happened). memory.learn takes only a
+        # change whose field is in it (fix of fe30a9a's BLOCK).
+        self.by_field = {f["ref"]: [f["ref"], *(r for r in (f.get("option_refs") or []) if r != f["ref"])]
+                         for f in self.fields if f.get("type") != "file" and f.get("ref")}
+        self.marks: set[str] = set()
         self.hook = _Hooked()
         self.hook.arm(page, self.fields)
         self.last: dict | None = None
@@ -221,6 +229,16 @@ class Watch:
         if not isinstance(raw, dict):
             return
         self.last, self.at, self.reads = extract.snapshot_from_raw(self.fields, raw), time.monotonic(), self.reads + 1
+        self.read_marks(page)
+
+    def read_marks(self, page: "Page") -> None:
+        """Which fields carry Jack's touch mark now, added to `marks`; a read that fails adds nothing."""
+        try:
+            hit = set(page.evaluate(ledger.TOUCHED_JS,
+                                    [[r for refs in self.by_field.values() for r in refs], ledger.REVIEW_ATTR]) or [])
+        except Exception:
+            return
+        self.marks |= {ref for ref, refs in self.by_field.items() if any(r in hit for r in refs)}
 
     def read(self) -> dict | None:
         """The last good read: the newer of the poll's and the hook's, or None if there was none."""
@@ -230,12 +248,16 @@ class Watch:
         return self.last
 
 
-def log_overrides(watch: Watch | None, fill, *, url: str, portal: str, log: list, prof=None) -> list[dict]:
+def log_overrides(watch: Watch | None, fill, *, url: str, portal: str, log: list, prof=None,
+                  touched: set | None = None) -> list[dict]:
     """
     The pause on `fill`'s page ended: diff the watch's last read against
     what the agent planned and filled, write the rows, learn his entries
     into memory (Jack, 2026-11-01), say in the job log what was recorded
-    and what couldn't be. Never raises.
+    and what couldn't be. Only a change on a field in `touched` (the
+    fields that gained his touch mark under the pause, by the wizard's
+    reading) is learned: a value the page set itself is not his. None
+    learns nothing. Never raises.
     """
     if watch is None or fill is None:
         return []
@@ -259,7 +281,11 @@ def log_overrides(watch: Watch | None, fill, *, url: str, portal: str, log: list
         found, _ = changes(watch.fields, plan, final, results=step.get("results"),
                            baseline=getattr(fill, "snapshot", None) or {}, source="override",
                            categories=categories)
-        learn_from(found, url=url, portal=portal, prof=prof, log=log)
+        his = [ch for ch in found if touched and ch["field"].get("ref") in touched]
+        if len(his) < len(found):
+            log.append(f"{len(found) - len(his)} change(s) under the pause carried no touch mark of yours: "
+                       "recorded, not learned")
+        learn_from(his, url=url, portal=portal, prof=prof, log=log)
         return rows
     except Exception as e:
         log.append(f"couldn't record corrections ({type(e).__name__})")
