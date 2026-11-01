@@ -229,7 +229,7 @@ def test_a_crash_after_a_pause_leaves_a_failed_row_with_no_continue():
     args = Namespace(profile=str(profile_path), resume=None, dry=False)
 
     def pause_then_boom(ctx, url, prof, args, pauser, *, new_tab=False, report_to=None,
-                        on_pause=None, on_wait=None, auto_submit=None):
+                        on_pause=None, on_wait=None, auto_submit=None, job_id=None):
         on_pause({"kind": "gate", "message": "this page needs you", "fields": [], "wants_code": False})
         raise _Boom(SENTINEL)
 

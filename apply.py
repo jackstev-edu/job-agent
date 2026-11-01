@@ -17,6 +17,7 @@ import argparse
 from argparse import Namespace
 import json
 import re
+import secrets
 import unicodedata
 import sys
 import threading
@@ -25,7 +26,7 @@ import time
 from pathlib import Path
 
 from agent import (accounts, adapters, browser as browser_mod, classify, config, corrections, extract,
-                   filler, follow, gate, google, gui, intake, learn, ledger, letters, mapper,
+                   filler, follow, gate, google, gui, intake, joblog, learn, ledger, letters, mapper,
                    outcome, pages, pause, pipeline, report, score, secrets_store, sensitive, shadow,
                    snapshot, template, tracker, wizard)
 from agent.profile import Profile
@@ -1115,7 +1116,7 @@ def _clean_title(text: str) -> str:
 
 def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
             new_tab: bool = False, report_to=None, on_pause=None, on_wait=None,
-            auto_submit=None) -> tuple[str, str]:
+            auto_submit=None, job_id: str | None = None) -> tuple[str, str]:
     """
     One link, end to end: open it, click Apply, follow to the form, detect
     the portal, then the wizard (accounts, every page, the gate, Submit).
@@ -1128,9 +1129,12 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
     deferred pause tells the page what to show, and the waiting Wizard is
     kept to be resumed when Jack presses Continue. `auto_submit` is the
     switch, a callable the wizard reads at the final page (Jack,
-    2026-10-29); None is OFF.
+    2026-10-29); None is OFF. `job_id` names the job's log file on disk
+    (the GUI row's id; `run` makes one up): every line the job's log
+    gains is appended there as it lands (Jack, 2026-11-01).
     """
     pauser = pauser or pause.Pauser()
+    sink = joblog.Sink(job_id or secrets.token_hex(6), url)
     landing = intake.open_link(ctx, url, new_tab=new_tab)
     for step in landing.steps:
         _print_safely(f"{DIM}  {step}{OFF}")
@@ -1161,13 +1165,13 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
             portal, _, method = adapters.detect_with_method(page.url, page)
             finish = {"url": url, "company": company, "role": role, "ats": ats,
                       "portal": portal, "portal_method": method,
-                      "resume": str(prof.resume_path(args.resume) or "")}
+                      "resume": str(prof.resume_path(args.resume) or ""), "sink": sink}
             w = wizard.Wizard(page, prof, url=url, portal=portal, portal_method=method,
                               company=company, role=role, resume=prof.resume_path(args.resume),
                               posting_text=extract.page_text(page, 6000), pauser=pauser, echo=print,
                               reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause,
                               intake_steps=landing.steps, auto_submit=auto_submit,
-                              on_log=lambda o: _flush_log(o, report_to))
+                              on_log=lambda o: _flush_log(o, report_to, sink))
             return finish_outcome(w.park_for_continue(landing.parked), finish, on_wait=on_wait)
         _park(url, landing.parked, company=company, role=role, ats=ats)
         return NEEDS_YOU, landing.parked
@@ -1181,7 +1185,7 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
         submitted_today = None
     finish = {"url": url, "company": company, "role": role, "ats": ats,
               "portal": landing.portal, "portal_method": landing.portal_method,
-              "resume": str(prof.resume_path(args.resume) or "")}
+              "resume": str(prof.resume_path(args.resume) or ""), "sink": sink}
     out = wizard.run_application(
         page, prof, url=url, portal=landing.portal, portal_method=landing.portal_method,
         company=company, role=role, resume=prof.resume_path(args.resume),
@@ -1189,7 +1193,7 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
         agent_submissions_today=submitted_today,
         reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause,
         intake_steps=landing.steps, auto_submit=auto_submit,
-        on_log=lambda o: _flush_log(o, report_to))
+        on_log=lambda o: _flush_log(o, report_to, sink))
     return finish_outcome(out, finish, on_wait=on_wait)
 
 
@@ -1207,13 +1211,15 @@ def _print_safely(text: str) -> None:
         print(text.encode(enc, "replace").decode(enc, "replace"))
 
 
-def _flush_log(out, report_to=None) -> None:
+def _flush_log(out, report_to=None, sink=None) -> None:
     """
     Print the job-log lines not printed yet, each exactly as the log
     holds it, and tell the GUI row the newest (Jack, 2026-10-29: live
     progress while a job runs). `printed` moves on here only, so a line
     printed as it landed is not printed again when the job ends, and a
-    job resumed from the GUI prints only what the resume added.
+    job resumed from the GUI prints only what the resume added. The
+    `sink` (Jack, 2026-11-01) appends the same lines to the job's file
+    on disk, by its own cursor; a write that fails changes nothing.
     """
     new = list(out.log[out.printed:])
     for line in new:
@@ -1221,6 +1227,11 @@ def _flush_log(out, report_to=None) -> None:
     out.printed = len(out.log)
     if new and report_to is not None:
         report_to({"progress": new[-1]})
+    if sink is not None:
+        try:
+            sink.write(out)
+        except OSError:
+            pass
 
 
 def finish_outcome(out, finish: dict, *, on_wait=None) -> tuple[str, str]:
@@ -1233,7 +1244,7 @@ def finish_outcome(out, finish: dict, *, on_wait=None) -> tuple[str, str]:
     url, company, role, ats = finish["url"], finish["company"], finish["role"], finish["ats"]
     # Whatever the live flush has not shown yet (a line added after the
     # hook was unset, or a job run without one).
-    _flush_log(out)
+    _flush_log(out, sink=finish.get("sink"))
     if out.status == wizard.WAITING:
         tracker.record(url, company=company, role=role, ats=ats, resume_used=finish["resume"],
                        answers=out.rows, flags=out.flags, status=NEEDS_YOU, notes=out.reason)
@@ -1516,7 +1527,7 @@ def gui_loop(ctx, state: "gui.State", prof, args, pauser, *, run=None, clock=tim
         job_pauser = pauser if job.dry else pause.GuiPauser(notify_fn=getattr(pauser, "notify_fn", None))
         try:
             status, reason = run(
-                ctx, job.url, prof, job_args, job_pauser, new_tab=True,
+                ctx, job.url, prof, job_args, job_pauser, new_tab=True, job_id=job.id,
                 report_to=lambda facts, j=job: state.update(j.id, **facts),
                 on_pause=lambda info, j=job: state.set_pause(
                     j.id, info.get("kind", ""), info.get("message", ""), info.get("fields") or [],
@@ -1629,6 +1640,14 @@ def cmd_gui(args) -> None:
     # writes, on Jack's click only, one line of it or an alias beside it.
     state.profile_path = prof.path
     state.refresh_suggestions()
+    # Job logs older than 60 days go (Jack, 2026-11-01); the rest are
+    # read back by the page's "View log".
+    try:
+        gone = joblog.prune()
+    except OSError:
+        gone = 0
+    if gone:
+        print(f"{DIM}  {gone} job log(s) older than {joblog.KEEP_DAYS} days removed{OFF}")
     server = gui.Server(state).start()
     print(f"\n{BOLD}GUI:{OFF} {server.url}")
     print(f"{DIM}Paste links there. A job that needs you waits in its tab until you press "

@@ -29,9 +29,9 @@ from dataclasses import dataclass, field as dataclass_field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
-from . import approve, gate, learn, sensitive
+from . import approve, gate, joblog, learn, sensitive
 
 QUEUED, WORKING, NEEDS_YOU, SUBMITTED, FAILED, DRY, DONE, CLOSED = (
     "queued", "working", "needs_you", "submitted", "failed", "dry", "done", "closed")
@@ -138,6 +138,18 @@ class State:
         self.suggestions: list[dict] = []
         self.profile_stamp = ""
         self.profile_changed = False
+        # Where the jobs' log files are (Jack, 2026-11-01); tests point it
+        # at a temp folder. "View log" reads one job's file by its id.
+        self.log_root = None
+
+    def job_log(self, job_id: str) -> dict:
+        """The lines of one job's log file, as text, for "View log"; only a job this session started."""
+        with self.lock:
+            job = self._job(job_id)
+        if job is None:
+            return {"ok": False, "error": "no such job"}
+        lines = joblog.read(job.id, root=self.log_root)
+        return {"ok": True, "lines": lines or [], "empty": lines is None}
 
     # -- suggestions (decision B) ---------------------------------------------
     def refresh_suggestions(self) -> list[dict]:
@@ -415,6 +427,8 @@ tr.failed td.status { color: #9b2226; }
 button { font: inherit; padding: .3rem .8rem; }
 .row-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .4rem; }
 .muted { color: #5b6875; font-size: .9em; }
+.joblog { margin: .4rem 0 0; padding: .4rem .6rem; background: #f1f3f5; border: 1px solid #d5dae0; font: 12px/1.4 ui-monospace, monospace;
+          white-space: pre-wrap; max-height: 16rem; overflow: auto; }
 #suggestions { margin-top: 1.2rem; padding: .6rem .9rem; border: 1px solid #d5dae0; border-radius: .4rem; background: #fff; }
 #suggestions li { margin: .3rem 0; }
 #suggestions .byhand { color: #a65a00; }
@@ -469,6 +483,19 @@ button { font: inherit; padding: .3rem .8rem; }
       td.appendChild(el('div', j.url, 'muted'));
       if (j.reason) td.appendChild(el('div', j.reason));
       if (j.landing) td.appendChild(el('div', j.landing, 'muted'));
+      const logBox = el('div', undefined, 'joblog'); logBox.hidden = true;
+      const viewLog = el('button', 'View log');
+      viewLog.addEventListener('click', () => {
+        if (!logBox.hidden) { logBox.hidden = true; viewLog.textContent = 'View log'; return; }
+        fetch('/log?job=' + encodeURIComponent(j.id), {headers: {'X-Token': TOKEN}}).then(r => r.json()).then(r => {
+          logBox.replaceChildren();
+          const lines = (r && r.ok && r.lines) ? r.lines : [];
+          if (!lines.length) logBox.appendChild(el('div', r && r.empty ? 'no log yet' : '(empty)', 'muted'));
+          for (const line of lines) logBox.appendChild(el('div', line));
+          logBox.hidden = false; viewLog.textContent = 'Hide log';
+        }).catch(() => {});
+      });
+      const logRow = el('div', undefined, 'row-actions'); logRow.appendChild(viewLog); td.appendChild(logRow); td.appendChild(logBox);
       if (j.pause) {
         const box = el('div', undefined, 'pause');
         box.appendChild(el('div', j.pause.message));
@@ -613,6 +640,11 @@ class Server:
                 if path == "/state":
                     if self._allowed(True):
                         self._json(server.state.snapshot())
+                    return
+                if path == "/log":
+                    if self._allowed(True):
+                        job_id = parse_qs(urlparse(self.path).query).get("job", [""])[0]
+                        self._json(server.state.job_log(str(job_id)[:64]))
                     return
                 self._deny(HTTPStatus.NOT_FOUND, "no such page")
 
