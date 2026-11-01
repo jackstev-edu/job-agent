@@ -214,12 +214,18 @@ class Watch:
         self.reads = 0
 
     def poll(self, page: "Page", *, force: bool = False) -> None:
-        """One read, if the form is still there; rate-limited to OVERRIDE_POLL_S unless forced."""
+        """
+        One read, if the form is still there; rate-limited to OVERRIDE_POLL_S
+        unless forced. Nothing is evaluated on Google's host or a job board
+        (the tab left the application's site: fold of 2c42879's finding 4).
+        """
         now = time.monotonic()
         if not force and now - self.polled_at < OVERRIDE_POLL_S:
             return
         self.polled_at = now
         if not self.items:
+            return
+        if not self.on_application_site(page):
             return
         try:
             if not page.evaluate(outcome._PRESENT_JS, self.refs):
@@ -231,6 +237,16 @@ class Watch:
             return
         self.last, self.at, self.reads = extract.snapshot_from_raw(self.fields, raw), time.monotonic(), self.reads + 1
         self.read_marks(page)
+
+    @staticmethod
+    def on_application_site(page: "Page") -> bool:
+        """False on Google's host or a job board (LinkedIn, Handshake), or when the address can't be read: no page call then."""
+        from . import google, intake
+        try:
+            url = page.url
+        except Exception:
+            return False
+        return not google.is_google_host(url) and intake.job_board(url) is None
 
     def read_marks(self, page: "Page") -> None:
         """Which fields carry Jack's touch mark now, added to `marks`; a read that fails adds nothing."""

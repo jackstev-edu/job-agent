@@ -49,6 +49,10 @@ REFUSED = re.compile(r"linkedin|indeed|seek|glassdoor|copy\s*(&|and)\s*paste|pas
 _ATTR = "data-ja-choice"
 
 
+class ChooserRefused(Exception):
+    """The control's file chooser opened but didn't take the resume."""
+
+
 class Choice(NamedTuple):
     """What `choose` did: the allowlist kind, and the control's whole label for the log and a park."""
     kind: str
@@ -70,14 +74,19 @@ class _Answer:
     """
 
     def __init__(self, resume: Path):
-        self.resume, self.answered = resume, False
+        self.resume, self.answered, self.failed = resume, False, False
 
     def __call__(self, chooser) -> None:
-        if self.answered:
+        if self.answered or self.failed:
+            return
+        try:
+            chooser.set_files(str(self.resume))
+        except Exception as e:
+            # The chooser opened and refused the file: not an upload, and
+            # the park says so (fold of 9ccf258's finding 2).
+            self.failed, self.why = True, type(e).__name__
             return
         self.answered = True
-        with contextlib.suppress(Exception):
-            chooser.set_files(str(self.resume))
 
 
 @contextlib.contextmanager
@@ -177,7 +186,11 @@ def choose(page: "Page", resume: Path | None, log: list[str]) -> Choice | None:
         shown = ", ".join(f"'{t}'" for _, t in controls[:8])
         raise ValueError(f"a choice of ways to apply, none of which the agent takes: {shown}")
     if kind == "from_device":
-        route = _upload(page, index, Path(resume))
+        try:
+            route = _upload(page, index, Path(resume))
+        except ChooserRefused as e:
+            raise ValueError(f"the '{text}' option's file chooser didn't take {Path(resume).name} ({e}); "
+                             f"upload it yourself in the tab")
         if route is None:
             raise ValueError(f"the '{text}' option opened no file chooser and the page has no file input")
         log.append(f"chose '{text}' and put {Path(resume).name} in {route}")
@@ -216,11 +229,13 @@ def _upload(page: "Page", index: int, resume: Path) -> str | None:
             return None
         # The listener's answer lands while the page is waited on.
         start = time.monotonic()
-        while not answer.answered and (time.monotonic() - start) * 1000 < FILE_CHOOSER_WAIT_MS:
+        while not (answer.answered or answer.failed) and (time.monotonic() - start) * 1000 < FILE_CHOOSER_WAIT_MS:
             try:
                 page.wait_for_timeout(100)
             except Exception:
                 return None
+        if answer.failed:
+            raise ChooserRefused(getattr(answer, "why", "") or "refused")
         if answer.answered:
             return "the file chooser it opened"
         try:
@@ -228,6 +243,8 @@ def _upload(page: "Page", index: int, resume: Path) -> str | None:
             # page is let settle before its address is compared, so the input
             # of a page being left is never set.
             browser_mod.settle(page, FALLBACK_SETTLE_MS)
+            if answer.failed:
+                raise ChooserRefused(getattr(answer, "why", "") or "refused")
             if answer.answered:
                 return "the file chooser it opened (late)"
             if page.url != here:
