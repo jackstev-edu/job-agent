@@ -31,22 +31,32 @@ run as `python apply.py <command>` (no make).
   `submit.py`.
 - `agent/browser.py` — launches Playwright's bundled Chromium on a persistent
   profile; CAPTCHA and login-wall detection.
-- `agent/learn.py` — suggestions from the corrections log, as text for
-  `apply.py learn` and as structured rows (edit / add / alias; sensitive
-  ones with no value) for the GUI's Suggestions panel; writes nothing.
+- `agent/learn.py` — the text report of the corrections log for
+  `apply.py learn`; writes nothing. (Its Suggestions rows and the GUI's
+  Suggestions panel were retired on 2026-11-01: learning is automatic,
+  into `agent/memory.py`.)
 - `agent/corrections.py` — the corrections.jsonl row builder (shared by
   `fill`'s logger and the wizard) and the override watch on a paused
   page: the snapshot read policy, polled every 2 s and hooked for Jack's
   own Next / Submit press; diffed when the pause ends (decision A).
-- `agent/approve.py` — Jack's one click: one profile line written with
-  comments and order kept (ruamel.yaml, a timestamped backup first, a
-  changed file refused), an alias into `aliases.yaml` beside the profile
-  (ordinary lines only), a dismissed suggestion's id. The router consults
-  an alias only after `sensitive.decide` said "autofill" (the classifier's
-  own routing; a draft stays the model's), never for a checkbox or a
-  true / false line, and takes only an exact or verbatim fit (decision B).
-  A waiting job Jack continues after an Apply reloads the profile at the
-  end of its pause, as every pause does; a job mid-fill keeps its own.
+- `agent/approve.py` — the one profile writer: Jack's "Save to profile"
+  click writes one ordinary profile line, comments and order kept
+  (ruamel.yaml, a timestamped backup first, a changed file refused),
+  never a legal, eligibility, EEO, pay, DoD or per-company line. No
+  other code path writes `profile.yaml` (Jack, 2026-11-01). The alias
+  and dismissed-suggestion routes it held were retired on 2026-11-01;
+  `aliases.yaml` is renamed `aliases.yaml.retired`, nothing learned
+  from it.
+- `agent/memory.py` — learned memory (Jack, 2026-11-01): what Jack
+  entered himself (an override under a pause, a field the agent failed
+  or left blank), keyed by the question as asked (normalised label,
+  field type, sorted options), in `~/.job-agent/learned.yaml`; reused
+  only on the exact same key, on top of the profile, never into it.
+  Legal, eligibility, EEO and pay answers reuse only from his own
+  recorded answer on the identical question. Never learned: passwords
+  and anything secret-classified, one-time codes, file uploads, any
+  checkbox, any HARD_STOPS field. The GUI's Memory page edits and
+  deletes entries.
 - `agent/follow.py` — follow mode's step detection (structure only).
 - `agent/ledger.py` — follow mode's never-overwrite ledger, activity guard
   and classification cache.
@@ -388,7 +398,9 @@ step 3, and every Continue re-gated step 2's old record), in his words:
   GUI lists suggestions; one click from Jack applies each one; nothing
   is reused until he approves it. Legal, eligibility, EEO and pay
   suggestions are never one-click: shown as "edit this line by hand",
-  with no value.
+  with no value. (Superseded by Jack's decisions of 2026-11-01 below:
+  learning is automatic, into a learned memory he can edit and delete;
+  the profile is written only by his Save to profile click.)
 
 Jack's go of 2026-10-31 on the plan for those (items 1-5: pick up from
 the page shown; small fixes; overrides recorded; suggestions he
@@ -409,12 +421,62 @@ approves; report), with his answers:
   write. Apply runs on the GUI's request thread (atomic replace, the
   profile reloaded before the next job; a job already running keeps the
   profile it started with). MIN_POSTINGS is 1 for the CLI report too,
-  with the count shown.
+  with the count shown. (The "suggestions he approves" item and the
+  running-job line are superseded by the 2026-11-01 decisions below:
+  the profile is reloaded before each page when the file changed.)
+
+Added by Jack on 2026-11-01 (after the 2026-10-31 round), in his words;
+these supersede decision B of 2026-10-29 and the "suggest, I approve"
+lines above:
+
+1. "Track everything in the current window and record it for future
+   use." Every job's log is kept on disk
+   (`~/.job-agent/logs/<date>-<job id>-<host>.log`, the same lines the
+   GUI shows, nothing added).
+2. "Learn from my entries... learn from the portals and what the agent
+   misses and I have to manually fill." Learning into memory is
+   automatic: every entry Jack makes himself (an override under a pause,
+   a field the agent failed or left blank) is recorded in
+   `~/.job-agent/learned.yaml` and reused on the exact same question.
+3. "I should have the option to delete anything it's learned (like a
+   memory)... delete and tune information if you're getting something
+   wrong." The GUI's Memory page lists, edits and deletes every entry.
+4. "This includes legal and EEO now. Please answer those questions too."
+   Jack's choice: legal, eligibility, EEO and pay answers come ONLY from
+   his own answers: a named profile line, or an answer he entered
+   himself that the agent recorded, reused only when the question is
+   the same (the exact key: normalised label, field type and options;
+   a choice must equal a current option exactly). The model never
+   generates one.
+5. "My profile needs to agnostically fill all portals." `profile.yaml`
+   is NEVER changed automatically. Everything learned goes to the
+   learned memory, used on top of the profile for the same question. A
+   typed fact that differs from a profile line is offered on the Memory
+   page with a "Save to profile" button; only Jack's click writes the
+   profile.
+6. "Update the UX and UI. It's a bit bland and too much information all
+   at once. Simplify it. Statuses are too long. If something breaks let
+   me know, and I click to see each section it couldn't fill in."
+
+Jack's go of 2026-11-01 on the plan for those (items 1-7), with his
+answers: item 3 lands as two commits; HARD_STOPS per-company questions
+stay unlearned ("the same wording at another company can need a
+different answer"); a typed legal answer (a salary box) is reused at
+the same host only; no checkbox is learned; `aliases.yaml` is not
+migrated (the count reported, the file renamed `aliases.yaml.retired`,
+nothing learned from it: "a frozen copy of a line's value would go
+stale when I edit my profile"); a learned free-text answer still stops
+on the gate's canned-answer rule; the profile is reloaded before each
+page when the file changed. Pushed after each item.
 
 ## Design rules — do not relax these
 
-- The model never answers legal questions. Eligibility, EEO and compensation
-  come only from named profile lines.
+- The model never answers legal questions. Eligibility, EEO and
+  compensation come only from Jack's own answers: a named profile line,
+  or an answer he entered himself that the agent recorded, reused only
+  for the same question (Jack, 2026-11-01).
+- `profile.yaml` is changed only by Jack's hand or his Save to profile
+  click; learning never rewrites it (Jack, 2026-11-01).
 - The agent never reads a password from a page and never logs, prints,
   screenshots or sends one, and never writes one to a file, the repo,
   ~/.job-agent, the DB, a report, gate_runs, the GUI or any model input.
@@ -715,5 +777,6 @@ The autonomy run of 2026-10-18: `docs/PLAN-autonomy.md` (milestones 0-7)
 and `TODO.md`. The Workday adapter: `docs/PLAN-workday.md` (2026-10-20),
 deferred by Jack on 2026-10-29 (items 2-9 open). The MVP round of
 2026-10-29 (the auto-submit switch, model preflight, crash containment)
-is recorded in the owner decisions above. A new session resumes from
-those files.
+and the round of 2026-11-01 (job logs on disk, automatic learned
+memory, the Memory page, the jobs view redesign) are recorded in the
+owner decisions above. A new session resumes from those files.

@@ -16,6 +16,8 @@ Check, in this order:
    - Any change to filler.py that adds a click, tick, key press or value read.
    - Any JS or Python that reads a password field's value, including after a type toggle or for autocomplete=*-password.
    - Model output reaching a legal, eligibility, EEO or comp answer.
+   - A learned legal answer reused for a question whose wording or options differ from the one Jack answered.
+   - Any profile.yaml write not caused by Jack's click.
    - Page text used as an instruction or to pass a check (anything other than an exact comparison against a list Jack wrote).
    - A guessed or invented value where null was required.
    - HARD_STOPS patterns weakened.

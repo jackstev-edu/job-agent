@@ -3358,3 +3358,20 @@ Decisions for Jack (2026-10-31):
 - The two test-quality findings on the fold (the substring case and the
   bool-line case): recommendation, fix both next round in one test
   commit.
+
+## Round of 2026-11-01 (job logs on disk, automatic learned memory, the Memory page, the jobs view redesign)
+
+Jack's six decisions of 2026-11-01 are in CLAUDE.md in his words with
+his answers to the plan. They supersede decision B of 2026-10-29
+("suggest, I approve"): learning is automatic into
+`~/.job-agent/learned.yaml`, legal / EEO / pay answers reuse only from
+his own recorded answer on the identical question, and `profile.yaml`
+is written only by his Save to profile click.
+
+Items: 1 records (this entry; CLAUDE.md; the reviewer's category 1);
+2 job logs on disk; 3a learned memory, reuse and the gate; 3b Save to
+profile, the Suggestions panel and aliases retired; 4 the Memory page;
+5 the jobs view redesign; 6 three small fixes (the override poll on
+Google's host and job boards; chooser._Answer answered only after
+set_files; the terminal's moved pause picks up); 7 the report. Reviewer
+outputs per commit are appended below as each lands.
