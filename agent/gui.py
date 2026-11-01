@@ -193,6 +193,65 @@ class State:
             self.notice = done
         return {"ok": True, "done": done}
 
+    # -- the Memory page (Jack, 2026-11-01, decision 3) -------------------------
+    GROUPS = ("choice", "candidate", "legal", "portal")
+
+    def memory_view(self) -> dict:
+        """
+        Every learned entry, grouped for the page: choice mappings, profile
+        candidates, legal & EEO answers, portal answers. Shown to Jack's own
+        browser only (local, token, Host and Origin checked); a legal entry
+        shows its answer here so he can tune or delete it, which the jobs
+        view never does.
+        """
+        try:
+            store = memory.Learned.load(self.memory_path)
+        except Exception:
+            return {"ok": False, "error": "learned memory couldn't be read", "entries": []}
+        out = []
+        for e in store.entries:
+            kind = e.get("kind")
+            if e.get("legal"):
+                group = "legal"
+            elif kind == memory.CHOICE:
+                group = "choice"
+            elif kind == memory.CANDIDATE:
+                group = "candidate"
+            else:
+                group = "portal"
+            out.append({"id": e.get("id"), "kind": kind, "group": group,
+                        "question": str(e.get("question") or ""), "type": str(e.get("type") or ""),
+                        "options": [str(o) for o in (e.get("options") or [])][:60],
+                        "answer": str(e.get("answer") or ""), "line": e.get("line"),
+                        "line_value": e.get("line_value") if group == "candidate" else None,
+                        "scope": "everywhere" if e.get("scope") == memory.ANY else str(e.get("scope") or ""),
+                        "host": str(e.get("host") or ""), "portal": str(e.get("portal") or ""),
+                        "first_seen": str(e.get("first_seen") or ""), "last_seen": str(e.get("last_seen") or ""),
+                        "seen": int(e.get("seen") or 0), "uses": int(e.get("uses") or 0),
+                        "posting": str(e.get("posting") or ""),
+                        "can_save": group == "candidate" and bool(e.get("line"))})
+        return {"ok": True, "entries": out, "groups": list(self.GROUPS)}
+
+    def memory_edit(self, entry_id: str, answer: str) -> dict:
+        """Jack tunes an answer: the entry keeps its question and kind; the next job routes on the new value."""
+        if not isinstance(answer, str) or not answer.strip() or len(answer) > 4000:
+            return {"ok": False, "error": "an answer to keep"}
+        try:
+            store = memory.Learned.load(self.memory_path)
+            ok = store.edit(str(entry_id)[:64], answer)
+        except Exception as e:
+            return {"ok": False, "error": f"couldn't edit it ({type(e).__name__})"}
+        return {"ok": ok} if ok else {"ok": False, "error": "no such entry"}
+
+    def memory_delete(self, entry_id: str) -> dict:
+        """Jack forgets an entry: gone from the file, never reused."""
+        try:
+            store = memory.Learned.load(self.memory_path)
+            ok = store.delete(str(entry_id)[:64])
+        except Exception as e:
+            return {"ok": False, "error": f"couldn't delete it ({type(e).__name__})"}
+        return {"ok": ok} if ok else {"ok": False, "error": "no such entry"}
+
     def take_profile_changed(self) -> bool:
         """Did a Save to profile write the profile since the loop last asked? Cleared on read."""
         with self.lock:
@@ -386,9 +445,22 @@ button { font: inherit; padding: .3rem .8rem; }
 .muted { color: #5b6875; font-size: .9em; }
 .joblog { margin: .4rem 0 0; padding: .4rem .6rem; background: #f1f3f5; border: 1px solid #d5dae0; font: 12px/1.4 ui-monospace, monospace;
           white-space: pre-wrap; max-height: 16rem; overflow: auto; }
+#tabs { display: flex; gap: .4rem; margin: .2rem 0 1rem; }
+#tabs button { padding: .4rem 1.1rem; border: 1px solid #d5dae0; border-bottom: none; background: #e9ecef; border-radius: .4rem .4rem 0 0; }
+#tabs button.active { background: #fff; font-weight: 700; }
+#memory-search { width: 100%%; font: inherit; padding: .4rem .6rem; margin: .4rem 0 .8rem; }
+.mgroup { margin: 1rem 0; }
+.mgroup h2 { font-size: 1.05em; margin: .4rem 0; }
+.mentry { background: #fff; border: 1px solid #d5dae0; border-radius: .4rem; padding: .5rem .8rem; margin: .4rem 0; }
+.mentry .q { font-weight: 600; }
+.mentry input.answer { font: inherit; width: 24rem; max-width: 100%%; padding: .2rem .4rem; }
+.mentry .meta { color: #5b6875; font-size: .85em; }
+.mentry .legal { color: #6a0f14; font-size: .85em; }
 </style></head>
 <body>
 <h1>job-agent</h1>
+<div id="tabs"><button id="tab-jobs" class="active">Jobs</button><button id="tab-memory">Memory</button></div>
+<section id="jobs">
 <div id="switch" class="off">
   <button id="toggle">Turn auto-submit ON</button>
   <span id="switch-text">Auto-submit: OFF — you press Submit</span>
@@ -405,6 +477,12 @@ button { font: inherit; padding: .3rem .8rem; }
 </div>
 <table><thead><tr><th>Company</th><th>Role</th><th>Portal</th><th>Status</th><th>Details</th></tr></thead>
 <tbody id="rows"></tbody></table>
+</section>
+<section id="memory" hidden>
+<p class="muted">What the agent learned from your own entries, reused only on the exact same question. Edit an answer, delete anything wrong; a profile candidate is written to profile.yaml only when you press Save to profile. Nothing here leaves this machine.</p>
+<input id="memory-search" placeholder="search questions, answers, hosts" autocomplete="off">
+<div id="memory-groups"></div>
+</section>
 <script nonce="%(nonce)s">
 (() => {
   const TOKEN = %(token)s;
@@ -492,6 +570,62 @@ button { font: inherit; padding: .3rem .8rem; }
     document.getElementById('notice').textContent = (state.browser_open ? 'browser open' : 'browser closed') + (state.notice ? ' · ' + state.notice : '');
   };
   const refresh = () => fetch('/state', {headers: {'X-Token': TOKEN}}).then(r => r.json()).then(render).catch(() => {});
+  // --- the Memory tab: text nodes only; every change goes through the token-checked routes ---
+  const GROUPS = [['choice', 'Choice mappings', 'an option you picked for a profile line on this exact question'],
+                  ['candidate', 'Profile candidates', 'typed text that differs from your profile; Save to profile writes it'],
+                  ['legal', 'Legal & EEO', 'your own answers, reused only on the identical question; edit by hand here or delete'],
+                  ['portal', 'Portal answers', 'answers with no profile line; free text and per-company ones at the same host only']];
+  let memoryEntries = [];
+  const drawMemory = () => {
+    const q = (document.getElementById('memory-search').value || '').toLowerCase();
+    const box = document.getElementById('memory-groups'); box.replaceChildren();
+    const hit = e => !q || [e.question, e.answer, e.host, e.portal, e.line || ''].some(s => String(s).toLowerCase().includes(q));
+    let shown = 0;
+    for (const [key, title, blurb] of GROUPS) {
+      const entries = memoryEntries.filter(e => e.group === key && hit(e));
+      const g = el('div', undefined, 'mgroup');
+      g.appendChild(el('h2', title + ' (' + entries.length + ')'));
+      g.appendChild(el('div', blurb, 'muted'));
+      for (const e of entries) {
+        shown += 1;
+        const d = el('div', undefined, 'mentry');
+        d.appendChild(el('div', e.question, 'q'));
+        const row = el('div', undefined, 'row-actions');
+        const inp = document.createElement('input'); inp.className = 'answer'; inp.value = e.answer; inp.autocomplete = 'off';
+        const save = el('button', 'Save edit');
+        save.addEventListener('click', () => api('/memory/edit', {id: e.id, answer: inp.value}).then(loadMemory));
+        const del = el('button', 'Delete');
+        del.addEventListener('click', () => { if (confirm('Forget this answer?')) api('/memory/delete', {id: e.id}).then(loadMemory); });
+        row.appendChild(inp); row.appendChild(save); row.appendChild(del);
+        if (e.can_save) {
+          const sp = el('button', 'Save to profile');
+          sp.addEventListener('click', () => { if (confirm('Write "' + inp.value + '" to ' + e.line + ' in profile.yaml?')) api('/memory/save', {id: e.id}).then(r => { if (r && r.error) alert(r.error); loadMemory(); refresh(); }); });
+          row.appendChild(sp);
+        }
+        d.appendChild(row);
+        const meta = [e.type || 'field', e.options.length ? e.options.length + ' options' : 'typed',
+                      e.scope === 'everywhere' ? 'any site' : 'only at ' + e.scope,
+                      'seen ' + e.seen + ', used ' + e.uses, 'last ' + e.last_seen];
+        if (e.line) meta.push((e.group === 'candidate' ? 'profile line ' + e.line + ' now holds "' + (e.line_value || '') + '"' : 'profile line ' + e.line));
+        d.appendChild(el('div', meta.join(' · '), 'meta'));
+        if (e.group === 'legal') d.appendChild(el('div', 'A legal, EEO or pay answer: reused only when the question and its options are identical. Never sent to a model.', 'legal'));
+        g.appendChild(d);
+      }
+      box.appendChild(g);
+    }
+    if (!shown) box.appendChild(el('p', memoryEntries.length ? 'nothing matches' : 'nothing learned yet', 'muted'));
+  };
+  const loadMemory = () => fetch('/memory', {headers: {'X-Token': TOKEN}}).then(r => r.json()).then(r => { memoryEntries = (r && r.ok && r.entries) ? r.entries : []; drawMemory(); }).catch(() => {});
+  const showTab = which => {
+    document.getElementById('jobs').hidden = which !== 'jobs';
+    document.getElementById('memory').hidden = which !== 'memory';
+    document.getElementById('tab-jobs').className = which === 'jobs' ? 'active' : '';
+    document.getElementById('tab-memory').className = which === 'memory' ? 'active' : '';
+    if (which === 'memory') loadMemory();
+  };
+  document.getElementById('tab-jobs').addEventListener('click', () => showTab('jobs'));
+  document.getElementById('tab-memory').addEventListener('click', () => showTab('memory'));
+  document.getElementById('memory-search').addEventListener('input', drawMemory);
   document.getElementById('start').addEventListener('click', () => {
     const links = document.getElementById('links').value.split(/\\r?\\n/).map(s => s.trim()).filter(Boolean);
     api('/start', {links, dry: document.getElementById('dry').checked}).then(() => { document.getElementById('links').value = ''; refresh(); });
@@ -581,6 +715,10 @@ class Server:
                         job_id = parse_qs(urlparse(self.path).query).get("job", [""])[0]
                         self._json(server.state.job_log(str(job_id)[:64]))
                     return
+                if path == "/memory":
+                    if self._allowed(True):
+                        self._json(server.state.memory_view())
+                    return
                 self._deny(HTTPStatus.NOT_FOUND, "no such page")
 
             def do_POST(self):
@@ -621,6 +759,12 @@ class Server:
                     if not isinstance(body.get("on"), bool):
                         self._deny(HTTPStatus.BAD_REQUEST, "on must be true or false"); return
                     self._json({"ok": True, "auto_submit": st.set_auto_submit(body["on"])}); return
+                if path == "/memory/edit":
+                    self._json(st.memory_edit(str(body.get("id", "")), body.get("answer"))); return
+                if path == "/memory/delete":
+                    self._json(st.memory_delete(str(body.get("id", "")))); return
+                if path == "/memory/save":
+                    self._json(st.save_to_profile(str(body.get("id", "")))); return
                 self._deny(HTTPStatus.NOT_FOUND, "no such action")
 
         self.httpd = ThreadingHTTPServer((host, port), Handler)
