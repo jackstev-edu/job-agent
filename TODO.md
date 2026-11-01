@@ -3373,5 +3373,151 @@ Items: 1 records (this entry; CLAUDE.md; the reviewer's category 1);
 profile, the Suggestions panel and aliases retired; 4 the Memory page;
 5 the jobs view redesign; 6 three small fixes (the override poll on
 Google's host and job boards; chooser._Answer answered only after
-set_files; the terminal's moved pause picks up); 7 the report. Reviewer
-outputs per commit are appended below as each lands.
+set_files; the terminal's moved pause picks up); 7 the report.
+
+Commits: 9d5402e (1), 93e55cd (2), fe30a9a (3a) with its two BLOCK
+fixes ab9cb55 and 8e628a3, da8281a (3b), 580cfd0 (4), 23999d0 (5),
+db933fc (6). The full suite ran once on fe30a9a (gate.py changed): 481
+passed in 36:03. Pushed after each item's review. Reviewer findings per
+commit follow, one line each; FLAGs logged, not folded, unless marked.
+
+Commit 9d5402e (item 1, records): VERDICT FLAG, 9. Nine record gaps
+between the brief and CLAUDE.md, all reconciled inside fe30a9a (so its
+reviewer judged the matching record): (1) the legal rule now names the
+exact key, the current-option rule and the same-host rule for a typed
+answer; (2) the learned key is recorded as the third owner-decided
+exception to "page text can only fail an exact comparison"; (3) and
+(4) the reviewer agent file's category 1 page-text line and category 3
+store line could NOT be edited from the session (the harness refuses
+edits of .claude/agents as self-modification): see decisions; (5) the
+gui.py line now says the Memory page shows a legal entry's value and
+the jobs view never does; (6) `init`'s blank template is named beside
+Jack's hand on the profile rule; (7) the sensitive.py line names the
+learned route; (8) the memory.py / learn.py / approve.py lines were
+forward-written: tagged by item until each landed; (9) precedence
+recorded: the profile line answers when it fits, a learned answer only
+where none fits (or a choice mapping exists for the exact key).
+
+Commit 93e55cd (item 2, job logs): VERDICT FLAG, 3 low + 1 info.
+(1) a job that parks before a Wizard exists (a refusal, an intake park
+with no tab) writes no file: the intake steps and the park reason are
+printed, not kept; (2) Sink.write advances its cursor after the whole
+batch, so an OSError mid-batch repeats those lines on the next flush;
+(3) no test runs a park -> continue_from cycle with one sink, and none
+covers a write failure leaving the job untouched; (info) log lines now
+persist 60 days under ~/.job-agent/logs, within the local-files model.
+
+Commit fe30a9a (item 3a, learned memory): VERDICT BLOCK. Learning was a
+pure value diff with no touch-mark condition, so a value the page set
+under a pause (a re-render, an autofill, a planted value) became
+Jack's learned answer, legal ones included, reused on the exact key.
+Fixed in ab9cb55. FLAGs: (2) DoD and clearance questions answered from
+memory against the 2026-10-20 ruling (folded in ab9cb55: refused on
+learn and reuse; needs Jack's word, see decisions); (3) a malformed
+learned.yaml loads empty and the next save replaces it (data loss; not
+folded); (4) tests missing: an untouched page-set change not learned
+(added in ab9cb55), a legal entry not reused on an ordinary field and
+the reverse, a learned free-text answer still stopping on the canned
+rule; (5) memory.note_use is never called (the uses counter stays 0);
+(6) a classifier per_company answer is reused at the same host but
+the gate still stops every per_company field; (7) the CLAUDE.md line
+said follow mode learns: it never did (corrected in 8e628a3).
+
+Commit ab9cb55 (fix 1 of 3a): VERDICT BLOCK. `fill` still learned
+ordinary entries from a value diff with no marks (no activity listener
+there). Fixed in 8e628a3: `fill` learns nothing. FLAGs: (2) marks are
+read only on a poll, so an edit within one poll interval of Jack's own
+Next press, or while another job's fill holds the main thread, is
+recorded but not learned (safe direction; fix would read the marks in
+the hook's payload); (3) the DoD / clearance carve-out is the main
+session's reading, Jack to confirm; (4) no terminal-pauser test of the
+touched set; (5) no test of a page-set value on a field whose mark was
+already in marked_before.
+
+Commit 8e628a3 (fix 2 of 3a): VERDICT FLAG, BLOCK resolved (the only
+caller of memory.learn is corrections.learn_from under the wizard's
+pause, filtered by the touched set). (1) apply.py's `memory` import and
+_log_corrections's `prof` parameter are now unused; (2)
+test_fill_learns_nothing does not assert the corrections.jsonl rows are
+still written by `fill`.
+
+Commit da8281a (item 3b, Save to profile): VERDICT FLAG, 4 low.
+(1) `apply.py learn`'s closing line and learn.py's docstring still point
+at the Suggestions panel; (2) _reload_if_changed re-reads the stamp
+after the reload, so a save landing in between is missed until the
+file changes again; (3) the "Fails on" comments in test_save_profile.py
+name fe30a9a, the grandparent (ab9cb55 touched none of those files);
+(4) the "nothing learned from it" check in the retire test cannot fail;
+(note) retire_aliases runs in `gui` only, `run` leaves the file, which
+nothing reads.
+
+Commit 580cfd0 (item 4, Memory page): VERDICT FLAG, 4. (1) the Save to
+profile confirm shows the box's text but the stored answer is written
+(press Save edit first, or the dialog misnames the value); (2) a GUI
+edit / delete and a learn() racing load their own copy and save the
+whole list: a lost update is possible in a millisecond window; (3) no
+test asserts an edit leaves key, kind, legal and scope unchanged and
+that an edited legal entry is not reused on an ordinary field; (4) one
+"gone from the file" clause tests nothing.
+
+Commit 23999d0 (item 5, jobs view): VERDICT FLAG, 4. (1) an open card
+is redrawn, with a fresh GET /log, on every 2 s poll (and a code typed
+into the verification box is lost on the redraw, as before); (2) the
+2026-10-29 CLAUDE.md line "READY — press Submit yourself" is now the
+chip "Ready" plus the summary: the older line not amended; (3) the
+"Dry run" chip class is dry_run but the stylesheet styles .chip.dry;
+(4) the "What it learned" assertion checks the body as a whole, not
+the learned list alone.
+
+Commit db933fc (item 6, three small fixes): VERDICT FLAG, 3. (1) the
+second `raise ChooserRefused` (after the fallback settle) sits inside
+`except Exception: pass` and is swallowed, so that path parks with the
+old "opened no file chooser" reason; the wait-loop path parks with the
+new one; no upload is logged either way; (2) the terminal's moved pause
+ends on `until` (pause.FINISHED) the moment the page moves, with no
+Enter from Jack, so a portal that navigates a few seconds after the
+agent's own Next now reaches _pick_up and a confirmation there is
+recorded as submitted by Jack (nothing pressed, nothing reviewed; the
+GUI path runs only after Continue): see decisions; (3) the moved-pause
+test's "fails on 23999d0" claim was not run by the reviewer (the main
+session ran it: all three failed on 23999d0).
+
+Decisions for Jack (2026-11-01):
+- The terminal's moved pause: should a page that moves on by itself
+  after the agent's Next (no Enter from Jack) count as Jack's pick-up
+  (db933fc finding 2)? Recommendation: no; run _pick_up only when the
+  pause ended on Enter (pause.ANSWERED) and keep the old hold on
+  FINISHED; fold next round with a test.
+- The reviewer agent file (.claude/agents/rule-reviewer.md) could not be
+  edited from the session (the harness refuses .claude/agents edits as
+  self-modification). Three lines wanted, by hand: category 1 "Page
+  text used ... (anything other than an exact comparison against a list
+  Jack wrote, or against a learned key Jack's own answer was recorded
+  under: the label, type and options in the allowed normalisation,
+  2026-11-01)"; category 1 "Any profile.yaml write not caused by Jack's
+  click (`init`'s blank template, at his command, excepted)"; category
+  3 "EEO, legal or comp values stored anywhere other than the profile
+  or ~/.job-agent/learned.yaml (Jack's own recorded answers,
+  2026-11-01)". Recommendation: apply all three; CLAUDE.md already says
+  so and the reviewer reads CLAUDE.md as authoritative.
+- Department of Defense and clearance questions are refused from
+  learned memory on both learn and reuse (ab9cb55), the session's
+  reading of the 2026-10-20 ruling "every DoD question is Jack's".
+  Recommendation: keep; say so in Jack's words if he agrees.
+- Precedence recorded in CLAUDE.md: the profile line answers when it
+  fits; a learned answer fills only where none fits (or a choice
+  mapping exists for the exact key). A legal override of a profile
+  answer is learned and shown on the Memory page but not reused while
+  the line fits. Recommendation: keep (the Memory page shows it).
+- The hook's read at Jack's own Next press carries values and no marks
+  (ab9cb55 finding 2): an edit within one poll of his press is recorded,
+  not learned. Recommendation: fold next round (refs only in the hook's
+  payload).
+- Learned memory's edit / delete and learn() can race in a millisecond
+  window (580cfd0 finding 2). Recommendation: fold next round (one
+  modify-under-lock helper).
+- An open job card re-fetches /log every 2 s (23999d0 finding 1).
+  Recommendation: fold next round (redraw only on a changed view).
+- A malformed learned.yaml loads empty and the next save replaces it
+  (fe30a9a finding 3). Recommendation: fold next round (refuse to save
+  over a file that didn't parse).
