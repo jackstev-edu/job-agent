@@ -38,7 +38,7 @@ def test_the_watch_polls_nothing_on_googles_host_or_a_job_board():
     # a stable identity, not on a credential step, its signature known.
     fields = [{"ref": f"{gen}-f1", "type": "text", "label": "City", "name": "city", "stable_identity": True,
                "credential_step": False, "sigs": {f"{gen}-f1": ["input", "text", "city"]}}]
-    with mock.patch.object(corrections._Hooked, "arm", lambda self, page, fields: None):
+    with mock.patch.object(corrections._Hooked, "arm", lambda self, page, fields, **kw: None):
         assert corrections.Watch(mock.Mock(url="https://x.example/"), fields).items, "the field must be readable"
         for what, url, calls in (("Google's sign-in site", "https://accounts.google.com/signin/v2", 0),
                                  ("Google on another path", "https://accounts.google.com/o/oauth2/consent", 0),

@@ -60,16 +60,29 @@ _TEXT_JS = "() => (document.body ? document.body.innerText : '').slice(0, 20000)
 # from the binding (the sync API deadlocks), and moments later the form is gone.
 _HOOK_JS = ("""
 (args) => {
-  const [name, items] = args;
+  const [name, items, marks] = args;
   const snap = """ + extract._SNAPSHOT_JS + """;
   // Which control fired the read goes along with it: a form's submit event
   // (with its submitter's text) or a press on a button (its text). Python
   // decides from that whether the read counts as submit-time.
   const textOf = b => String((b && (b.innerText || b.value)) || '').trim().slice(0, 80);
+  // With `marks` ([attr, refs]): which of those refs carry the attribute
+  // at the moment of the read (the override watch's touch marks, so an
+  // edit in the instant before Jack's own press is his: fold of
+  // ab9cb55's finding 2). Refs only; nothing of the field.
+  const marked = () => {
+    if (!marks) return null;
+    try {
+      return marks[1].filter(r => {
+        const el = document.querySelector(`[data-ja-ref="${CSS.escape(r)}"]`);
+        return !!el && el.hasAttribute(marks[0]);
+      });
+    } catch (e) { return null; }
+  };
   const fire = how => {
     let data = null;
     try { data = snap(items); } catch (e) {}
-    try { window[name](data, how); } catch (e) {}
+    try { window[name](data, how, marked()); } catch (e) {}
   };
   document.addEventListener('submit', e => fire('submit:' + textOf(e.submitter)), true);
   document.addEventListener('pointerdown', e => {
@@ -204,19 +217,23 @@ class Capture:
             return
         self.final, self.capture = snap, kind
 
-    def _on_submit(self, source, raw=None, how=None) -> None:
+    def _on_submit(self, source, raw=None, how=None, marks=None) -> None:
         # Runs inside Playwright's dispatch: no calls back into the page.
+        # `marks` (refs carrying the watch's touch mark) is for the
+        # override watch's subclass; the plain capture ignores it.
         accepted = _accept(raw, self._allowed)
         if accepted is not None:
             kind = read_kind(how)
             self._keep(extract.snapshot_from_raw(self.fields, accepted),
                        "inexact" if extract.partly_read(self.fields, accepted) else kind)
 
-    def arm(self, page: "Page", fields: list[dict]) -> None:
+    def arm(self, page: "Page", fields: list[dict], *, marks: tuple[str, list[str]] | None = None) -> None:
         """
         Watch these fields, and put the hook on the document showing now.
         The binding is exposed once per page; the hook goes on again after
-        every navigation and every fill. Never fails the run.
+        every navigation and every fill. Never fails the run. `marks`
+        (an attribute name and the refs to check it on) makes each read
+        also say which of those refs carry the attribute.
         """
         self.fields = list(fields)
         self._allowed = set(extract.readable_refs(self.fields))
@@ -230,7 +247,8 @@ class Capture:
                 # of what's taken, and it only ever reaches local files.
                 self._name = secrets.choice(string.ascii_letters) + secrets.token_hex(12)
                 page.expose_binding(self._name, self._on_submit)
-            page.evaluate(_HOOK_JS, [self._name, extract.read_items(self.fields)])
+            page.evaluate(_HOOK_JS, [self._name, extract.read_items(self.fields),
+                                     [marks[0], list(marks[1])] if marks else None])
             self.hooked = True
         except Exception:
             pass

@@ -124,28 +124,52 @@ def entry_id(key: str, kind: str, scope: str, answer: Any) -> str:
     return hashlib.sha1(f"{key}\x00{kind}\x00{scope}\x00{_norm(answer)}".encode("utf-8")).hexdigest()[:12]
 
 
-class Learned:
-    """The store, loaded once; every write goes through the one lock and an atomic replace."""
+class Unreadable(Exception):
+    """learned.yaml exists but couldn't be read as the store: nothing is saved over it."""
 
-    def __init__(self, entries: list[dict], at: Path | None = None):
+
+class Learned:
+    """
+    The store. Every write (learn, edit, delete) re-reads the file under
+    the one lock before applying and saving atomically, so a GUI edit and
+    a learn() racing each other lose nothing (fold of 580cfd0's finding
+    2). A file that exists but didn't parse marks the store unreadable:
+    it loads empty, every save is refused, and the file is kept as it is
+    for Jack to fix or delete (fold of fe30a9a's finding 3).
+    """
+
+    def __init__(self, entries: list[dict], at: Path | None = None, unreadable: str | None = None):
         self.entries = entries
         self.at = at or path()
+        self.unreadable = unreadable
 
     @classmethod
     def load(cls, at: Path | None = None) -> "Learned":
         at = at or path()
+        unreadable = None
         with _LOCK:
             try:
-                raw = yaml.safe_load(at.read_text(encoding="utf-8")) if at.exists() else None
-            except (OSError, yaml.YAMLError):
-                raw = None
+                raw = yaml.safe_load(at.read_text(encoding="utf-8")) if at.exists() else {"entries": []}
+            except (OSError, yaml.YAMLError) as e:
+                raw, unreadable = None, type(e).__name__
+        if unreadable is None and not (isinstance(raw, dict) and isinstance(raw.get("entries"), list)):
+            unreadable = "not a mapping with an entries list"
         entries = raw.get("entries") if isinstance(raw, dict) else None
-        good = [e for e in (entries or []) if isinstance(e, dict) and isinstance(e.get("key"), str)
+        good = [e for e in (entries if isinstance(entries, list) else []) if isinstance(e, dict) and isinstance(e.get("key"), str)
                 and e.get("kind") in (CHOICE, ANSWER, CANDIDATE) and isinstance(e.get("id"), str)]
-        return cls(good, at)
+        return cls(good, at, unreadable)
+
+    def _refresh(self) -> None:
+        """Under the lock: the file as it is now replaces this copy, before a write is applied to it."""
+        fresh = Learned.load(self.at)
+        self.entries, self.unreadable = fresh.entries, fresh.unreadable
+        if self.unreadable:
+            raise Unreadable(self.unreadable)
 
     def save(self) -> None:
         with _LOCK:
+            if self.unreadable:
+                raise Unreadable(self.unreadable)
             self.at.parent.mkdir(parents=True, exist_ok=True)
             text = ("# Learned by job-agent from what you entered yourself (Jack, 2026-11-01).\n"
                     "# Reused only on the exact same question. Edit or delete entries on the\n"
@@ -184,6 +208,7 @@ class Learned:
 
     def delete(self, entry_id_: str) -> bool:
         with _LOCK:
+            self._refresh()
             before = len(self.entries)
             self.entries = [e for e in self.entries if e.get("id") != entry_id_]
             if len(self.entries) == before:
@@ -194,6 +219,7 @@ class Learned:
     def edit(self, entry_id_: str, answer: str) -> bool:
         """Jack tunes an answer; the id changes with it (it names the answer), the key and kind stay."""
         with _LOCK:
+            self._refresh()
             e = self.get(entry_id_)
             if e is None or not isinstance(answer, str) or not answer.strip():
                 return False
@@ -236,9 +262,19 @@ def learn(changes: list[dict], *, url: str, portal: str, prof, store: Learned | 
     kind of change, what the agent held, what the box holds now, the
     plan's decision and the category). Returns the entries learned, in
     the store's shape, and saves. Values of a legal field are kept here
-    and nowhere else; a field never_reason refuses is skipped.
+    and nowhere else; a field never_reason refuses is skipped. Raises
+    Unreadable, saving nothing, when the file exists but didn't parse.
     """
     store = store or Learned.load()
+    with _LOCK:
+        store._refresh()
+        learned = _learn_into(store, changes, url=url, portal=portal, prof=prof)
+        if learned:
+            store.save()
+    return learned
+
+
+def _learn_into(store: Learned, changes: list[dict], *, url: str, portal: str, prof) -> list[dict]:
     host = host_of(url)
     learned: list[dict] = []
     for ch in changes:
@@ -280,10 +316,7 @@ def learn(changes: list[dict], *, url: str, portal: str, prof, store: Learned | 
                  "legal": legal, "scope": scope, "host": host, "portal": portal or "",
                  "first_seen": stamp, "last_seen": stamp, "seen": 1, "uses": 0, "posting": str(url)[:300],
                  "change": ch.get("kind") or "", **extra}
-        with _LOCK:
-            learned.append(_upsert(store, entry))
-    if learned:
-        store.save()
+        learned.append(_upsert(store, entry))
     return learned
 
 

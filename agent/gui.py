@@ -151,6 +151,12 @@ class Job:
         return short(self.reason or self.status)
 
 
+# learned.yaml exists but didn't parse: nothing is learned or saved over it
+# (fold of fe30a9a's finding 3; Jack, 2026-11-01, fold round, decision 4).
+_UNREADABLE = ("learned.yaml didn't parse (%s): nothing is learned or saved over it until you fix "
+               "or delete the file")
+
+
 class State:
     """What the page and the queue loop share. Every access takes the lock."""
 
@@ -245,6 +251,8 @@ class State:
             store = memory.Learned.load(self.memory_path)
         except Exception:
             return {"ok": False, "error": "learned memory couldn't be read", "entries": []}
+        if store.unreadable:
+            return {"ok": False, "error": _UNREADABLE % store.unreadable, "entries": []}
         out = []
         for e in store.entries:
             kind = e.get("kind")
@@ -276,6 +284,8 @@ class State:
         try:
             store = memory.Learned.load(self.memory_path)
             ok = store.edit(str(entry_id)[:64], answer)
+        except memory.Unreadable as e:
+            return {"ok": False, "error": _UNREADABLE % e}
         except Exception as e:
             return {"ok": False, "error": f"couldn't edit it ({type(e).__name__})"}
         return {"ok": ok} if ok else {"ok": False, "error": "no such entry"}
@@ -285,6 +295,8 @@ class State:
         try:
             store = memory.Learned.load(self.memory_path)
             ok = store.delete(str(entry_id)[:64])
+        except memory.Unreadable as e:
+            return {"ok": False, "error": _UNREADABLE % e}
         except Exception as e:
             return {"ok": False, "error": f"couldn't delete it ({type(e).__name__})"}
         return {"ok": ok} if ok else {"ok": False, "error": "no such entry"}
@@ -447,7 +459,10 @@ class State:
 
     def snapshot(self) -> dict:
         with self.lock:
-            return {"jobs": [j.view() for j in self.jobs], "browser_open": self.browser_open,
+            # log_stamp: the log file's size, so an open card refetches
+            # the log only when it grew (fold of 23999d0's finding 1).
+            return {"jobs": [{**j.view(), "log_stamp": joblog.stamp(j.id, root=self.log_root)} for j in self.jobs],
+                    "browser_open": self.browser_open,
                     "notice": self.notice, "auto_submit": self.auto_submit is True}
 
     def _job(self, job_id: str) -> Job | None:
@@ -512,6 +527,7 @@ button.primary { background: #16202b; color: #fff; border-color: #16202b; }
 .mentry input.answer { font: inherit; width: 24rem; max-width: 100%%; padding: .2rem .4rem; }
 .mentry .meta { color: var(--muted); font-size: .85em; }
 .mentry .legal { color: #6a0f14; font-size: .85em; }
+#memory-groups .broken { color: #8a1c21; font-weight: 600; }
 </style></head>
 <body><main>
 <h1>job-agent</h1>
@@ -552,6 +568,9 @@ button.primary { background: #16202b; color: #fff; border-color: #16202b; }
       const t = el('div', text); t.id = 'toast'; t.addEventListener('click', () => t.remove()); document.body.appendChild(t); };
   const shortUrl = u => { try { const x = new URL(u); const path = x.pathname.length > 28 ? x.pathname.slice(0, 27) + '…' : x.pathname; return x.hostname + path; } catch (e) { return String(u).slice(0, 60); } };
   const chipClass = j => (j.short_status || '').toLowerCase().replace(' ', '_');
+  const bodyKey = j => JSON.stringify([j.status, j.short_status, j.summary, j.reason, j.landing, j.dry, j.pause,
+                                       j.code_given, j.log_stamp === undefined ? null : j.log_stamp]);
+  const drawn = new Map();   // job id -> {key, body} of each open card, carried across polls
   const drawBody = (j, body) => {
     body.replaceChildren();
     const u = el('div', shortUrl(j.url), 'url'); u.title = j.url; body.appendChild(u);
@@ -625,12 +644,23 @@ button.primary { background: #16202b; color: #fff; border-color: #16202b; }
       head.appendChild(el('span', j.portal || '', 'muted'));
       head.appendChild(el('span', j.short_status + (j.dry && j.short_status !== 'Dry run' ? ' (dry)' : ''), 'chip ' + cls));
       head.appendChild(el('div', j.summary || '', 'sum'));
-      const body = el('div', undefined, 'body'); body.hidden = !open.has(j.id);
+      // An open card's body is drawn (and its log fetched) only when
+      // what it shows changed since the last poll; otherwise the body
+      // element is carried over, a code typed into it and all.
+      const key = bodyKey(j);
+      const prev = drawn.get(j.id);
+      let body;
+      if (open.has(j.id) && prev && prev.key === key) body = prev.body;
+      else {
+        body = el('div', undefined, 'body');
+        if (open.has(j.id)) { drawBody(j, body); drawn.set(j.id, {key, body}); } else drawn.delete(j.id);
+      }
+      body.hidden = !open.has(j.id);
       head.addEventListener('click', ev => {
         if (ev.target.closest('button, input, label')) return;
-        if (open.has(j.id)) { open.delete(j.id); body.hidden = true; } else { open.add(j.id); drawBody(j, body); body.hidden = false; }
+        if (open.has(j.id)) { open.delete(j.id); drawn.delete(j.id); body.hidden = true; }
+        else { open.add(j.id); drawBody(j, body); drawn.set(j.id, {key, body}); body.hidden = false; }
       });
-      if (!body.hidden) drawBody(j, body);
       card.appendChild(head); card.appendChild(body); list.appendChild(card);
       if (j.pause) { if (!seenNeedsYou.has(j.id)) { seenNeedsYou.add(j.id); chime(880); } } else seenNeedsYou.delete(j.id);
       if (j.status === 'failed') { if (!seenFailed.has(j.id)) { seenFailed.add(j.id); chime(440);
@@ -685,7 +715,10 @@ button.primary { background: #16202b; color: #fff; border-color: #16202b; }
     }
     if (!shown) box.appendChild(el('p', memoryEntries.length ? 'nothing matches' : 'nothing learned yet', 'muted'));
   };
-  const loadMemory = () => fetch('/memory', {headers: {'X-Token': TOKEN}}).then(r => r.json()).then(r => { memoryEntries = (r && r.ok && r.entries) ? r.entries : []; drawMemory(); }).catch(() => {});
+  const loadMemory = () => fetch('/memory', {headers: {'X-Token': TOKEN}}).then(r => r.json()).then(r => {
+    memoryEntries = (r && r.ok && r.entries) ? r.entries : []; drawMemory();
+    if (r && r.ok === false && r.error) { const box = document.getElementById('memory-groups'); box.replaceChildren(el('p', r.error, 'broken')); }
+  }).catch(() => {});
   const showTab = which => {
     document.getElementById('jobs').hidden = which !== 'jobs';
     document.getElementById('memory').hidden = which !== 'memory';

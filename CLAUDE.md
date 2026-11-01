@@ -40,7 +40,10 @@ run as `python apply.py <command>` (no make).
 - `agent/corrections.py` — the corrections.jsonl row builder (shared by
   `fill`'s logger and the wizard) and the override watch on a paused
   page: the snapshot read policy, polled every 2 s and hooked for Jack's
-  own Next / Submit press; diffed when the pause ends (decision A).
+  own Next / Submit press (the hook's read also carries which watched
+  refs hold his touch mark at that instant, refs only: Jack,
+  2026-11-01, fold round, decision 4); diffed when the pause ends
+  (decision A).
 - `agent/approve.py` — the one profile writer: Jack's "Save to profile"
   click writes one ordinary profile line, comments and order kept
   (ruamel.yaml, a timestamped backup first, a changed file refused),
@@ -61,7 +64,11 @@ run as `python apply.py <command>` (no make).
   HARD_STOPS field. A Department of Defense or clearance question is
   learned and reused like any other legal one (Jack, 2026-11-01, fold
   round, decision 1). A profile line on a strict fit wins over an entry;
-  an entry beats a loose fit (decision 2). Under a pause only a change on a field
+  an entry beats a loose fit (decision 2). Every write (learn, edit,
+  delete) re-reads the file under one lock before applying it; a file
+  that exists but didn't parse loads empty, is never saved over, and is
+  reported in the job log and on the Memory page (decision 4). Under a
+  pause only a change on a field
   that gained his touch mark (the override watch reads the marks at
   every poll) is learned: a value the page set itself is recorded in
   corrections.jsonl but never learned. Reuse happens in `pipeline.route`
@@ -143,8 +150,11 @@ run as `python apply.py <command>` (no make).
   in State and is read by the wizard at the final page (Jack,
   2026-10-29). The Memory page (Jack, 2026-11-01, decision 3; item 4
   of that round) lists every learned entry with its answer, legal ones
-  included, for Jack to edit or delete; the jobs view still never shows
-  a legal, EEO or pay value.
+  included, for Jack to edit or delete, and says so when learned.yaml
+  didn't parse; the jobs view still never shows a legal, EEO or pay
+  value. An open job card is redrawn, and its log fetched, only when
+  the row or the log's size changed since the last poll (Jack,
+  2026-11-01, fold round, decision 4).
 - `agent/snapshot.py` — `apply.py snapshot`: a structure dump of the page
   the agent's browser shows (tag, type, role, aria-*, data-automation-id,
   name, id, label, required, visibility, container chain), no input

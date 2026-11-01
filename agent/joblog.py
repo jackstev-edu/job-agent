@@ -77,6 +77,17 @@ def find(job_id: str, *, root: Path | None = None) -> Path | None:
     return found[-1] if found else None
 
 
+def stamp(job_id: str, *, root: Path | None = None) -> int | None:
+    """The job's log size in bytes (None with no file): the GUI refetches the log only when it changed."""
+    path = find(job_id, root=root)
+    if path is None:
+        return None
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
 def read(job_id: str, *, root: Path | None = None, limit: int = 2000) -> list[str] | None:
     """The job's lines (the last `limit`), or None when it has no file yet."""
     path = find(job_id, root=root)

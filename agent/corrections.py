@@ -155,6 +155,10 @@ def learn_from(changes_: list[dict], *, url: str, portal: str, prof, log: list |
     """
     try:
         learned = memory.learn(changes_, url=url, portal=portal, prof=prof)
+    except memory.Unreadable as e:
+        if log is not None:
+            log.append(f"learned.yaml didn't parse ({e}): nothing learned or saved over it; fix or delete the file")
+        return []
     except Exception as e:
         if log is not None:
             log.append(f"couldn't learn from your entries ({type(e).__name__})")
@@ -176,13 +180,33 @@ def append(rows: list[dict], at: Path | None = None) -> Path:
 
 
 class _Hooked(outcome.Capture):
-    """outcome.Capture with the time of its newest read, so the watch can pick the later of hook and poll."""
+    """
+    outcome.Capture with the time of its newest read, so the watch can pick
+    the later of hook and poll, and with the touch marks the read carried:
+    the fields (by their own and their options' refs) that held Jack's
+    mark at his press go into the watch's `marks` (fold of ab9cb55's
+    finding 2: an edit within one poll of his own Next press is his).
+    """
 
     at: float | None = None
+
+    def __init__(self, by_field: dict[str, list[str]] | None = None, marks: set | None = None):
+        super().__init__()
+        self.by_field = by_field or {}
+        self.marks = marks if marks is not None else set()
 
     def _keep(self, snap: dict, kind: str) -> None:
         super()._keep(snap, kind)
         self.at = time.monotonic()
+
+    def _on_submit(self, source, raw=None, how=None, marks=None) -> None:
+        super()._on_submit(source, raw, how, marks)
+        if isinstance(marks, list):
+            hit = {r for r in marks[:_MAX_MARKS] if isinstance(r, str)}
+            self.marks |= {ref for ref, refs in self.by_field.items() if any(r in hit for r in refs)}
+
+
+_MAX_MARKS = 2000
 
 
 class Watch:
@@ -206,8 +230,9 @@ class Watch:
         self.by_field = {f["ref"]: [f["ref"], *(r for r in (f.get("option_refs") or []) if r != f["ref"])]
                          for f in self.fields if f.get("type") != "file" and f.get("ref")}
         self.marks: set[str] = set()
-        self.hook = _Hooked()
-        self.hook.arm(page, self.fields)
+        self.hook = _Hooked(self.by_field, self.marks)
+        self.hook.arm(page, self.fields,
+                      marks=(ledger.REVIEW_ATTR, [r for refs in self.by_field.values() for r in refs]))
         self.last: dict | None = None
         self.at: float | None = None
         self.polled_at: float = 0.0
