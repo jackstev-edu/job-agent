@@ -15,6 +15,7 @@ with something you wrote, never passes one.
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from typing import Any
@@ -99,6 +100,19 @@ def normalize_label(text: Any) -> str:
     t = unicodedata.normalize("NFKC", str(text or "")).casefold()
     t = re.sub(r"\s+", " ", t).strip()
     return t[:-1].rstrip() if t.endswith("*") else t
+
+
+def question_key(field: dict) -> str:
+    """
+    The question as asked, in the allowed normalisation and nothing
+    else: the label, the field type, and for a choice field the sorted
+    option texts. A learned answer (memory.py) is reused on this key
+    alone, and the gate recomputes it here from the record's own field
+    to trust a "learned" legal answer (Jack, 2026-11-01).
+    """
+    options = sorted(normalize_label(o) for o in (field.get("options") or []) if str(o or "").strip())
+    return json.dumps([normalize_label(field.get("label")), normalize_label(field.get("type")), options],
+                      ensure_ascii=False)
 
 
 def _same_text(a: Any, b: Any) -> bool:
@@ -515,18 +529,31 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
                      "source": (decision or {}).get("source"),
                      "fit": (decision or {}).get("fit")}
             trace.append(entry)
-            if not decision or entry["source"] != "profile" or not entry["profile_path"]:
+            # Jack's own recorded answer on the identical question (Jack,
+            # 2026-11-01, decision 4): source "learned" counts as traced
+            # only when the key the gate recomputes from this field equals
+            # the key the answer was learned under. Anything else about the
+            # key (a missing one, a different one) is not traced.
+            learned_ok = bool(decision and entry["source"] == "learned"
+                              and isinstance(decision.get("learned_key"), str)
+                              and decision.get("learned_key") == question_key(f))
+            traced_to_profile = bool(decision and entry["source"] == "profile" and entry["profile_path"])
+            if not (traced_to_profile or learned_ok):
                 content.append(f"{name}: legal/eligibility/EEO/pay answer not traced to a "
-                               f"profile line (left for you)")
+                               f"profile line or to your own answer on this question (left for you)")
                 continue
             guards = sensitive.legal_guard_kinds(f)
             if len(set(guards)) > 1:
                 content.append(f"{name}: reads as more than one kind of legal question "
                                f"({'/'.join(guards)})")
-            if guards and not sensitive.in_legal_area(entry["profile_path"], guards):
+            if guards and entry["profile_path"] and not sensitive.in_legal_area(entry["profile_path"], guards):
                 content.append(f"{name}: answered from {entry['profile_path']}, which isn't "
                                f"a {'/'.join(guards)} profile line")
             fits = sensitive.LEGAL_FITS if guards else STRICT_FITS
+            if learned_ok and not f.get("options"):
+                # His typed answer in a box with no options, as written
+                # (a salary box; reused at the same host only by memory.py).
+                fits = fits | {"verbatim"}
             if entry["fit"] not in fits:
                 content.append(f"{name}: profile answer matched the options loosely "
                                f"({entry['fit']}), not exactly")

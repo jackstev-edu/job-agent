@@ -30,10 +30,23 @@ import _harness  # noqa: F401
 
 @pytest.fixture(autouse=True)
 def _empty_vault():
-    """Every test starts and ends with the in-memory keyring empty: a password stored by one test is never another's."""
+    """
+    Every test starts and ends with the in-memory keyring empty and no
+    learned memory in the throwaway home: a password stored, or an answer
+    learned (memory.py, 2026-11-01), by one test is never another's.
+    """
     _harness.FAKE_KEYRING.store.clear()
+    _forget_learned()
     yield
     _harness.FAKE_KEYRING.store.clear()
+    _forget_learned()
+
+
+def _forget_learned():
+    from agent import memory
+    at = memory.path()
+    assert str(at).startswith(str(_harness.TEST_HOME))
+    at.unlink(missing_ok=True)
 
 TESTS_DIR = Path(__file__).resolve().parent
 

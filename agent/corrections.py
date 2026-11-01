@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import classify, config, extract, learn, outcome, sensitive, tracker
+from . import classify, config, extract, learn, memory, outcome, sensitive, tracker
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -64,19 +64,19 @@ def _line_for(field: dict, decision: dict | None) -> str | None:
             or next(iter(sensitive.profile_lines(sensitive._question_text(field))), None))
 
 
-def rows_for(url: str, fields: list[dict], plan: dict, categories: dict, final: dict, *,
-             results: dict | None = None, baseline: dict | None = None, source: str = "fill",
-             portal: str = "") -> tuple[list[dict], list[str]]:
+def changes(fields: list[dict], plan: dict, final: dict, *, results: dict | None = None,
+            baseline: dict | None = None, source: str = "fill",
+            categories: dict | None = None) -> tuple[list[dict], list[str]]:
     """
-    The correction rows a read of the form (`final`, by ref) implies, and
-    the labels of fields the read left out (nothing is recorded for them).
-    What the agent left in a box is `baseline` (its fill-time read-back)
-    when known, else the plan's value when the fill went through, else
-    nothing. A box that holds something else now is a correction: kind
-    filled_blank (the agent planned nothing), filled_after_failure (it
-    planned a value the fill didn't land) or overwrote.
+    The changes a read of the form (`final`, by ref) implies, with the
+    real values, and the labels of fields the read left out. One dict per
+    change: field, kind (filled_blank, filled_after_failure, overwrote),
+    agent (what the agent held), now (what the box holds), decision,
+    category. The one diff behind rows_for (corrections.jsonl, values
+    dropped for anything sensitive) and memory.learn (Jack's own answers,
+    kept there and nowhere else).
     """
-    rows: list[dict] = []
+    out: list[dict] = []
     unread: list[str] = []
     for f in fields:
         if f.get("type") in ("file", "password") or extract.is_secret(f):
@@ -105,24 +105,63 @@ def rows_for(url: str, fields: list[dict], plan: dict, categories: dict, final: 
             continue
         if _norm(now) == "" and source != "fill":
             continue                            # the brief's three kinds all hold a value now
-        cat = categories.get(ref, "unknown")
         if _norm(planned) and not landed and _norm(agent) == "":
             kind = FILLED_AFTER_FAILURE
         elif _norm(agent) == "":
             kind = FILLED_BLANK
         else:
             kind = OVERWROTE
+        out.append({"field": f, "kind": kind, "agent": agent, "now": now, "decision": decision,
+                    "category": (categories or {}).get(ref, "unknown")})
+    return out, unread
+
+
+def rows_for(url: str, fields: list[dict], plan: dict, categories: dict, final: dict, *,
+             results: dict | None = None, baseline: dict | None = None, source: str = "fill",
+             portal: str = "") -> tuple[list[dict], list[str]]:
+    """
+    The correction rows a read of the form (`final`, by ref) implies, and
+    the labels of fields the read left out (nothing is recorded for them).
+    What the agent left in a box is `baseline` (its fill-time read-back)
+    when known, else the plan's value when the fill went through, else
+    nothing. A box that holds something else now is a correction: kind
+    filled_blank (the agent planned nothing), filled_after_failure (it
+    planned a value the fill didn't land) or overwrote.
+    """
+    found, unread = changes(fields, plan, final, results=results, baseline=baseline,
+                            source=source, categories=categories)
+    rows: list[dict] = []
+    for ch in found:
+        f, cat = ch["field"], ch["category"]
         safe = _safe(f, cat)
         rows.append({
             "url": url, "portal": portal, "source": source,
-            "label": f.get("label"), "type": f.get("type"), "category": cat, "kind": kind,
-            "agent_value": agent if safe else None,
-            "final_value": now if safe else None,
-            "profile_path": _line_for(f, decision),
+            "label": f.get("label"), "type": f.get("type"), "category": cat, "kind": ch["kind"],
+            "agent_value": ch["agent"] if safe else None,
+            "final_value": ch["now"] if safe else None,
+            "profile_path": _line_for(f, ch["decision"]),
             "logged_at": tracker._timestamp(),
             "log_version": learn.LOG_VERSION,
         })
     return rows, unread
+
+
+def learn_from(changes_: list[dict], *, url: str, portal: str, prof, log: list | None = None) -> list[dict]:
+    """
+    Jack's own entries into learned memory (Jack, 2026-11-01): one entry
+    per change memory accepts; the job log names each by question and
+    kind, never by value. Never raises.
+    """
+    try:
+        learned = memory.learn(changes_, url=url, portal=portal, prof=prof)
+    except Exception as e:
+        if log is not None:
+            log.append(f"couldn't learn from your entries ({type(e).__name__})")
+        return []
+    if learned and log is not None:
+        log.append(f"learned {len(learned)} answer(s) of yours for the same question next time: "
+                   + ", ".join(memory.describe(e) for e in learned[:6]))
+    return learned
 
 
 def append(rows: list[dict], at: Path | None = None) -> Path:
@@ -191,11 +230,12 @@ class Watch:
         return self.last
 
 
-def log_overrides(watch: Watch | None, fill, *, url: str, portal: str, log: list) -> list[dict]:
+def log_overrides(watch: Watch | None, fill, *, url: str, portal: str, log: list, prof=None) -> list[dict]:
     """
     The pause on `fill`'s page ended: diff the watch's last read against
-    what the agent planned and filled, write the rows, say in the job log
-    what was recorded and what couldn't be. Never raises.
+    what the agent planned and filled, write the rows, learn his entries
+    into memory (Jack, 2026-11-01), say in the job log what was recorded
+    and what couldn't be. Never raises.
     """
     if watch is None or fill is None:
         return []
@@ -205,8 +245,8 @@ def log_overrides(watch: Watch | None, fill, *, url: str, portal: str, log: list
         return []
     try:
         step = getattr(fill, "step", None) or {}
-        rows, unread = rows_for(url, watch.fields, getattr(fill, "plan", None) or {},
-                                getattr(fill, "categories", None) or {}, final,
+        plan, categories = getattr(fill, "plan", None) or {}, getattr(fill, "categories", None) or {}
+        rows, unread = rows_for(url, watch.fields, plan, categories, final,
                                 results=step.get("results"), baseline=getattr(fill, "snapshot", None) or {},
                                 source="override", portal=portal)
         if rows:
@@ -216,6 +256,10 @@ def log_overrides(watch: Watch | None, fill, *, url: str, portal: str, log: list
         if unread:
             log.append(f"no readable last read of {len(unread)} field(s) under the pause, nothing recorded for them: "
                        + ", ".join(f"'{u[:40]}'" for u in unread[:5]))
+        found, _ = changes(watch.fields, plan, final, results=step.get("results"),
+                           baseline=getattr(fill, "snapshot", None) or {}, source="override",
+                           categories=categories)
+        learn_from(found, url=url, portal=portal, prof=prof, log=log)
         return rows
     except Exception as e:
         log.append(f"couldn't record corrections ({type(e).__name__})")

@@ -407,7 +407,8 @@ class Wizard:
                 watch.poll(self.page, force=True)
         except Exception:
             pass
-        corrections.log_overrides(watch, fill, url=self.url, portal=self.portal, log=self.out.log)
+        corrections.log_overrides(watch, fill, url=self.url, portal=self.portal, log=self.out.log,
+                                  prof=self.prof)
         pending["watch"] = None
 
     def poll_watch(self) -> None:

@@ -20,8 +20,8 @@ from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import (adapters, browser as browser_mod, classify, extract, filler, mapper, outcome,
-               sensitive, shadow)
+from . import (adapters, browser as browser_mod, classify, extract, filler, mapper, memory,
+               outcome, sensitive, shadow)
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -60,13 +60,16 @@ def resume_box(fields: list[dict]) -> dict | None:
 
 
 def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str],
-          held_reason: str = HELD_AFTER_UPLOAD) -> tuple[dict, list[dict], list[dict]]:
+          held_reason: str = HELD_AFTER_UPLOAD, *, learned=None, host: str = "") -> tuple[dict, list[dict], list[dict]]:
     """
     The policy for one page's fields: (plan from the profile, flags for you,
     fields for the mapper). Sensitive fields never reach the mapper. Shared
     by every mode, so each routes a field the same way. `new_after_upload`
     holds the fields whose help text the classifier wasn't shown;
-    `held_reason` says why, on the review sheet.
+    `held_reason` says why, on the review sheet. `learned` (memory.Learned,
+    Jack, 2026-11-01) answers a field from his own recorded answer on the
+    exact same question: a human verdict's gap, a choice mapping over a
+    profile fit, or ahead of the model; `host` scopes the host-only ones.
     """
     plan: dict[str, dict] = {}
     flags: list[dict] = []
@@ -95,6 +98,10 @@ def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str]
             continue
         verdict = sensitive.decide(
             field, categories.get(field["ref"], "unknown"), prof)
+        remembered = memory.reuse(field, category, verdict, prof, learned, host) if learned is not None else None
+        if remembered is not None:
+            plan[field["ref"]] = remembered
+            continue
         if verdict["action"] == "human":
             flags.append({**verdict, "ref": field["ref"]})
         elif verdict["action"] == "fill":
@@ -317,6 +324,14 @@ class PageFill:
     held: list[str] = dataclass_field(default_factory=list)     # refs left as they are (protect_held)
 
 
+def _learned_store():
+    """The learned memory for one page's routing, or None when it can't be read (nothing reused then)."""
+    try:
+        return memory.Learned.load()
+    except Exception:
+        return None
+
+
 def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | None,
               posting_text: str, portal: str = "generic", protect_held: bool = False) -> PageFill | None:
     """
@@ -389,7 +404,7 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
         categories = classify.classify_fields([f for f in fields if f.get("type") != "file"
                                                and f["ref"] not in marked])
     plan, flags, for_model = route([f for f in fields if f["ref"] not in marked], categories, prof,
-                                   new_after_upload)
+                                   new_after_upload, learned=_learned_store(), host=memory.host_of(page.url))
     held: list[str] = []
     for f in fields:
         if f["ref"] in marked:

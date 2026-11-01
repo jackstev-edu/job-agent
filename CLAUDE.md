@@ -20,7 +20,9 @@ run as `python apply.py <command>` (no make).
   regex backstop runs alongside; a field must clear BOTH layers to be
   auto-filled. A legal backstop (LEGAL_GUARD) sends any question that reads
   as eligibility, EEO or pay to a named profile line with a strict fit, or
-  to the user, whatever the classifier said.
+  (since 2026-11-01, `agent/memory.py` in `pipeline.route`) to Jack's own
+  recorded answer on the identical key, or to the user, whatever the
+  classifier said.
 - `agent/extract.py` — injects JS to pull a compact field list out of the page.
 - `agent/mapper.py` — answers ordinary fields in batches of 10, under a prompt
   that forces `null` rather than a guess.
@@ -33,8 +35,8 @@ run as `python apply.py <command>` (no make).
   profile; CAPTCHA and login-wall detection.
 - `agent/learn.py` — the text report of the corrections log for
   `apply.py learn`; writes nothing. (Its Suggestions rows and the GUI's
-  Suggestions panel were retired on 2026-11-01: learning is automatic,
-  into `agent/memory.py`.)
+  Suggestions panel are retired on 2026-11-01, item 3b of that round:
+  learning is automatic, into `agent/memory.py`.)
 - `agent/corrections.py` — the corrections.jsonl row builder (shared by
   `fill`'s logger and the wizard) and the override watch on a paused
   page: the snapshot read policy, polled every 2 s and hooked for Jack's
@@ -44,9 +46,9 @@ run as `python apply.py <command>` (no make).
   (ruamel.yaml, a timestamped backup first, a changed file refused),
   never a legal, eligibility, EEO, pay, DoD or per-company line. No
   other code path writes `profile.yaml` (Jack, 2026-11-01). The alias
-  and dismissed-suggestion routes it held were retired on 2026-11-01;
-  `aliases.yaml` is renamed `aliases.yaml.retired`, nothing learned
-  from it.
+  and dismissed-suggestion routes it held are retired on 2026-11-01
+  (item 3b of that round); `aliases.yaml` is renamed
+  `aliases.yaml.retired`, nothing learned from it.
 - `agent/memory.py` — learned memory (Jack, 2026-11-01): what Jack
   entered himself (an override under a pause, a field the agent failed
   or left blank), keyed by the question as asked (normalised label,
@@ -55,8 +57,13 @@ run as `python apply.py <command>` (no make).
   Legal, eligibility, EEO and pay answers reuse only from his own
   recorded answer on the identical question. Never learned: passwords
   and anything secret-classified, one-time codes, file uploads, any
-  checkbox, any HARD_STOPS field. The GUI's Memory page edits and
-  deletes entries.
+  checkbox, a credential, consent or legal-declaration field, any
+  HARD_STOPS field. Reuse happens in `pipeline.route` after
+  `sensitive.decide` (the wizard's page fill; `fill` and follow mode
+  learn but do not reuse); the gate trusts a "learned" legal answer only
+  when the key it recomputes from the record's field equals the key the
+  decision carries. The GUI's Memory page (item 4) edits and deletes
+  entries.
 - `agent/follow.py` — follow mode's step detection (structure only).
 - `agent/ledger.py` — follow mode's never-overwrite ledger, activity guard
   and classification cache.
@@ -127,7 +134,10 @@ run as `python apply.py <command>` (no make).
   never offered for approval and its value never reaches the page. The
   auto-submit switch (default OFF at every start, never persisted) lives
   in State and is read by the wizard at the final page (Jack,
-  2026-10-29).
+  2026-10-29). The Memory page (Jack, 2026-11-01, decision 3; item 4
+  of that round) lists every learned entry with its answer, legal ones
+  included, for Jack to edit or delete; the jobs view still never shows
+  a legal, EEO or pay value.
 - `agent/snapshot.py` — `apply.py snapshot`: a structure dump of the page
   the agent's browser shows (tag, type, role, aria-*, data-automation-id,
   name, id, label, required, visibility, container chain), no input
@@ -474,8 +484,14 @@ page when the file changed. Pushed after each item.
 - The model never answers legal questions. Eligibility, EEO and
   compensation come only from Jack's own answers: a named profile line,
   or an answer he entered himself that the agent recorded, reused only
-  for the same question (Jack, 2026-11-01).
-- `profile.yaml` is changed only by Jack's hand or his Save to profile
+  for the same question (Jack, 2026-11-01): the exact key (normalised
+  label, field type, sorted options), a choice only equal to one of the
+  form's current options, a typed answer at the same host only. The
+  profile line answers when it fits; a learned answer fills only where
+  no profile answer fits (or, for an ordinary field, where a choice
+  mapping exists for the exact key).
+- `profile.yaml` is changed only by Jack's hand (his editor, or `init`
+  writing the blank template at his command) or his Save to profile
   click; learning never rewrites it (Jack, 2026-11-01).
 - The agent never reads a password from a page and never logs, prints,
   screenshots or sends one, and never writes one to a file, the repo,
@@ -612,7 +628,11 @@ How the code keeps them, and rules of its own:
   comparison with something the user wrote, never pass one (the consent
   policy above, and the Google chooser and consent screen of the
   2026-10-19 decisions, are the owner-decided exceptions; each can only
-  tick a box or press a Google control, never answer a question). No answer value for a legal, eligibility,
+  tick a box or press a Google control, never answer a question; the
+  third, Jack's decisions 2 and 4 of 2026-11-01, is the learned key: a
+  page's label, type and options equal, in the allowed normalisation,
+  to the key Jack's own answer was recorded under answer the field with
+  that answer, a choice only as an option the form offers now). No answer value for a legal, eligibility,
   EEO or pay field is ever stored in `gate_runs`; in the edits diff a
   checkbox whose tick is such an answer records only that it changed.
 - Google sign-in (Jack, 2026-10-19): `accounts.py` presses a control whose

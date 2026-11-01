@@ -30,7 +30,7 @@ _FIELD_KEYS = ("ref", "type", "widget", "label", "name", "placeholder", "require
 
 # The parts of a plan decision the gate reads.
 _DECISION_KEYS = ("value", "source", "profile_path", "fit", "confidence", "needs_review",
-                  "review_reasons", "draft", "note", "category")
+                  "review_reasons", "draft", "note", "category", "learned_key", "learned_id")
 
 
 def step_entry(fields: list[dict], categories: dict, plan: dict, flags: list[dict],
