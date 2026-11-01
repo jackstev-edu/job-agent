@@ -11,7 +11,10 @@ correction to an ordinary line becomes a profile candidate reused for
 that key alone; a legal answer of his is reused on the identical
 question and not when one word or one option differs, the model is
 never handed the field, and the gate takes a "learned" legal answer
-only with the exact key; a hard-stop question, a consent box, a
+only with the exact key; a Department of Defense or clearance answer of
+his is reused the same way (Jack, 2026-11-01, fold round, decision 1);
+a learned entry beats a loose profile fit (bool_prefix, substring) and
+loses to a strict one (exact, bool, decline) (decision 2); a hard-stop question, a consent box, a
 password, a credential and a code box are never learned; free text is
 reused at the same host only; a deleted entry is never reused; no
 module but approve.py can write profile.yaml; and, in a headless
@@ -307,8 +310,10 @@ def test_a_value_the_page_sets_under_a_pause_is_recorded_but_never_learned():
     check.done()
 
 
-def test_dod_and_clearance_questions_are_never_learned_or_answered():
-    # Fails on fe30a9a: both were learned and reused on the exact key.
+def test_a_dod_or_clearance_answer_of_jacks_is_reused_on_the_identical_question_only():
+    # Fails on cac014c: memory.never_reason refused both on learn and on reuse
+    # (the session's reading of the 2026-10-20 ruling, superseded by Jack's
+    # decision 1 of the 2026-11-01 fold round).
     check = Checks()
     prof, store = _prof(), _store("dod")
     for what, field in (("a Department of Defense question",
@@ -317,15 +322,115 @@ def test_dod_and_clearance_questions_are_never_learned_or_answered():
                         ("a clearance question",
                          {"ref": "d2", "type": "select", "label": "Do you hold a security clearance?",
                           "options": ["Yes", "No"]})):
-        learned = memory.learn([_change(field, "No", category="work_authorization")], url=URL_A, portal="generic",
-                               prof=prof, store=store)
-        check(learned == [] and memory.never_reason(field, "work_authorization"), f"{what}: never learned")
-        store.entries.append({"id": "planted", "kind": memory.ANSWER, "key": gate.question_key(field), "question": field["label"],
-                              "type": "select", "options": field["options"], "answer": "No", "line": None, "legal": True,
-                              "scope": memory.ANY, "host": "", "portal": "", "first_seen": "t", "last_seen": "t"})
         decision, flags, for_model = _route(field, "work_authorization", prof, store, "x.example")
         check(decision is None and flags and flags[0]["source"] == "human" and not for_model,
-              f"{what}: an entry planted in the file is not reused; the question is Jack's")
+              f"{what}: with nothing learned, Jack's and never the model's")
+        learned = memory.learn([_change(field, "No", category="work_authorization")], url=URL_A, portal="generic",
+                               prof=prof, store=store)
+        check(len(learned) == 1 and learned[0]["legal"] is True and learned[0]["kind"] == memory.ANSWER
+              and learned[0]["scope"] == memory.ANY and memory.never_reason(field, "work_authorization") is None,
+              f"{what}: his answer is learned as a legal one ({learned})")
+        decision, flags, for_model = _route(field, "work_authorization", prof, store, "y.example")
+        check(decision and decision["value"] == "No" and decision["source"] == "learned" and decision["fit"] == "exact"
+              and decision["learned_key"] == gate.question_key(field) and not flags and not for_model,
+              f"{what}: the identical question on another posting takes his answer ({decision})")
+        for how, variant in (("a different wording", dict(field, label=field["label"].replace("Have you", "Did you")
+                                                                                    .replace("Do you", "Did you"))),
+                             ("one option more", dict(field, options=["Yes", "No", "Prefer not to say"])),
+                             ("a box to type in", dict(field, type="text", options=[]))):
+            decision, flags, for_model = _route(variant, "work_authorization", prof, store, "y.example")
+            check(decision is None and flags and flags[0]["source"] == "human" and not for_model,
+                  f"{what}, {how}: not reused, Jack's again, never the model's")
+    # The gate on the full record: a DoD answer of his is traced on the
+    # exact key, and on no other.
+    dod = {"ref": "d1", "type": "select", "label": "Have you worked for the Department of Defense?",
+           "options": ["Yes", "No"], "required": True}
+    rec = base()
+    rec["fields"].append(dod)
+    rec["categories"]["d1"] = "work_authorization"
+    rec["plan"]["d1"] = {"value": "No", "source": "learned", "fit": "exact", "confidence": "high",
+                         "profile_path": None, "learned_key": gate.question_key(dod), "learned_id": "x"}
+    rec["results"]["d1"] = {"filled": True, "detail": "chose", "unconfirmed": False}
+    rec["snapshot"]["d1"] = "No"
+    res = gate_run(rec)
+    check(res["content_verdict"] == gate.WOULD_SUBMIT, f"the gate traces his DoD answer on the exact key ({res['content_reasons']})")
+    rec["plan"]["d1"]["learned_key"] = gate.question_key(dict(dod, options=["Yes", "No", "Maybe"]))
+    res = gate_run(rec)
+    check(res["content_verdict"] == gate.WOULD_STOP and any("Department of Defense" in r for r in res["content_reasons"]),
+          f"another key: would_stop ({res['content_reasons']})")
+    rec["plan"]["d1"] = {"value": "No", "source": "model", "confidence": "high"}
+    check(gate_run(rec)["content_verdict"] == gate.WOULD_STOP, "the same value from the model: never")
+    check.done()
+
+
+RELOCATE = {"ref": "r1", "type": "select", "label": "Are you willing to relocate?", "options": ["Yes, anywhere", "No"]}
+TRAVEL = {"ref": "t1", "type": "select", "label": "What percentage of travel are you willing to do?",
+          "options": ["25%", "50%"]}
+GENDER = {"ref": "g2", "type": "select", "label": "Gender", "options": ["Male", "Female", "I do not wish to answer"]}
+
+
+def test_a_learned_entry_beats_a_loose_profile_fit_and_loses_to_a_strict_one():
+    # Fails on cac014c: on a profile fill, reuse returned None for every legal
+    # field and let a same-line choice beat any fit; the loose fits below
+    # (bool_prefix, substring) stayed the profile's.
+    check = Checks()
+    prof = _prof("memory-profile-fits.yaml", PROFILE.replace(
+        "  authorized_to_work_us: true\n",
+        "  authorized_to_work_us: true\n  willing_to_relocate: true\n  willing_to_travel_pct: 25\n"))
+    assert prof.get("eligibility.willing_to_relocate") is True and prof.get("eligibility.willing_to_travel_pct") == 25
+    store = _store("fits")
+    from agent import sensitive
+    # bool_prefix: "Yes, anywhere" from true. His own "No" on this key wins.
+    verdict = sensitive.decide(RELOCATE, "work_authorization", prof)
+    assert verdict["action"] == "fill" and verdict["fit"] == "bool_prefix", verdict
+    decision, _, _ = _route(RELOCATE, "work_authorization", prof, store, "x.example")
+    check(decision and decision["source"] == "profile" and decision["fit"] == "bool_prefix",
+          "with nothing learned the loose profile fit stands (the gate stops on it)")
+    memory.learn([_change(RELOCATE, "No", category="work_authorization", decision=verdict, kind="overwrote")],
+                 url=URL_A, portal="generic", prof=prof, store=store)
+    decision, _, _ = _route(RELOCATE, "work_authorization", prof, store, "y.example")
+    check(decision and decision["source"] == "learned" and decision["value"] == "No" and decision["fit"] == "exact",
+          f"bool_prefix: his exact-key answer beats the loose fit ({decision})")
+    # bool: "Yes" from true is strict. The profile wins over the same entry.
+    strict = dict(RELOCATE, options=["Yes", "No"])
+    memory.learn([_change(strict, "No", category="work_authorization", kind="overwrote")],
+                 url=URL_A, portal="generic", prof=prof, store=store)
+    decision, _, _ = _route(strict, "work_authorization", prof, store, "y.example")
+    check(decision and decision["source"] == "profile" and decision["fit"] == "bool" and decision["value"] == "Yes",
+          f"bool: the profile line wins ({decision})")
+    # substring: "25%" from 25. His "50%" on this key wins.
+    verdict = sensitive.decide(TRAVEL, "work_authorization", prof)
+    assert verdict["action"] == "fill" and verdict["fit"] == "substring", verdict
+    memory.learn([_change(TRAVEL, "50%", category="work_authorization", decision=verdict, kind="overwrote")],
+                 url=URL_A, portal="generic", prof=prof, store=store)
+    decision, _, _ = _route(TRAVEL, "work_authorization", prof, store, "y.example")
+    check(decision and decision["source"] == "learned" and decision["value"] == "50%",
+          f"substring: his exact-key answer beats the loose fit ({decision})")
+    # exact: "25" from 25. The profile wins over a learned "50" on that key.
+    exact = dict(TRAVEL, options=["25", "50"])
+    memory.learn([_change(exact, "50", category="work_authorization", kind="overwrote")],
+                 url=URL_A, portal="generic", prof=prof, store=store)
+    decision, _, _ = _route(exact, "work_authorization", prof, store, "y.example")
+    check(decision and decision["source"] == "profile" and decision["fit"] == "exact" and decision["value"] == "25",
+          f"exact: the profile line wins ({decision})")
+    # decline: the profile's "Decline to self-identify" as the form's decline
+    # option is strict. The profile wins over a learned "Female" on that key.
+    verdict = sensitive.decide(GENDER, "eeo", prof)
+    assert verdict["action"] == "fill" and verdict["fit"] == "decline", verdict
+    memory.learn([_change(GENDER, "Female", category="eeo", kind="overwrote")], url=URL_A, portal="generic",
+                 prof=prof, store=store)
+    decision, _, _ = _route(GENDER, "eeo", prof, store, "y.example")
+    check(decision and decision["source"] == "profile" and decision["fit"] == "decline"
+          and decision["value"] == "I do not wish to answer", f"decline: the profile line wins ({decision})")
+    # The entries the profile beat are still in memory (the Memory page
+    # shows them); nothing was written to the profile.
+    check(len(store.entries) == 5 and "Female" not in prof.path.read_text(encoding="utf-8")
+          and "50" not in prof.path.read_text(encoding="utf-8"), "every entry kept in memory, the profile untouched")
+    # A human verdict (a blank line) still takes his answer on the key.
+    blank = _prof("memory-profile-blank.yaml", PROFILE)
+    decision, flags, _ = _route(RELOCATE, "work_authorization", blank, store, "y.example")
+    check(decision and decision["source"] == "learned" and decision["value"] == "No" and not flags,
+          "no profile answer at all: his answer fills the gap")
     check.done()
 
 

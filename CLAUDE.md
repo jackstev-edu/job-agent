@@ -58,8 +58,10 @@ run as `python apply.py <command>` (no make).
   recorded answer on the identical question. Never learned: passwords
   and anything secret-classified, one-time codes, file uploads, any
   checkbox, a credential, consent or legal-declaration field, any
-  HARD_STOPS field, a Department of Defense or clearance question
-  (always Jack's, 2026-10-20). Under a pause only a change on a field
+  HARD_STOPS field. A Department of Defense or clearance question is
+  learned and reused like any other legal one (Jack, 2026-11-01, fold
+  round, decision 1). A profile line on a strict fit wins over an entry;
+  an entry beats a loose fit (decision 2). Under a pause only a change on a field
   that gained his touch mark (the override watch reads the marks at
   every poll) is learned: a value the page set itself is recorded in
   corrections.jsonl but never learned. Reuse happens in `pipeline.route`
@@ -242,7 +244,9 @@ Added by Jack on 2026-10-20 (second set):
 
 - Department of Defense: the `eligibility.dod_employment_past_two_years`
   row leaves `PROFILE_PATHS` and the template; the `dod` LEGAL_GUARD kind
-  stays, so every DoD question is Jack's.
+  stays, so every DoD question is Jack's. (Superseded in part on
+  2026-11-01, fold round, decision 1: his own recorded answer on the
+  identical key answers it; the guard kind stays.)
 - The "two profile lines" trace resolution (the question's own line
   answers; the field's identifier can only block) is confirmed as Jack's
   decision.
@@ -484,6 +488,30 @@ stale when I edit my profile"); a learned free-text answer still stops
 on the gate's canned-answer rule; the profile is reloaded before each
 page when the file changed. Pushed after each item.
 
+Added by Jack on 2026-11-01 (the fold round, his decisions on the
+report of the 2026-11-01 round), in his words; these supersede older
+lines where they conflict:
+
+1. "DoD and clearance: 'Only my own answers' on 2026-11-01 covered DoD
+   explicitly and supersedes the 2026-10-20 ruling. DoD and clearance
+   questions are learned and reused like other legal questions: exact
+   question key, exact option match, never the model."
+2. "Precedence: a learned exact-key entry beats a profile fit of any
+   kind other than 'exact' or 'verbatim'. A profile line wins only on
+   an exact or verbatim fit. (Otherwise a correction to a loose fit,
+   such as a degree wording, is never used.)" His answer on the plan:
+   "'bool' and 'decline' count as a profile win, alongside 'exact' and
+   'verbatim'. They are strict fits from my own lines that the gate
+   already trusts. A learned exact-key entry beats only the loose fits
+   (substring, bool_prefix and any other non-strict kind)."
+3. "The terminal's moved pause picks up only when Jack ended it with
+   Enter; a page that moved by itself parks as before." His answer on
+   the plan: the pre-db933fc path (the hold on boxes holding a value,
+   the loop goes on, and a thank-you page then parks with Continue).
+4. "Fold all four: touch marks in the hook's read; the learn-versus-edit
+   race; no per-poll log fetch on an open card; refuse to save over a
+   learned.yaml that didn't parse (keep the old file, report it)."
+
 ## Design rules — do not relax these
 
 - The model never answers legal questions. Eligibility, EEO and
@@ -491,10 +519,14 @@ page when the file changed. Pushed after each item.
   or an answer he entered himself that the agent recorded, reused only
   for the same question (Jack, 2026-11-01): the exact key (normalised
   label, field type, sorted options), a choice only equal to one of the
-  form's current options, a typed answer at the same host only. The
-  profile line answers when it fits; a learned answer fills only where
-  no profile answer fits (or, for an ordinary field, where a choice
-  mapping exists for the exact key).
+  form's current options, a typed answer at the same host only. A
+  profile line answered with a strict fit (exact, verbatim, bool or
+  decline: the fits the gate trusts) wins over a learned answer; a
+  learned exact-key entry beats only a loose fit (substring,
+  bool_prefix, any other non-strict kind) and fills where no profile
+  answer fits (Jack, 2026-11-01, fold round, decision 2). A Department
+  of Defense or clearance question is learned and reused the same way
+  (decision 1, same day; it supersedes the 2026-10-20 ruling).
 - `profile.yaml` is changed only by Jack's hand (his editor, or `init`
   writing the blank template at his command) or his Save to profile
   click; learning never rewrites it (Jack, 2026-11-01).
@@ -544,7 +576,9 @@ How the code keeps them, and rules of its own:
   question's line answers it (confirmed by Jack, 2026-10-20, second
   set). A Department of Defense question has its own guard kind (`dod`)
   and no profile line: every one is Jack's, whatever other line its words
-  match (Jack, 2026-10-20, second set). `LABEL_ONLY_LINES` (a line whose
+  match (Jack, 2026-10-20, second set), or his own recorded answer's on
+  the identical key, like a clearance question (Jack, 2026-11-01, fold
+  round, decision 1). `LABEL_ONLY_LINES` (a line whose
   question must be the label itself) is kept and empty. A security
   clearance question has its own guard kind (`clearance`), answered only
   from `eligibility.security_clearance` or `eligibility.clearance_eligible`
@@ -803,5 +837,7 @@ and `TODO.md`. The Workday adapter: `docs/PLAN-workday.md` (2026-10-20),
 deferred by Jack on 2026-10-29 (items 2-9 open). The MVP round of
 2026-10-29 (the auto-submit switch, model preflight, crash containment)
 and the round of 2026-11-01 (job logs on disk, automatic learned
-memory, the Memory page, the jobs view redesign) are recorded in the
-owner decisions above. A new session resumes from those files.
+memory, the Memory page, the jobs view redesign) and its fold round
+(the same day: DoD and clearance learned, precedence by strict fit, the
+terminal's moved pause, four folds) are recorded in the owner decisions
+above. A new session resumes from those files.

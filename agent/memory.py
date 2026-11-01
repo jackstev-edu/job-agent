@@ -15,10 +15,13 @@ the Memory page with "Save to profile", never written by this module).
 pipeline.route reuses an entry only on the exact same key, a choice only
 as an option the form offers now, free text and per-company answers only
 at the same host, and a legal answer only when the field reads as legal
-now and the entry was learned as one. Never learned, never reused: a
-file box, a password or anything secret-classified, a credential, a
-checkbox of any kind, a consent or legal-declaration field, any
-HARD_STOPS match. Local only: nothing here reaches a model or the
+now and the entry was learned as one; a profile line answered with a
+strict fit (exact, verbatim, bool, decline) wins over it, a loose fit
+loses to it (Jack, 2026-11-01, fold round). A Department of Defense or
+clearance question is learned and reused like any other legal one (same
+day, decision 1). Never learned, never reused: a file box, a password
+or anything secret-classified, a credential, a checkbox of any kind, a
+consent or legal-declaration field, any HARD_STOPS match. Local only: nothing here reaches a model or the
 network; the model never sees a learned legal answer.
 WHY IT MATTERS: The profile fills every portal the same way; what one
 portal asks differently is answered the way Jack answered it there, and
@@ -79,12 +82,11 @@ def never_reason(field: dict, category: str) -> str | None:
         return f"a {category.replace('_', ' ')} field is never learned"
     if sensitive.stop_reason(sensitive._question_text(field)) is not None or field.get("raw_stop"):
         return "a hard-stop question is never learned"
-    if {"dod", "clearance"} & set(sensitive.legal_guard_kinds(field)):
-        # Every Department of Defense question, and a clearance question
-        # outside its two profile lines, is Jack's (2026-10-20, second
-        # set); decision 4 of 2026-11-01 did not name them, so memory
-        # neither learns nor answers one (fold of fe30a9a's review).
-        return "a Department of Defense or clearance question is always yours"
+    # A Department of Defense or clearance question is learned and reused
+    # like every other legal question: Jack's own answer on the exact key,
+    # a choice only as a current option, never the model (Jack,
+    # 2026-11-01, fold round, decision 1: "only my own answers" covered
+    # DoD explicitly and supersedes the 2026-10-20 ruling).
     if not _norm(field.get("label")):
         return "a question with no label has no key"
     return None
@@ -289,24 +291,23 @@ def reuse(field: dict, category: str, verdict: dict, prof, store: Learned | None
     """
     The plan decision a learned entry gives this field, or None. The
     router (pipeline.route) calls this after sensitive.decide: on a human
-    verdict the entry fills the gap; on a profile fill only a choice
-    mapping of the same line overrides it; on a model route the entry
-    answers ahead of the model. Checked again here: a never_reason field,
-    a choice that is no option of the form now, a choice mapping whose
-    profile line changed since, and a legal entry on a field that doesn't
-    read as legal now (or the reverse) all give None.
+    verdict the entry fills the gap; on a profile fill the profile line
+    wins on a strict fit (exact, verbatim, bool or decline: the fits the
+    gate trusts) and his exact-key entry beats a loose one (substring,
+    bool_prefix, any other kind) (Jack, 2026-11-01, fold round, decision
+    2); on a model route the entry answers ahead of the model. Checked
+    again here: a never_reason field, a choice that is no option of the
+    form now, a choice mapping whose profile line changed since, and a
+    legal entry on a field that doesn't read as legal now (or the
+    reverse) all give None.
     """
     if store is None:
         return None
     entry = store.match(field, category, host)
     if entry is None:
         return None
-    legal = is_legal(field, category)
-    if verdict.get("action") == "fill":
-        # The profile answered with a strict fit: only his own choice for
-        # this exact key, mapped from the same line, replaces it.
-        if legal or entry.get("kind") != CHOICE or entry.get("line") != verdict.get("profile_path"):
-            return None
+    if verdict.get("action") == "fill" and verdict.get("fit") in gate.STRICT_FITS:
+        return None
     if entry.get("kind") == CHOICE:
         current = _profile_text(prof, entry.get("line"))
         if current is None or _norm(current) != _norm(entry.get("line_value")):
