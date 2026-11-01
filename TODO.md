@@ -3521,3 +3521,72 @@ Decisions for Jack (2026-11-01):
 - A malformed learned.yaml loads empty and the next save replaces it
   (fe30a9a finding 3). Recommendation: fold next round (refuse to save
   over a file that didn't parse).
+
+## Fold round of 2026-11-01 (Jack's decisions on the report above)
+
+Jack's four decisions are in CLAUDE.md in his words ("Added by Jack on
+2026-11-01 (the fold round...)"): 1 DoD and clearance answers of his
+are learned and reused like other legal questions; 2 precedence: a
+profile line wins on a strict fit (exact, verbatim, bool, decline), a
+learned exact-key entry beats a loose fit; 3 the terminal's moved pause
+picks up only on Enter, a page that moved by itself takes the
+pre-db933fc path; 4 the four folds (touch marks in the hook's read, the
+learn-versus-edit race, no per-poll log fetch on an open card, refuse
+to save over a learned.yaml that didn't parse).
+
+Commits: 24d5a45 (A: decisions 1 and 2, the records), 4fdca04 (B:
+decision 3), 90e4d27 (C: decision 4's four folds). The full suite ran
+once on 24d5a45 (memory routing changed): 496 passed in 35:57. Pushed after each item's
+review. Reviewer findings per commit, one line each; every one a FLAG,
+none folded (none is stop-to-pass or a safety issue).
+
+Commit 24d5a45 (item A): VERDICT FLAG, 3 low. (1) pipeline.route's
+docstring still says a learned entry answers "a choice mapping over a
+profile fit"; (2) a DoD question whose wording also matches a
+PROFILE_PATHS row gets that row as the entry's `line` (memory._line_for
+takes the first profile_lines match when the verdict was human), reuse
+plans a fill with profile_path set, and the gate stops it ("answered
+from <line>, which isn't a dod profile line"): safe direction, but his
+DoD answer is not reused for that wording, and the test's gate case
+plants profile_path None by hand; (3) the precedence test has no
+"verbatim" case (a text box the profile fills verbatim keeping source
+"profile" after a candidate is learned on its key). Notes: the removal
+of memory.py's own dod/clearance refusal is the one approved narrowing
+(decision 1); sensitive.py, HARD_STOPS and SECRET_WORDS untouched; the
+fails-on-previous claims consistent with the diff.
+
+Commit 4fdca04 (item B): VERDICT FLAG, 2. (1) in the real terminal the
+Enter ending is practically unreachable: console.ask returns None the
+moment the page moves (polled every 0.5 s) and pause.Pauser.wait checks
+`until` before the empty-line rule, so ANSWERED-and-moved needs a
+non-empty line typed inside that window; after Jack fixes the page and
+presses Next himself the job holds and the thank-you page parks
+needs_you, never "submitted by Jack": fails toward the stop, so not a
+BLOCK; the ready pause (wizard.py ~1455) reads the same FINISHED ending
+as by_jack=True, the opposite reading, pre-existing; (2) both endings
+are proven through mock pausers returning the constant; no test drives
+pause.Pauser.wait with a fake console.
+
+Commit 90e4d27 (item C): VERDICT FLAG, 3 low. (1) memory.note_use saves
+without _refresh (dormant: nothing calls it); (2) an empty or
+comment-only learned.yaml counts as unreadable (errs toward refusal, as
+decided; a file that parses with one malformed entry still drops it at
+load and overwrites on the next save, pre-existing); (3) State.snapshot
+globs the logs folder per job per 2 s poll under State.lock (fine for a
+dozen jobs; cache the path per job id and stat it).
+
+Decisions for Jack (fold round, 2026-11-01):
+- The terminal's moved pause never reaches the Enter ending in practice
+  (4fdca04 finding 1). Recommendation: after a FINISHED ending, prompt
+  once more ("the page moved on: press Enter to take up the page shown,
+  or type n to leave it") and pick up only on that Enter; a test through
+  pause.Pauser with a fake console. Until then the terminal's moved
+  pause always takes the hold path; the GUI's Continue is the pick-up.
+- A DoD wording that also matches a profile row (24d5a45 finding 2).
+  Recommendation: a legal answer entry learned with no profile fill
+  records `line: None` (the key is the trust anchor, not the line);
+  fold next round with a test through reuse and the gate.
+- The three low test and docstring findings (24d5a45's 1 and 3,
+  4fdca04's 2) and C's three (note_use, the empty file's message, the
+  per-poll glob): fold together in one small commit next round, or
+  leave; recommendation: fold.
