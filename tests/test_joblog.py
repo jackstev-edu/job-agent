@@ -174,7 +174,7 @@ def test_the_page_serves_a_jobs_log_behind_the_token():
         status, _, body = _req(server, "GET", "/log?job=zz")
         check(status == 200 and body.get("ok") is False, "a job this session never started has no log here")
         status, _, page = _req(server, "GET", "/", token=None)
-        check("View log" in page, "the page offers View log")
+        check("/log?job=" in page, "the page reads the job's log into its row")
     finally:
         server.stop()
     check.done()
@@ -198,11 +198,11 @@ def test_a_log_line_holding_markup_is_drawn_as_text():
                 page = browser.new_page()
                 page.goto(server.url)
                 page.wait_for_timeout(800)
-                page.click("text=View log")
+                page.click(".job .head .name")        # the row's log section opens on click (2026-11-01)
                 page.wait_for_timeout(800)
                 pwned = page.evaluate("window.__pwned || 0")
-                text = page.inner_text("#rows")
-                tags = page.evaluate("document.querySelectorAll('#rows img, #rows script, #rows b').length")
+                text = page.inner_text("#jobs-list")
+                tags = page.evaluate("document.querySelectorAll('#jobs-list img, #jobs-list script, #jobs-list b').length")
             finally:
                 browser.close()
         check(pwned == 0 and tags == 0, f"nothing from the log line ran or rendered ({pwned}, {tags})")

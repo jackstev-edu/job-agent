@@ -276,9 +276,11 @@ def test_markup_in_a_label_is_rendered_as_text():
                 page = browser.new_page()
                 page.goto(server.url)
                 page.wait_for_timeout(1200)
+                page.click(".job .head .name")        # the row's sections open on click (2026-11-01)
+                page.wait_for_timeout(600)
                 pwned = page.evaluate("window.__pwned || 0")
-                text = page.inner_text("#rows")
-                imgs = page.evaluate("document.querySelectorAll('#rows img, #rows script, #rows b').length")
+                text = page.inner_text("#jobs-list")
+                imgs = page.evaluate("document.querySelectorAll('#jobs-list img, #jobs-list script, #jobs-list b').length")
             finally:
                 browser.close()
         check(pwned == 0 and imgs == 0, f"no markup from the label ran or rendered ({pwned}, {imgs})")

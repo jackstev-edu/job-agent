@@ -108,10 +108,47 @@ class Job:
                                 for f in self.pause.get("fields", [])]}
         return {"id": self.id, "url": self.url, "dry": self.dry, "company": self.company,
                 "role": self.role, "portal": self.portal, "status": self.status,
+                "short_status": self.short_status(), "summary": self.summary(),
                 "reason": self.reason, "final_url": self.final_url,
                 "form_found": self.form_found, "progress": self.progress, "landing": landing,
                 "pause": pause,
                 "code_given": self.code is not None}
+
+    # One word for the chip and one line under it (Jack, 2026-11-01,
+    # decision 6: "Statuses are too long... Simplify it").
+    SHORT = {QUEUED: "Queued", WORKING: "Working", NEEDS_YOU: "Needs you", SUBMITTED: "Submitted",
+             FAILED: "Failed", DRY: "Dry run", DONE: "Done", CLOSED: "Closed", "skipped": "Skipped"}
+
+    def is_ready(self) -> bool:
+        return self.status == NEEDS_YOU and (self.pause or {}).get("kind") == "ready"
+
+    def short_status(self) -> str:
+        if self.is_ready():
+            return "Ready"
+        return self.SHORT.get(self.status, str(self.status or "").replace("_", " ").capitalize())
+
+    def summary(self) -> str:
+        """The one line a row shows: a count of what needs Jack, the newest step, or the reason."""
+        def short(text, n=140):
+            text = " ".join(str(text or "").split())
+            return text if len(text) <= n else text[:n - 1] + "…"
+        if self.is_ready():
+            return "Filled — review and press Submit yourself"
+        if self.status == NEEDS_YOU:
+            fields = (self.pause or {}).get("fields") or []
+            if fields:
+                n = len(fields)
+                return f"{n} field{'s' if n != 1 else ''} need{'' if n != 1 else 's'} you"
+            return short((self.pause or {}).get("message") or self.reason or "needs you")
+        if self.status == WORKING:
+            return short(self.progress or "working")
+        if self.status == QUEUED:
+            return "waiting in the queue"
+        if self.status == DRY:
+            return short(self.reason or "dry run: nothing filled")
+        if self.status == SUBMITTED:
+            return short(self.reason or "submitted")
+        return short(self.reason or self.status)
 
 
 class State:
@@ -424,74 +461,153 @@ _PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>job-agent</title>
 <style nonce="%(nonce)s">
-body { font: 15px/1.5 system-ui, sans-serif; margin: 1.5rem; color: #16202b; background: #f7f8f9; }
-textarea { width: 100%%; height: 6rem; font: inherit; }
-table { width: 100%%; border-collapse: collapse; background: #fff; margin-top: 1rem; }
-th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #d5dae0; vertical-align: top; }
-tr.needs_you { background: #fff4e0; }
-tr.ready { background: #e3f3e8; }
-tr.ready td.status { color: #1f5e3a; font-weight: 700; }
-tr.submitted td.status { color: #2f6b4f; font-weight: 600; }
-tr.failed td.status { color: #9b2226; }
+:root { --ink: #16202b; --muted: #5b6875; --line: #d5dae0; --paper: #fff; --bg: #f4f6f8; }
+body { font: 15px/1.5 system-ui, sans-serif; margin: 0; color: var(--ink); background: var(--bg); }
+main { max-width: 1100px; margin: 0 auto; padding: 1.2rem 1.2rem 3rem; }
+h1 { font-size: 1.3em; margin: .4rem 0 .8rem; }
+textarea { width: 100%%; height: 4.5rem; font: inherit; padding: .5rem; border: 1px solid var(--line); border-radius: .4rem; box-sizing: border-box; }
+button { font: inherit; padding: .35rem .9rem; border: 1px solid #b9c2cc; border-radius: .4rem; background: #fff; cursor: pointer; }
+button:hover { background: #eef1f4; }
+button.primary { background: #16202b; color: #fff; border-color: #16202b; }
 #switch { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; padding: .9rem 1rem; margin: .5rem 0 1rem;
           border: 3px solid #5b6875; border-radius: .5rem; background: #e9ecef; font-size: 1.25em; font-weight: 700; }
 #switch.on { border-color: #9b2226; background: #fde2e4; color: #6a0f14; }
 #switch button { font-size: 1em; font-weight: 700; padding: .5rem 1.2rem; }
 #warning { flex-basis: 100%%; font-size: .8em; font-weight: 400; color: #6a0f14; }
-.pause { margin: .4rem 0 0; padding: .5rem; border-left: 3px solid #a65a00; background: #fff; }
-.pause li { margin: .2rem 0; }
-button { font: inherit; padding: .3rem .8rem; }
 .row-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .4rem; }
-.muted { color: #5b6875; font-size: .9em; }
-.joblog { margin: .4rem 0 0; padding: .4rem .6rem; background: #f1f3f5; border: 1px solid #d5dae0; font: 12px/1.4 ui-monospace, monospace;
-          white-space: pre-wrap; max-height: 16rem; overflow: auto; }
+.muted { color: var(--muted); font-size: .9em; }
 #tabs { display: flex; gap: .4rem; margin: .2rem 0 1rem; }
-#tabs button { padding: .4rem 1.1rem; border: 1px solid #d5dae0; border-bottom: none; background: #e9ecef; border-radius: .4rem .4rem 0 0; }
+#tabs button { padding: .4rem 1.1rem; border: 1px solid var(--line); border-bottom: none; background: #e9ecef; border-radius: .4rem .4rem 0 0; }
 #tabs button.active { background: #fff; font-weight: 700; }
-#memory-search { width: 100%%; font: inherit; padding: .4rem .6rem; margin: .4rem 0 .8rem; }
+#jobs-list { margin-top: 1rem; display: flex; flex-direction: column; gap: .5rem; }
+.job { background: var(--paper); border: 1px solid var(--line); border-radius: .5rem; }
+.job .head { display: grid; grid-template-columns: 1.4fr 1.6fr .8fr auto; gap: .8rem; align-items: center; padding: .6rem .9rem; cursor: pointer; }
+.job .head .name { font-weight: 600; }
+.job .head .sum { grid-column: 1 / -1; color: var(--muted); font-size: .92em; margin-top: -.2rem; }
+.job.failed { border-color: #c0343a; background: #fff0f0; }
+.job.failed .head .sum { color: #9b2226; }
+.job.needs_you { border-color: #d9951e; }
+.job.ready { border-color: #2f8a57; }
+.chip { display: inline-block; padding: .1rem .7rem; border-radius: 1rem; font-size: .8em; font-weight: 700; white-space: nowrap; background: #e9ecef; color: #3c4854; }
+.chip.working { background: #dfe9ff; color: #1b3f8f; }
+.chip.needs_you { background: #ffe9c4; color: #7a4a00; }
+.chip.ready { background: #d8f2e2; color: #1f5e3a; }
+.chip.submitted { background: #d8f2e2; color: #1f5e3a; }
+.chip.failed { background: #f8d2d4; color: #8a1c21; }
+.chip.skipped, .chip.closed, .chip.dry, .chip.queued { background: #e9ecef; color: #3c4854; }
+.job .body { border-top: 1px solid var(--line); padding: .6rem .9rem .8rem; }
+.job .body h3 { font-size: .95em; margin: .6rem 0 .2rem; }
+.job .body ul { margin: .2rem 0; padding-left: 1.2rem; }
+.job .body li { margin: .15rem 0; }
+.url { color: var(--muted); font-size: .85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%%; }
+.joblog { margin: .3rem 0 0; padding: .4rem .6rem; background: #f1f3f5; border: 1px solid var(--line); font: 12px/1.4 ui-monospace, monospace;
+          white-space: pre-wrap; max-height: 16rem; overflow: auto; }
+#toast { position: fixed; right: 1rem; bottom: 1rem; max-width: 28rem; background: #8a1c21; color: #fff; padding: .7rem 1rem; border-radius: .5rem;
+         box-shadow: 0 4px 16px rgba(0,0,0,.25); cursor: pointer; z-index: 9; }
+#memory-search { width: 100%%; font: inherit; padding: .4rem .6rem; margin: .4rem 0 .8rem; box-sizing: border-box; }
 .mgroup { margin: 1rem 0; }
 .mgroup h2 { font-size: 1.05em; margin: .4rem 0; }
-.mentry { background: #fff; border: 1px solid #d5dae0; border-radius: .4rem; padding: .5rem .8rem; margin: .4rem 0; }
+.mentry { background: #fff; border: 1px solid var(--line); border-radius: .4rem; padding: .5rem .8rem; margin: .4rem 0; }
 .mentry .q { font-weight: 600; }
 .mentry input.answer { font: inherit; width: 24rem; max-width: 100%%; padding: .2rem .4rem; }
-.mentry .meta { color: #5b6875; font-size: .85em; }
+.mentry .meta { color: var(--muted); font-size: .85em; }
 .mentry .legal { color: #6a0f14; font-size: .85em; }
 </style></head>
-<body>
+<body><main>
 <h1>job-agent</h1>
-<div id="tabs"><button id="tab-jobs" class="active">Jobs</button><button id="tab-memory">Memory</button></div>
-<section id="jobs">
 <div id="switch" class="off">
   <button id="toggle">Turn auto-submit ON</button>
   <span id="switch-text">Auto-submit: OFF — you press Submit</span>
   <div id="warning" hidden>While ON the agent presses Submit when the gate passes. The MUST FIX BEFORE AUTO-SUBMIT items in TODO.md are still open.</div>
 </div>
-<p class="muted">Paste links, one per line. The agent fills in its own browser; rows that need you turn amber and chime; a green READY row is filled and waits for you to press Submit.</p>
-<textarea id="links" placeholder="https://..."></textarea>
+<div id="tabs"><button id="tab-jobs" class="active">Jobs</button><button id="tab-memory">Memory</button></div>
+<section id="jobs">
+<textarea id="links" placeholder="Paste job links, one per line"></textarea>
 <div class="row-actions">
-  <button id="start">Start</button>
-  <label><input type="checkbox" id="dry"> dry run (intake only: open, click Apply, report; fill nothing)</label>
+  <button id="start" class="primary">Start</button>
+  <label class="muted"><input type="checkbox" id="dry"> dry run (open, click Apply, report; fill nothing)</label>
   <button id="google">Google login</button>
   <button id="close">Close browser</button>
   <span id="notice" class="muted"></span>
 </div>
-<table><thead><tr><th>Company</th><th>Role</th><th>Portal</th><th>Status</th><th>Details</th></tr></thead>
-<tbody id="rows"></tbody></table>
+<p class="muted">Click a row to see what it couldn't fill, what it learned and its log. A row that needs you chimes; a red row broke.</p>
+<div id="jobs-list"></div>
 </section>
 <section id="memory" hidden>
 <p class="muted">What the agent learned from your own entries, reused only on the exact same question. Edit an answer, delete anything wrong; a profile candidate is written to profile.yaml only when you press Save to profile. Nothing here leaves this machine.</p>
 <input id="memory-search" placeholder="search questions, answers, hosts" autocomplete="off">
 <div id="memory-groups"></div>
 </section>
+</main>
 <script nonce="%(nonce)s">
 (() => {
   const TOKEN = %(token)s;
-  const seenNeedsYou = new Set();
+  const seenNeedsYou = new Set(), seenFailed = new Set(), open = new Set();
   const el = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = String(text); if (cls) e.className = cls; return e; };
   const api = (path, body) => fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Token': TOKEN},
                                             body: JSON.stringify(body || {})}).then(r => r.json()).catch(() => ({ok: false}));
-  const chime = () => { try { const c = new AudioContext(); const o = c.createOscillator(); const g = c.createGain();
-      o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.35); } catch (e) {} };
+  const chime = (hz) => { try { const c = new AudioContext(); const o = c.createOscillator(); const g = c.createGain();
+      o.frequency.value = hz || 880; g.gain.value = 0.08; o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + 0.35); } catch (e) {} };
+  const toast = text => { const old = document.getElementById('toast'); if (old) old.remove();
+      const t = el('div', text); t.id = 'toast'; t.addEventListener('click', () => t.remove()); document.body.appendChild(t); };
+  const shortUrl = u => { try { const x = new URL(u); const path = x.pathname.length > 28 ? x.pathname.slice(0, 27) + '…' : x.pathname; return x.hostname + path; } catch (e) { return String(u).slice(0, 60); } };
+  const chipClass = j => (j.short_status || '').toLowerCase().replace(' ', '_');
+  const drawBody = (j, body) => {
+    body.replaceChildren();
+    const u = el('div', shortUrl(j.url), 'url'); u.title = j.url; body.appendChild(u);
+    if (j.landing) body.appendChild(el('div', j.landing, 'muted'));
+    if (j.reason && j.reason !== j.summary) body.appendChild(el('div', j.reason));
+    if (j.pause) {
+      body.appendChild(el('h3', j.pause.fields.length ? "Fields it couldn't fill" : 'What it needs'));
+      if (!j.pause.fields.length) body.appendChild(el('div', j.pause.message));
+      else {
+        const ul = el('ul');
+        for (const f of j.pause.fields) {
+          const li = el('li');
+          li.appendChild(el('span', f.label + ' — ' + f.reason));
+          if (f.approvable && f.value !== null && f.value !== undefined && String(f.value).trim() !== '') {
+            const lab = el('label'); const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = f.approved;
+            cb.addEventListener('change', () => api('/approve', {job: j.id, ref: f.ref, on: cb.checked}).then(refresh));
+            lab.appendChild(cb); lab.appendChild(el('span', ' approve "' + f.value + '"'));
+            li.appendChild(el('span', ' ')); li.appendChild(lab);
+          }
+          ul.appendChild(li);
+        }
+        body.appendChild(ul);
+      }
+      const actions = el('div', undefined, 'row-actions');
+      if (j.pause.wants_code) {
+        const inp = document.createElement('input'); inp.placeholder = 'verification code'; inp.autocomplete = 'off';
+        const send = el('button', 'Send code');
+        send.addEventListener('click', () => api('/code', {job: j.id, code: inp.value}).then(refresh));
+        actions.appendChild(inp); actions.appendChild(send);
+        if (j.code_given) actions.appendChild(el('span', 'code received', 'muted'));
+      }
+      if (j.pause.kind === 'closed') {
+        const close = el('button', 'Close this job');
+        close.addEventListener('click', () => api('/close-job', {job: j.id}).then(refresh));
+        actions.appendChild(close);
+      } else {
+        const cont = el('button', 'Continue', 'primary');
+        cont.addEventListener('click', () => api('/continue', {job: j.id}).then(refresh));
+        actions.appendChild(cont);
+      }
+      body.appendChild(actions);
+    }
+    const learnedH = el('h3', 'What it learned'); const learned = el('ul'); learned.appendChild(el('li', 'loading…', 'muted'));
+    body.appendChild(learnedH); body.appendChild(learned);
+    body.appendChild(el('h3', 'Log'));
+    const logBox = el('div', undefined, 'joblog'); logBox.appendChild(el('div', 'loading…', 'muted')); body.appendChild(logBox);
+    fetch('/log?job=' + encodeURIComponent(j.id), {headers: {'X-Token': TOKEN}}).then(r => r.json()).then(r => {
+      const lines = (r && r.ok && r.lines) ? r.lines : [];
+      logBox.replaceChildren(); learned.replaceChildren();
+      if (!lines.length) logBox.appendChild(el('div', r && r.empty ? 'no log yet' : '(empty)', 'muted'));
+      for (const line of lines) logBox.appendChild(el('div', line));
+      const got = lines.filter(l => l.startsWith('learned '));
+      if (!got.length) learned.appendChild(el('li', 'nothing yet', 'muted'));
+      for (const l of got) learned.appendChild(el('li', l));
+    }).catch(() => {});
+  };
   const render = state => {
     const on = state.auto_submit === true;
     const sw = document.getElementById('switch'); sw.className = on ? 'on' : 'off';
@@ -499,73 +615,27 @@ button { font: inherit; padding: .3rem .8rem; }
     document.getElementById('switch-text').textContent = on
         ? 'Auto-submit: ON — the agent submits when the gate passes' : 'Auto-submit: OFF — you press Submit';
     document.getElementById('warning').hidden = !on;
-    const rows = document.getElementById('rows'); rows.replaceChildren();
+    const list = document.getElementById('jobs-list'); list.replaceChildren();
     for (const j of state.jobs) {
-      const ready = !!(j.pause && j.pause.kind === 'ready');
-      const tr = el('tr', undefined, ready ? 'ready' : j.status);
-      tr.appendChild(el('td', j.company || ''));
-      tr.appendChild(el('td', j.role || ''));
-      tr.appendChild(el('td', j.portal || ''));
-      const working = j.status === 'working' && j.progress ? j.progress : j.status.replace('_', ' ');
-      const st = el('td', (ready ? 'READY — press Submit yourself' : working) + (j.dry ? ' (dry)' : ''), 'status');
-      tr.appendChild(st);
-      const td = el('td');
-      td.appendChild(el('div', j.url, 'muted'));
-      if (j.reason) td.appendChild(el('div', j.reason));
-      if (j.landing) td.appendChild(el('div', j.landing, 'muted'));
-      const logBox = el('div', undefined, 'joblog'); logBox.hidden = true;
-      const viewLog = el('button', 'View log');
-      viewLog.addEventListener('click', () => {
-        if (!logBox.hidden) { logBox.hidden = true; viewLog.textContent = 'View log'; return; }
-        fetch('/log?job=' + encodeURIComponent(j.id), {headers: {'X-Token': TOKEN}}).then(r => r.json()).then(r => {
-          logBox.replaceChildren();
-          const lines = (r && r.ok && r.lines) ? r.lines : [];
-          if (!lines.length) logBox.appendChild(el('div', r && r.empty ? 'no log yet' : '(empty)', 'muted'));
-          for (const line of lines) logBox.appendChild(el('div', line));
-          logBox.hidden = false; viewLog.textContent = 'Hide log';
-        }).catch(() => {});
+      const cls = chipClass(j);
+      const card = el('div', undefined, 'job ' + cls); card.dataset.job = j.id;
+      const head = el('div', undefined, 'head');
+      head.appendChild(el('span', j.company || shortUrl(j.url), 'name'));
+      head.appendChild(el('span', j.role || ''));
+      head.appendChild(el('span', j.portal || '', 'muted'));
+      head.appendChild(el('span', j.short_status + (j.dry && j.short_status !== 'Dry run' ? ' (dry)' : ''), 'chip ' + cls));
+      head.appendChild(el('div', j.summary || '', 'sum'));
+      const body = el('div', undefined, 'body'); body.hidden = !open.has(j.id);
+      head.addEventListener('click', ev => {
+        if (ev.target.closest('button, input, label')) return;
+        if (open.has(j.id)) { open.delete(j.id); body.hidden = true; } else { open.add(j.id); drawBody(j, body); body.hidden = false; }
       });
-      const logRow = el('div', undefined, 'row-actions'); logRow.appendChild(viewLog); td.appendChild(logRow); td.appendChild(logBox);
-      if (j.pause) {
-        const box = el('div', undefined, 'pause');
-        box.appendChild(el('div', j.pause.message));
-        if (j.pause.fields.length) {
-          const ul = el('ul');
-          for (const f of j.pause.fields) {
-            const li = el('li');
-            li.appendChild(el('span', f.label + ': ' + f.reason));
-            if (f.approvable && f.value !== null && f.value !== undefined && String(f.value).trim() !== '') {
-              const lab = el('label'); const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = f.approved;
-              cb.addEventListener('change', () => api('/approve', {job: j.id, ref: f.ref, on: cb.checked}).then(refresh));
-              lab.appendChild(cb); lab.appendChild(el('span', ' approve "' + f.value + '"'));
-              li.appendChild(el('span', ' ')); li.appendChild(lab);
-            }
-            ul.appendChild(li);
-          }
-          box.appendChild(ul);
-        }
-        const actions = el('div', undefined, 'row-actions');
-        if (j.pause.wants_code) {
-          const inp = document.createElement('input'); inp.placeholder = 'verification code'; inp.autocomplete = 'off';
-          const send = el('button', 'Send code');
-          send.addEventListener('click', () => api('/code', {job: j.id, code: inp.value}).then(refresh));
-          actions.appendChild(inp); actions.appendChild(send);
-          if (j.code_given) actions.appendChild(el('span', 'code received', 'muted'));
-        }
-        if (j.pause.kind === 'closed') {
-          const close = el('button', 'Close this job');
-          close.addEventListener('click', () => api('/close-job', {job: j.id}).then(refresh));
-          actions.appendChild(close);
-        } else {
-          const cont = el('button', 'Continue');
-          cont.addEventListener('click', () => api('/continue', {job: j.id}).then(refresh));
-          actions.appendChild(cont);
-        }
-        box.appendChild(actions);
-        td.appendChild(box);
-        if (!seenNeedsYou.has(j.id)) { seenNeedsYou.add(j.id); chime(); }
-      } else { seenNeedsYou.delete(j.id); }
-      tr.appendChild(td); rows.appendChild(tr);
+      if (!body.hidden) drawBody(j, body);
+      card.appendChild(head); card.appendChild(body); list.appendChild(card);
+      if (j.pause) { if (!seenNeedsYou.has(j.id)) { seenNeedsYou.add(j.id); chime(880); } } else seenNeedsYou.delete(j.id);
+      if (j.status === 'failed') { if (!seenFailed.has(j.id)) { seenFailed.add(j.id); chime(440);
+          toast((j.company || shortUrl(j.url)) + ' broke: ' + (j.summary || j.reason || 'failed') + ' (click to dismiss)'); } }
+      else seenFailed.delete(j.id);
     }
     document.getElementById('notice').textContent = (state.browser_open ? 'browser open' : 'browser closed') + (state.notice ? ' · ' + state.notice : '');
   };
