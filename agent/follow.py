@@ -39,7 +39,7 @@ NEW_STEP, REVISIT, RERENDER, CHANGED = "new_step", "revisit", "rerender", "chang
 # agent stamping refs or you typing doesn't count as the page moving. Values
 # are never read. A field's label is used only to tell apart fields with no
 # name and no id, and only to tell them apart.
-_SHAPE_JS = r"""
+_SHAPE_JS = extract.safe(r"""
 (GROUP) => {
   if (!window.__jaShape) {
     window.__jaShape = {last: performance.now()};
@@ -52,33 +52,33 @@ _SHAPE_JS = r"""
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
-  const attr = (el, a) => (el.getAttribute(a) || '').slice(0, 80);
-  const tie = el => (el.name || el.id) ? '' :
-      (el.getAttribute('aria-label') || el.labels?.[0]?.innerText || '')
+  const attr = (el, a) => (__ja.attr(el, a) || '').slice(0, 80);
+  const tie = el => (__ja.name(el) || __ja.id(el)) ? '' :
+      (__ja.attr(el, 'aria-label') || el.labels?.[0]?.innerText || '')
         .replace(/\s+/g, ' ').trim().slice(0, 80);
   const out = [];
   let stamped = 0;
   document.querySelectorAll(`input, select, textarea, [role=combobox], ${GROUP}`).forEach(el => {
-    if (el.matches(GROUP)) {
+    if (__ja.matches(el, GROUP)) {
       if (!visible(el)) return;
-      out.push(['group', '', attr(el, 'data-field-path'), el.id || '', '', '', '']);
+      out.push(['group', '', attr(el, 'data-field-path'), __ja.id(el) || '', '', '', '']);
       if (el.querySelector('[data-ja-ref]')) stamped++;
       return;
     }
-    if (el.closest(GROUP)) return;
-    const type = (el.type || el.tagName).toLowerCase();
+    if (__ja.closest(el, GROUP)) return;
+    const type = (__ja.type(el) || __ja.tag(el)).toLowerCase();
     if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type)) return;
     if (el.disabled || el.readOnly || !visible(el)) return;
     // Skipped by the scan too (react-select's validation input), so never stamped.
-    if (el.getAttribute('aria-hidden') === 'true' && el.tabIndex === -1) return;
-    out.push([el.tagName.toLowerCase(), type, el.name || '', el.id || '', attr(el, 'role'),
+    if (__ja.attr(el, 'aria-hidden') === 'true' && el.tabIndex === -1) return;
+    out.push([__ja.tag(el).toLowerCase(), type, __ja.name(el) || '', __ja.id(el) || '', attr(el, 'role'),
               attr(el, 'autocomplete'), tie(el)]);
-    if (el.hasAttribute('data-ja-ref')) stamped++;
+    if (__ja.has(el, 'data-ja-ref')) stamped++;
   });
   return {url: location.href, fields: out, stamped,
           quiet_ms: Math.round(performance.now() - window.__jaShape.last)};
 }
-"""
+""")
 
 
 def url_key(url: str) -> str:

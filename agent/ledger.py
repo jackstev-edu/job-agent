@@ -59,12 +59,12 @@ REVIEW_ATTR = "data-ja-review-touch"
 # Which of these refs carry a trusted-input mark on their own element (set
 # only for isTrusted events while the agent isn't filling): Jack's touches.
 # Refs only; nothing of the field is read.
-TOUCHED_JS = r"""
+TOUCHED_JS = extract.safe(r"""
 ([refs, attr]) => refs.filter(r => {
   const el = document.querySelector(`[data-ja-ref="${CSS.escape(r)}"]`);
-  return !!el && el.hasAttribute(attr);
+  return !!el && __ja.has(el, attr);
 })
-"""
+""")
 # Put on what gets typed in, pasted into or changed (trusted events only)
 # while the agent is filling: that's you, unless the agent then marks the
 # field as filled (MARK_ATTR). The agent's own text sets are untrusted.
@@ -131,7 +131,7 @@ def _kind(f: dict) -> str:
 # element, the agent's value or null, the option index the agent chose].
 # Returns {present, empty, mine, same} or {present: false}; "same" is
 # whether every element still carries the agent's mark.
-_STATE_JS = ("""
+_STATE_JS = extract.safe("""
 (args) => {
 """ + extract._SECRET_JS + r"""
   const [kind, els, agentValue, agentIndex, mark] = args;
@@ -140,15 +140,15 @@ _STATE_JS = ("""
   if (document.querySelector('input[type=password i], [autocomplete*="password" i]'))
     return {present: true, secret: true};
   const norm = t => String(t ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
-  const same = !!mark && els.every(e => e.getAttribute('""" + MARK_ATTR + r"""') === mark);
-  const marked = els.some(e => e.hasAttribute('""" + MARK_ATTR + r"""'));
-  let touched = els.some(e => e.hasAttribute('""" + TOUCH_ATTR + r"""'));
-  const whileFilling = els.some(e => e.hasAttribute('""" + WHILE_AGENT_ATTR + r"""')
-      && !e.hasAttribute('""" + MARK_ATTR + r"""'));
+  const same = !!mark && els.every(e => __ja.attr(e, '""" + MARK_ATTR + r"""') === mark);
+  const marked = els.some(e => __ja.has(e, '""" + MARK_ATTR + r"""'));
+  let touched = els.some(e => __ja.has(e, '""" + TOUCH_ATTR + r"""'));
+  const whileFilling = els.some(e => __ja.has(e, '""" + WHILE_AGENT_ATTR + r"""')
+      && !__ja.has(e, '""" + MARK_ATTR + r"""'));
   const el = els[0];
   let empty, mine = false;
   if (kind === 'radio' || kind === 'buttons') {
-    const on = els.map(e => kind === 'radio' ? e.checked : e.getAttribute('aria-pressed') === 'true');
+    const on = els.map(e => kind === 'radio' ? e.checked : __ja.attr(e, 'aria-pressed') === 'true');
     empty = !on.some(Boolean);
     mine = agentIndex !== null && agentIndex >= 0 && on[agentIndex] && on.filter(Boolean).length === 1;
   } else if (kind === 'checkbox') {
@@ -162,7 +162,7 @@ _STATE_JS = ("""
     empty = !(el.files && el.files.length);
     mine = false;
   } else if (kind === 'combobox') {
-    const control = el.closest('[class*="control"]') || el.parentElement?.closest('[role=combobox]');
+    const control = __ja.closest(el, '[class*="control"]') || __ja.closest(__ja.parent(el), '[role=combobox]');
     const shown = control ? [...control.querySelectorAll(
         '[class*="single-value"], [class*="singleValue"], [class*="multi-value"], ' +
         '[class*="multiValue"], [class*="chip" i], [class~="tag" i], [class*="ant-tag"], ' +
@@ -171,17 +171,17 @@ _STATE_JS = ("""
         '[class*="selected-item" i], [class*="selectedItem" i], ' +
         '[data-automation-id="selectedItem"]')]
         .map(d => d.innerText).filter(t => norm(t)) : [];
-    const own = ('value' in el && el.tagName !== 'BUTTON') ? el.value : '';
+    const own = ('value' in el && __ja.tag(el) !== 'BUTTON') ? el.value : '';
     // A button or div combobox shows its choice as its own text, and Workday
     // can show one in its form field, outside any control container: any
     // text there and it isn't empty (a placeholder can't be told apart).
-    const ownText = (el.tagName === 'BUTTON' || !('value' in el)) ? el.innerText : '';
-    const wd = el.closest('[data-automation-id^="formField"]');
+    const ownText = (__ja.tag(el) === 'BUTTON' || !('value' in el)) ? el.innerText : '';
+    const wd = __ja.closest(el, '[data-automation-id^="formField"]');
     const wdShown = wd ? [...wd.querySelectorAll('[data-automation-id="selectedItem"]')]
         .map(d => d.innerText).filter(t => norm(t)) : [];
     // You may pick a row with the mouse and clear it with the X: neither
     // touches the input, both touch its control.
-    if (control && (control.hasAttribute('""" + TOUCH_ATTR + r"""')
+    if (control && (__ja.has(control, '""" + TOUCH_ATTR + r"""')
         || control.querySelector('[""" + TOUCH_ATTR + r"""]'))) touched = true;
     empty = !shown.length && !norm(own) && !norm(ownText) && !wdShown.length;
     mine = agentValue !== null && (shown.length ? shown.some(t => norm(t) === norm(agentValue))
@@ -517,14 +517,14 @@ class FieldLedger:
 # touched form field's identity parts (tag, name, id, explicit label; never
 # a value) are also recorded, in window.__jaAct and the tab's
 # sessionStorage, so the record outlasts a re-mount and a new document.
-_ACTIVITY_JS = r"""
+_ACTIVITY_JS = extract.safe(r"""
 () => {
   if (window.__jaAct) return;
   // Starts as "just now": input before this was installed can't be seen,
   // so a fresh page always waits the full quiet period.
   window.__jaAct = {last: performance.now(), agent: false, t: [], a: []};
 """ + extract._TEXT_OF_JS + r"""
-  const explicitLabel = el => ((el.getAttribute('aria-label') || '').trim()
+  const explicitLabel = el => ((__ja.attr(el, 'aria-label') || '').trim()
       || [...(el.labels || [])].map(l => textOf(l, el)).filter(Boolean).join(' '))
       .slice(0, 300);
   const STORE = '__jaTouched';
@@ -549,13 +549,13 @@ _ACTIVITY_JS = r"""
   const fieldsOf = el => {
     const out = new Set();
     if (!(el instanceof Element) || el === document.body) return out;
-    if (el.matches(FORMISH)) out.add(el);
-    const ref = el.closest(REF);
+    if (__ja.matches(el, FORMISH)) out.add(el);
+    const ref = __ja.closest(el, REF);
     if (ref) out.add(ref);
     if (el instanceof HTMLLabelElement && el.control) out.add(el.control);
-    const control = el.closest('[class*="control"], [role=combobox]');
+    const control = __ja.closest(el, '[class*="control"], [role=combobox]');
     if (control) {
-      if (control.matches(FORMISH)) out.add(control);
+      if (__ja.matches(control, FORMISH)) out.add(control);
       control.querySelectorAll(FORMISH).forEach(x => out.add(x));
     }
     return out;
@@ -564,8 +564,8 @@ _ACTIVITY_JS = r"""
     let added = false;
     for (const el of els)
       for (const f of fieldsOf(el)) {
-        const rec = [f.tagName.toLowerCase(), typeof f.name === 'string' ? f.name : '',
-                     f.id || '', explicitLabel(f)];
+        const rec = [__ja.tag(f).toLowerCase(), typeof __ja.name(f) === 'string' ? __ja.name(f) : '',
+                     __ja.id(f) || '', explicitLabel(f)];
         const k = list + JSON.stringify(rec);
         if (seen.has(k)) continue;
         seen.add(k); window.__jaAct[list].push(rec); added = true;
@@ -581,8 +581,8 @@ _ACTIVITY_JS = r"""
     for (const el of els) {
       if (!(el instanceof Element) || el === document.body) continue;
       put(el, attr);
-      put(el.closest(REF), attr);
-      put(el.closest('[class*="control"], [role=combobox]'), attr);
+      put(__ja.closest(el, REF), attr);
+      put(__ja.closest(el, '[class*="control"], [role=combobox]'), attr);
       if (el instanceof HTMLLabelElement) put(el.control, attr);
     }
   };
@@ -599,7 +599,7 @@ _ACTIVITY_JS = r"""
         } else if (['input', 'paste', 'change'].includes(t)) {
           for (const el of targets) {
             put(el, '""" + WHILE_AGENT_ATTR + r"""');
-            put(el.closest(REF), '""" + WHILE_AGENT_ATTR + r"""');
+            put(__ja.closest(el, REF), '""" + WHILE_AGENT_ATTR + r"""');
           }
           record(targets, 'a');
         }
@@ -618,9 +618,9 @@ _ACTIVITY_JS = r"""
       // agent's fill or the page left focused, a review it never got.
       const pointer = t === 'pointerdown' || t === 'mousedown';
       const picker = active instanceof Element && active !== document.body
-          && (active.matches('[role=combobox], [aria-autocomplete]:not([aria-autocomplete="none" i]), '
+          && (__ja.matches(active, '[role=combobox], [aria-autocomplete]:not([aria-autocomplete="none" i]), '
                              + '[role=listbox], [role=option], select')
-              || !!(active.parentElement && active.parentElement.closest('[role=combobox]')));
+              || !!__ja.closest(__ja.parent(active), '[role=combobox]'));
       // ...and only when the click lands on that dropdown or one of its
       // rows (Jack, 2026-10-27): a page that moves the focus to a dropdown
       // after the pause's baseline must not have a click elsewhere count
@@ -630,20 +630,20 @@ _ACTIVITY_JS = r"""
       // dropdown, or in the list it names by aria-controls / aria-owns.
       // A row of another dropdown, or a listbox wrapping the form, is not
       // its row and counts for nothing.
-      const own = picker ? (active.closest('[role=combobox]') || active) : null;
-      const named = picker ? [active, own].flatMap(el => ((el.getAttribute('aria-controls') || '') + ' '
-          + (el.getAttribute('aria-owns') || '')).split(/\s+/)).filter(Boolean) : [];
+      const own = picker ? (__ja.closest(active, '[role=combobox]') || active) : null;
+      const named = picker ? [active, own].flatMap(el => ((__ja.attr(el, 'aria-controls') || '') + ' '
+          + (__ja.attr(el, 'aria-owns') || '')).split(/\s+/)).filter(Boolean) : [];
       const ownRow = n => {
-        if (!(n instanceof Element) || !n.matches('[role=option], [role=listbox]')) return false;
+        if (!(n instanceof Element) || !__ja.matches(n, '[role=option], [role=listbox]')) return false;
         if (own.contains(n)) return true;
-        const list = n.closest('[role=listbox]') || n;
-        return !!list.id && named.includes(list.id);
+        const list = __ja.closest(n, '[role=listbox]') || n;
+        return !!__ja.id(list) && named.includes(__ja.id(list));
       };
       const onPicker = picker && path.some(n => n === active || n === own || ownRow(n));
       mark(pointer && !onPicker ? targets : [...targets, active], R);
     }, true);
 }
-"""
+""")
 # The listener's record of what you touched: identity parts only.
 _TOUCHED_JS = "() => window.__jaAct ? {t: window.__jaAct.t || [], a: window.__jaAct.a || []} : null"
 _RESET_JS = """() => {

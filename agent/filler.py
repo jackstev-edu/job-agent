@@ -50,24 +50,24 @@ def _one_line(text: str) -> str:
 # to you), aria-describedby and the placeholder. The name (or id, as the
 # scan takes it) comes back on its own, so it's split into words like the
 # scan's. Local only: never sent anywhere.
-_CHECKBOX_LABEL_JS = r"""
+_CHECKBOX_LABEL_JS = extract.safe(r"""
 el => {
-  const parts = [el.getAttribute('aria-label'),
-                 ...(el.getAttribute('aria-labelledby') || '').split(/\s+/)
+  const parts = [__ja.attr(el, 'aria-label'),
+                 ...(__ja.attr(el, 'aria-labelledby') || '').split(/\s+/)
                    .map(id => document.getElementById(id)?.innerText),
                  ...[...(el.labels || [])].map(l => l.innerText),
-                 el.closest('label')?.innerText];
-  let parent = el.parentElement;
-  for (let i = 0; i < 4 && parent; i++, parent = parent.parentElement) {
+                 __ja.closest(el, 'label')?.innerText];
+  let parent = __ja.parent(el);
+  for (let i = 0; i < 4 && parent; i++, parent = __ja.parent(parent)) {
     const n = parent.querySelector(':scope > legend, :scope > label, :scope > .label');
     if (n && n.innerText.trim()) { parts.push(n.innerText); break; }
   }
-  parts.push(...(el.getAttribute('aria-describedby') || '').split(/\s+/)
+  parts.push(...(__ja.attr(el, 'aria-describedby') || '').split(/\s+/)
                .map(id => document.getElementById(id)?.innerText),
-             el.getAttribute('placeholder'));
-  return {label: parts.filter(Boolean).join(' '), name: el.getAttribute('name') || el.id || ''};
+             __ja.attr(el, 'placeholder'));
+  return {label: parts.filter(Boolean).join(' '), name: __ja.attr(el, 'name') || __ja.id(el) || ''};
 }
-"""
+""")
 
 
 def _element(page: "Page", ref: str):
@@ -89,7 +89,7 @@ def _element(page: "Page", ref: str):
 #            rewritten value. There is no digits-only or phone-specific
 #            comparison, so the page never chooses which check runs;
 #   "empty"  the box took nothing.
-_SET_VALUE_JS = ("""
+_SET_VALUE_JS = extract.safe("""
 (el, v) => {
 """ + extract._SECRET_JS + r"""
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return 'no';
@@ -115,7 +115,7 @@ _SET_VALUE_JS = ("""
 # the way _SET_VALUE_JS compares; the same words come back ("exact", "same",
 # "other", "empty"), plus "no" for anything that isn't a text box or has
 # become secret, which is never read.
-_READ_BACK_JS = ("""
+_READ_BACK_JS = extract.safe("""
 (el, v) => {
 """ + extract._SECRET_JS + r"""
   if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) return 'no';
@@ -388,7 +388,7 @@ _MARK_OPTION_JS = r"""
 #                 choice or is contained in it ("+1" shown for "United
 #                 States +1"): something was kept, but not word for word;
 #   "missing"     anything else. A secret box is never read: "missing".
-_SHOWS_CHOICE_JS = ("""
+_SHOWS_CHOICE_JS = extract.safe("""
 (el, choice) => {
 """ + extract._SECRET_JS + r"""
   if (isSecret(el, '')) return 'missing';
@@ -414,8 +414,8 @@ _SHOWS_CHOICE_JS = ("""
   };
   // The control container first, as the snapshot finds it; an enclosing
   // role=combobox only as a fallback, and never the element itself.
-  const control = el.closest('[class*="control"]')
-      || el.parentElement?.closest('[role=combobox]');
+  const control = __ja.closest(el, '[class*="control"]')
+      || __ja.closest(__ja.parent(el), '[role=combobox]');
   if (control) {
     const shown = [...control.querySelectorAll(
         '[class*="single-value"], [class*="singleValue"]')].map(d => d.innerText);
@@ -424,7 +424,7 @@ _SHOWS_CHOICE_JS = ("""
     if (shown.length && shown.every(same)) return 'kept';
     return shown.length && shown.every(near) ? 'unconfirmed' : 'missing';
   }
-  if (el.tagName === 'BUTTON' || !('value' in el))
+  if (__ja.tag(el) === 'BUTTON' || !('value' in el))
     return same(el.innerText) ? 'kept' : near(el.innerText) ? 'unconfirmed' : 'missing';
   return same(el.value) ? 'unconfirmed' : 'missing';
 }
@@ -527,16 +527,16 @@ def _fill_combobox(page: "Page", element, field: dict, value: str,
     return True, f"selected '{choice}' — {how}{note}{CONFIRM}"
 
 
-_BUTTON_FACTS_JS = r"""
+_BUTTON_FACTS_JS = extract.safe(r"""
 (el, group) => ({
   text: (el.innerText || '').trim(),
-  inGroup: el.tagName === 'BUTTON' && !!el.parentElement?.closest(group),
+  inGroup: __ja.tag(el) === 'BUTTON' && !!__ja.closest(__ja.parent(el), group),
   // A <button> with no type attribute IS type=submit, and Ashby's have none.
   // That only matters with a form to submit, so the test is both together.
-  submits: !!el.form && ['submit', 'image'].includes((el.type || '').toLowerCase()),
-  pressed: el.getAttribute('aria-pressed'),
+  submits: !!el.form && ['submit', 'image'].includes((__ja.type(el) || '').toLowerCase()),
+  pressed: __ja.attr(el, 'aria-pressed'),
 })
-"""
+""")
 
 
 def _press_option_button(page: "Page", field: dict, value: str) -> tuple[bool, str]:

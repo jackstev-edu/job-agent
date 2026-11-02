@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply</title></head>
+<body>
+<header><h1>Example Co careers</h1><nav><a href="#">Jobs</a></nav></header>
+<main>
+<h2>Software Engineer</h2>
+<p>Some words about the role.</p>
+<!-- A form whose controls are named after the form's own properties and
+     methods: form.id, form.name, form.action, form.method, form.tagName,
+     form.type, form.getAttribute, form.hasAttribute, form.matches,
+     form.closest, form.parentElement, form.classList and form.attributes
+     each answer with the control, not the attribute or the method. -->
+<form id="apply-form" name="application" action="/apply" method="post" role="form"
+      data-automation-id="applyForm" class="apply-form wide">
+  Fill in every box.
+  <div><label for="f-id">Employee id (if any)</label><input id="f-id" name="id" type="text"></div>
+  <div><label for="f-name">Full name</label><input id="f-name" name="name" type="text" required></div>
+  <div><label for="f-action">Preferred action</label><input id="f-action" name="action" type="text"></div>
+  <div><label for="f-method">Contact method</label><input id="f-method" name="method" type="text"></div>
+  <div><label for="f-type">Position type</label><input id="f-type" name="type" type="text"></div>
+  <div><label for="f-tag">Tag name</label><input id="f-tag" name="tagName" type="text"></div>
+  <div><label for="f-ga">Get attribute</label><input id="f-ga" name="getAttribute" type="text"></div>
+  <div><label for="f-ha">Has attribute</label><input id="f-ha" name="hasAttribute" type="text"></div>
+  <div><label for="f-m">Matches</label><input id="f-m" name="matches" type="text"></div>
+  <div><label for="f-c">Closest</label><input id="f-c" name="closest" type="text"></div>
+  <div><label for="f-p">Parent element</label><input id="f-p" name="parentElement" type="text"></div>
+  <div><label for="f-cl">Class list</label><input id="f-cl" name="classList" type="text"></div>
+  <div><label for="f-at">Attributes</label><input id="f-at" name="attributes" type="text"></div>
+  <div><label for="f-cb">Available immediately</label><input id="f-cb" name="available" type="checkbox"></div>
+  <div><label for="f-r">Resume</label><input id="f-r" name="resume" type="file"></div>
+  <div><label for="f-t">Anything else</label><textarea id="f-t" name="notes"></textarea></div>
+  <button type="submit">Submit application</button>
+</form>
+</main>
+<footer>Example Co</footer>
+</body>
+</html>

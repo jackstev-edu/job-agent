@@ -58,7 +58,7 @@ _TEXT_JS = "() => (document.body ? document.body.innerText : '').slice(0, 20000)
 # same password-safe snapshot and hand the result to Python. It has to be read
 # in the page: once the click is under way, Python can't call into the page
 # from the binding (the sync API deadlocks), and moments later the form is gone.
-_HOOK_JS = ("""
+_HOOK_JS = extract.safe("""
 (args) => {
   const [name, items, marks] = args;
   const snap = """ + extract._SNAPSHOT_JS + """;
@@ -75,7 +75,7 @@ _HOOK_JS = ("""
     try {
       return marks[1].filter(r => {
         const el = document.querySelector(`[data-ja-ref="${CSS.escape(r)}"]`);
-        return !!el && el.hasAttribute(marks[0]);
+        return !!el && __ja.has(el, marks[0]);
       });
     } catch (e) { return null; }
   };
@@ -86,7 +86,7 @@ _HOOK_JS = ("""
   };
   document.addEventListener('submit', e => fire('submit:' + textOf(e.submitter)), true);
   document.addEventListener('pointerdown', e => {
-    const b = e.target.closest && e.target.closest(
+    const b = __ja.closest(e.target, 
         'button, input[type=submit], input[type=button], [role=button]');
     if (b) fire('click:' + textOf(b));
   }, true);
@@ -329,14 +329,14 @@ def watch(page: "Page", *, record: dict, stop_requested, poll_ms: int = 500,
 # that skips a box leaves it holding a stale ref another element may now
 # carry, so the ref only counts if the box is still in the page and is the
 # one element holding it.
-_UPLOAD_REF_JS = r"""
+_UPLOAD_REF_JS = extract.safe(r"""
 (el) => {
   if (!el.isConnected) return null;
-  const r = el.getAttribute('data-ja-ref');
+  const r = __ja.attr(el, 'data-ja-ref');
   if (!r || !window.__jaGen || !r.startsWith(window.__jaGen + '-')) return null;
   return document.querySelectorAll(`[data-ja-ref="${CSS.escape(r)}"]`).length === 1 ? r : null;
 }
-"""
+""")
 
 
 def upload_ref(handle, fields: list[dict]) -> str | None:

@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
-from . import browser as browser_mod
+from . import browser as browser_mod, extract
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -103,7 +103,7 @@ def answering(page: "Page", resume: Path):
 # The visible controls that could be a way to apply, with their whole text.
 # Marks nothing; the texts come back for the allowlist compare and, when
 # none is allowed, the park message.
-_CONTROLS_JS = r"""
+_CONTROLS_JS = extract.safe(r"""
 (attr) => {
   const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
   const visible = el => {
@@ -114,11 +114,11 @@ _CONTROLS_JS = r"""
   const els = [...document.querySelectorAll('a, button, [role=button], input[type=submit], input[type=button], label')]
     .filter(visible);
   return els.map((el, i) => {
-    const text = norm(el.tagName === 'INPUT' ? el.value : el.innerText) || norm(el.getAttribute('aria-label'));
+    const text = norm(__ja.tag(el) === 'INPUT' ? el.value : el.innerText) || norm(__ja.attr(el, 'aria-label'));
     return [i, text];
   }).filter(([, t]) => t && t.length <= 60);
 }
-"""
+""")
 
 _MARK_JS = r"""
 ([index, attr]) => {

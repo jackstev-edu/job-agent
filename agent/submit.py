@@ -41,7 +41,7 @@ GENERIC_CONFIRMATION = re.compile(
     r"|we('ve| have) received your application|your application (is|has been) (in|complete)",
     re.I)
 
-_FIND_SUBMIT_JS = r"""
+_FIND_SUBMIT_JS = extract.safe(r"""
 ([submitRx, nextRx, attr]) => {
   const SUBMIT = new RegExp(submitRx, 'i'), NEXT = new RegExp(nextRx, 'i');
   const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
@@ -50,8 +50,8 @@ _FIND_SUBMIT_JS = r"""
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
   document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
-  const isBtnInput = el => el.tagName === 'INPUT' && ['submit', 'button'].includes((el.type || '').toLowerCase());
-  const text = el => norm(el.innerText || (isBtnInput(el) ? el.value : '') || el.getAttribute('aria-label'));
+  const isBtnInput = el => __ja.tag(el) === 'INPUT' && ['submit', 'button'].includes((__ja.type(el) || '').toLowerCase());
+  const text = el => norm(el.innerText || (isBtnInput(el) ? el.value : '') || __ja.attr(el, 'aria-label'));
   const hits = [...document.querySelectorAll(
       'button, input[type=submit], input[type=button], [role=button], a')]
       .filter(visible).filter(el => { const t = text(el); return t && SUBMIT.test(t) && !NEXT.test(t); });
@@ -61,29 +61,29 @@ _FIND_SUBMIT_JS = r"""
   chosen.setAttribute(attr, '1');
   return {found: hits.length, chosen: true, word: text(chosen), disabled: !!chosen.disabled};
 }
-"""
+""")
 
 # One checkbox, found by its scan ref, with its label as the census reads it.
-_BOX_LABEL_JS = r"""
+_BOX_LABEL_JS = extract.safe(r"""
 (el) => {
   const norm = t => (t || '').replace(/\s+/g, ' ').trim();
   const texts = els => ({inner: els.map(e => e.innerText).join(' '),
                          content: els.map(e => e.textContent).join(' ')});
   let lab = {source: 'none', inner: '', content: ''};
-  const aria = el.getAttribute('aria-label');
+  const aria = __ja.attr(el, 'aria-label');
   if (aria && aria.trim()) lab = {source: 'aria-label', inner: aria, content: aria};
-  else if (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`))
-    lab = {source: 'for', ...texts([document.querySelector(`label[for="${CSS.escape(el.id)}"]`)])};
-  else if (el.closest('label')) lab = {source: 'wrap', ...texts([el.closest('label')])};
-  const described = (el.getAttribute('aria-describedby') || '').split(/\s+/)
+  else if (__ja.id(el) && document.querySelector(`label[for="${CSS.escape(__ja.id(el))}"]`))
+    lab = {source: 'for', ...texts([document.querySelector(`label[for="${CSS.escape(__ja.id(el))}"]`)])};
+  else if (__ja.closest(el, 'label')) lab = {source: 'wrap', ...texts([__ja.closest(el, 'label')])};
+  const described = (__ja.attr(el, 'aria-describedby') || '').split(/\s+/)
       .map(id => document.getElementById(id)?.textContent || '').join(' ');
   const r = el.getBoundingClientRect(), s = getComputedStyle(el);
   return {checked: !!el.checked, label_source: lab.source, label_inner: norm(lab.inner),
           label_content: norm(lab.content), described: norm(described),
           visible: r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none',
-          is_checkbox: el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'checkbox'};
+          is_checkbox: __ja.tag(el) === 'INPUT' && (__ja.type(el) || '').toLowerCase() === 'checkbox'};
 }
-"""
+""")
 
 
 @dataclass

@@ -30,7 +30,7 @@ from urllib.parse import urlsplit
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
-from . import browser as browser_mod, gate, google, secrets_store, pages, pause as pause_mod
+from . import browser as browser_mod, extract, gate, google, secrets_store, pages, pause as pause_mod
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -139,7 +139,7 @@ def generate_password(length: int = PASSWORD_LENGTH) -> str:
 
 # --- finding things on the page (structure and whole-text matches only) -------
 
-_FIND_BUTTON_JS = r"""
+_FIND_BUTTON_JS = extract.safe(r"""
 ([wordsRx, neverRx, attr]) => {
   const WORDS = new RegExp(wordsRx, 'i'), NEVER = new RegExp(neverRx, 'i');
   const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
@@ -148,9 +148,9 @@ _FIND_BUTTON_JS = r"""
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
   document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
-  const isBtnInput = el => el.tagName === 'INPUT' && ['submit', 'button'].includes((el.type || '').toLowerCase());
-  const texts = el => [el.innerText, isBtnInput(el) ? el.value : '', el.getAttribute('aria-label'),
-                       el.getAttribute('title')].map(norm).filter(Boolean);
+  const isBtnInput = el => __ja.tag(el) === 'INPUT' && ['submit', 'button'].includes((__ja.type(el) || '').toLowerCase());
+  const texts = el => [el.innerText, isBtnInput(el) ? el.value : '', __ja.attr(el, 'aria-label'),
+                       __ja.attr(el, 'title')].map(norm).filter(Boolean);
   const hits = [...document.querySelectorAll(
       'button, a, [role=button], input[type=submit], input[type=button]')]
       .filter(visible)
@@ -158,18 +158,18 @@ _FIND_BUTTON_JS = r"""
                                                   && ts.some(t => WORDS.test(t)); });
   // A submit button beats a link; the first of several equals wins only
   // when they all read the same.
-  const words = new Set(hits.map(el => norm(el.innerText || (isBtnInput(el) ? el.value : '') || el.getAttribute('aria-label')).toLowerCase()));
+  const words = new Set(hits.map(el => norm(el.innerText || (isBtnInput(el) ? el.value : '') || __ja.attr(el, 'aria-label')).toLowerCase()));
   if (!hits.length || words.size > 1) return {found: hits.length, chosen: false, word: ''};
-  const chosen = hits.find(el => (el.type || '').toLowerCase() === 'submit') || hits[0];
+  const chosen = hits.find(el => (__ja.type(el) || '').toLowerCase() === 'submit') || hits[0];
   chosen.setAttribute(attr, '1');
-  return {found: hits.length, chosen: true, word: norm(chosen.innerText || (isBtnInput(chosen) ? chosen.value : '') || chosen.getAttribute('aria-label'))};
+  return {found: hits.length, chosen: true, word: norm(chosen.innerText || (isBtnInput(chosen) ? chosen.value : '') || __ja.attr(chosen, 'aria-label'))};
 }
-"""
+""")
 
 # Visible text-like boxes with their identity words, so the email and name
 # boxes can be picked by label. Values are never read: only attributes and
 # label text come back, and only for non-password boxes.
-_TEXT_BOXES_JS = r"""
+_TEXT_BOXES_JS = extract.safe(r"""
 (attr) => {
   const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
   const visible = el => {
@@ -180,11 +180,11 @@ _TEXT_BOXES_JS = r"""
   const out = [];
   let n = 0;
   for (const el of document.querySelectorAll('input')) {
-    const type = (el.type || 'text').toLowerCase();
+    const type = (__ja.type(el) || 'text').toLowerCase();
     if (!['text', 'email', 'tel', ''].includes(type) || !visible(el) || el.disabled || el.readOnly) continue;
-    if (/password/i.test(el.getAttribute('autocomplete') || '')) continue;
-    const words = norm([el.name, el.id, el.getAttribute('aria-label'), el.getAttribute('placeholder'),
-                        el.getAttribute('autocomplete'),
+    if (/password/i.test(__ja.attr(el, 'autocomplete') || '')) continue;
+    const words = norm([__ja.name(el), __ja.id(el), __ja.attr(el, 'aria-label'), __ja.attr(el, 'placeholder'),
+                        __ja.attr(el, 'autocomplete'),
                         ...[...(el.labels || [])].map(l => l.innerText)].filter(Boolean).join(' '));
     const key = 'b' + (n++);
     el.setAttribute(attr, key);
@@ -192,12 +192,12 @@ _TEXT_BOXES_JS = r"""
   }
   return out;
 }
-"""
+""")
 
 # The password boxes, by role: "new" (autocomplete new-password, or every
 # password box on a page with none marked current), "current" (autocomplete
 # current-password, or the single box on a sign-in page). Attributes only.
-_PASSWORD_BOXES_JS = r"""
+_PASSWORD_BOXES_JS = extract.safe(r"""
 (attr) => {
   const visible = el => {
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);
@@ -205,8 +205,8 @@ _PASSWORD_BOXES_JS = r"""
   };
   document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
   const boxes = [...document.querySelectorAll('input[type=password i]')].filter(visible);
-  const roles = boxes.map(el => /new-password/i.test(el.getAttribute('autocomplete') || '') ? 'new'
-                             : /current-password/i.test(el.getAttribute('autocomplete') || '') ? 'current' : '');
+  const roles = boxes.map(el => /new-password/i.test(__ja.attr(el, 'autocomplete') || '') ? 'new'
+                             : /current-password/i.test(__ja.attr(el, 'autocomplete') || '') ? 'current' : '');
   const anyCurrent = roles.includes('current');
   let n = 0;
   return boxes.map((el, i) => {
@@ -217,9 +217,9 @@ _PASSWORD_BOXES_JS = r"""
     return {key, role, maxlength: max};
   });
 }
-"""
+""")
 
-_CODE_BOX_JS = r"""
+_CODE_BOX_JS = extract.safe(r"""
 (attr) => {
   const split = t => t.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
   const codeRx = /one\s?time|(?<![a-z])otp(?![a-z])|(?<![a-z])2fa(?![a-z])|(?<![a-z])mfa(?![a-z])|two\s?factor|passcode|(verification|verify|security|auth\w*|sms|confirmation|access)\s*code/i;
@@ -229,14 +229,14 @@ _CODE_BOX_JS = r"""
   };
   document.querySelectorAll('[' + attr + ']').forEach(e => e.removeAttribute(attr));
   const boxes = [...document.querySelectorAll('input')].filter(el => visible(el) &&
-      (el.getAttribute('autocomplete') === 'one-time-code' ||
-       codeRx.test(split([el.name, el.id, el.getAttribute('aria-label'), el.getAttribute('placeholder')]
+      (__ja.attr(el, 'autocomplete') === 'one-time-code' ||
+       codeRx.test(split([__ja.name(el), __ja.id(el), __ja.attr(el, 'aria-label'), __ja.attr(el, 'placeholder')]
                          .filter(Boolean).join(' ')))));
   if (boxes.length !== 1) return boxes.length;
   boxes[0].setAttribute(attr, '1');
   return 1;
 }
-"""
+""")
 
 # One marker attribute per kind of box, so stamping one kind never clears
 # another's (each scan clears its own markers first).
@@ -245,7 +245,7 @@ _TEXT_ATTR, _PW_ATTR, _CODE_ATTR, _CONSENT_ATTR = (
 _BTN_ATTR = "data-ja-acct-btn"
 
 # Consent checkboxes on the page, in the census shape the gate's policy judges.
-_CONSENT_BOXES_JS = r"""
+_CONSENT_BOXES_JS = extract.safe(r"""
 (attr) => {
   const norm = t => (t || '').replace(/\s+/g, ' ').trim();
   const visible = el => {
@@ -255,17 +255,17 @@ _CONSENT_BOXES_JS = r"""
   const texts = els => ({inner: els.map(e => e.innerText).join(' '),
                          content: els.map(e => e.textContent).join(' ')});
   const labelOf = el => {
-    const aria = el.getAttribute('aria-label');
+    const aria = __ja.attr(el, 'aria-label');
     if (aria && aria.trim()) return {source: 'aria-label', inner: aria, content: aria};
-    if (el.id) {
-      const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (__ja.id(el)) {
+      const l = document.querySelector(`label[for="${CSS.escape(__ja.id(el))}"]`);
       if (l) return {source: 'for', ...texts([l])};
     }
-    const wrap = el.closest('label');
+    const wrap = __ja.closest(el, 'label');
     if (wrap) return {source: 'wrap', ...texts([wrap])};
     return {source: 'none', inner: '', content: ''};
   };
-  const described = el => (el.getAttribute('aria-describedby') || '').split(/\s+/)
+  const described = el => (__ja.attr(el, 'aria-describedby') || '').split(/\s+/)
       .map(id => document.getElementById(id)?.textContent || '').join(' ');
   let n = 0;
   return [...document.querySelectorAll('input[type=checkbox]')].filter(visible).map(el => {
@@ -277,7 +277,7 @@ _CONSENT_BOXES_JS = r"""
             described: norm(described(el))};
   });
 }
-"""
+""")
 
 
 def _box(page: "Page", attr: str, key: str):
@@ -302,7 +302,7 @@ _WORKDAY_IDS_JS = r"""
 # that overlay too. Returns {where: 'overlay' | 'control', x, y}, the
 # control's own centre as an offset inside the marked element, so the
 # click lands on the control's point even under a larger overlay; or null.
-_WORKDAY_MARK_JS = r"""
+_WORKDAY_MARK_JS = extract.safe(r"""
 ([id, attr, neverRx]) => {
   const NEVER = new RegExp(neverRx, 'i');
   const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
@@ -318,24 +318,24 @@ _WORKDAY_MARK_JS = r"""
   // read for the wording check only then. Any other input with the id
   // (a text or password box) is never read and never pressed.
   const kinds = ['submit', 'button'];
-  const isBtnInput = el.tagName === 'INPUT' && kinds.includes((el.type || '').toLowerCase())
-    && kinds.includes((el.getAttribute('type') || '').toLowerCase());
-  if (el.tagName === 'INPUT' && !isBtnInput) return null;
-  const texts = [el.innerText, isBtnInput ? el.value : '', el.getAttribute('aria-label'),
-                 el.getAttribute('title')].map(norm).filter(Boolean);
+  const isBtnInput = __ja.tag(el) === 'INPUT' && kinds.includes((__ja.type(el) || '').toLowerCase())
+    && kinds.includes((__ja.attr(el, 'type') || '').toLowerCase());
+  if (__ja.tag(el) === 'INPUT' && !isBtnInput) return null;
+  const texts = [el.innerText, isBtnInput ? el.value : '', __ja.attr(el, 'aria-label'),
+                 __ja.attr(el, 'title')].map(norm).filter(Boolean);
   if (texts.some(t => NEVER.test(t))) return null;
   const b = el.getBoundingClientRect();
   const cx = b.left + b.width / 2, cy = b.top + b.height / 2;
   const covers = o => { const r = o.getBoundingClientRect();
     return r.left <= cx && cx <= r.right && r.top <= cy && cy <= r.bottom; };
   const overlay = [...document.querySelectorAll('[data-automation-id="click_filter"]')]
-    .filter(visible).filter(o => el.parentElement && el.parentElement.contains(o)).find(covers);
+    .filter(visible).filter(o => __ja.parent(el) && __ja.parent(el).contains(o)).find(covers);
   const target = overlay || el, r = target.getBoundingClientRect();
   target.setAttribute(attr, '1');
   // Playwright's position is relative to the padding box: the border is taken off.
   return {where: overlay ? 'overlay' : 'control', x: cx - r.left - target.clientLeft, y: cy - r.top - target.clientTop};
 }
-"""
+""")
 
 
 def workday_controls(page: "Page") -> set[str]:

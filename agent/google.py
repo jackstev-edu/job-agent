@@ -29,7 +29,7 @@ import unicodedata
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from . import browser as browser_mod, pause as pause_mod
+from . import browser as browser_mod, extract, pause as pause_mod
 
 if TYPE_CHECKING:
     from playwright.sync_api import BrowserContext, Page
@@ -111,7 +111,7 @@ def _norm(t) -> str:
 # box, the chooser entries' identifiers, every visible leaf list item on
 # the whole page (a permission line anywhere counts), the Continue /
 # Allow count and the "not secure" notice.
-_SHAPE_JS = r"""
+_SHAPE_JS = extract.safe(r"""
 (okRx) => {
   const OK = new RegExp(okRx, 'i');
   const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
@@ -120,13 +120,13 @@ _SHAPE_JS = r"""
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
   const boxes = [...document.querySelectorAll('input, textarea, select')].filter(el =>
-    !['hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio'].includes((el.type || '').toLowerCase())).length;
+    !['hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio'].includes((__ja.type(el) || '').toLowerCase())).length;
   const ticks = document.querySelectorAll('input[type=checkbox i], input[type=radio i], [role=checkbox], [role=radio], [role=switch]').length;
   const ids = [...document.querySelectorAll('[data-identifier]')].filter(visible)
-    .map(el => norm(el.getAttribute('data-identifier')));
+    .map(el => norm(__ja.attr(el, 'data-identifier')));
   const entries = [...document.querySelectorAll('li')].filter(visible).filter(li => !li.querySelector('li'))
     .map(li => norm(li.innerText));
-  const btnText = b => norm(b.innerText || (b.tagName === 'INPUT' ? b.value : '') || b.getAttribute('aria-label'));
+  const btnText = b => norm(b.innerText || (__ja.tag(b) === 'INPUT' ? b.value : '') || __ja.attr(b, 'aria-label'));
   const ok = [...document.querySelectorAll('button, [role=button], input[type=submit], input[type=button]')]
     .filter(visible).filter(b => OK.test(btnText(b))).length;
   const insecure = /browser or app may not be secure|couldn.t sign you in/i.test(norm(document.body.innerText));
@@ -146,7 +146,7 @@ _SHAPE_JS = r"""
   // frame likewise. Closed roots (attached by script or declared in the
   // markup) are counted by shadow_hosts() through the browser's own DOM
   // tree, which this script cannot see.
-  const hidden = e => e.shadowRoot || e.tagName.includes('-') || e.tagName === 'SLOT';
+  const hidden = e => e.shadowRoot || __ja.tag(e).includes('-') || __ja.tag(e) === 'SLOT';
   const opaque = [...document.querySelectorAll('*')].filter(hidden).length;
   const frames = [...document.querySelectorAll('iframe, frame, fencedframe, object, embed')].filter(visible).length;
   const blocks = [...document.querySelectorAll('p, div, li, h1, h2, h3, h4, h5, h6, section, article, main, dd, dt')]
@@ -154,11 +154,11 @@ _SHAPE_JS = r"""
     .map(el => norm(el.innerText)).filter(t => t && t.length <= 400).slice(0, 400);
   return {boxes, ticks, ids, entries, ok, insecure, blocks, frames, opaque};
 }
-"""
+""")
 
 # Marks the i-th visible chooser entry (and returns its identifier, for a
 # second look before the click), or the single Continue / Allow.
-_MARK_JS = r"""
+_MARK_JS = extract.safe(r"""
 ([what, index, attr, okRx]) => {
   const OK = new RegExp(okRx, 'i');
   const norm = t => String(t || '').replace(/\s+/g, ' ').trim();
@@ -170,7 +170,7 @@ _MARK_JS = r"""
   let list;
   if (what === 'account') list = [...document.querySelectorAll('[data-identifier]')].filter(visible);
   else {
-    const btnText = b => norm(b.innerText || (b.tagName === 'INPUT' ? b.value : '') || b.getAttribute('aria-label'));
+    const btnText = b => norm(b.innerText || (__ja.tag(b) === 'INPUT' ? b.value : '') || __ja.attr(b, 'aria-label'));
     list = [...document.querySelectorAll('button, [role=button], input[type=submit], input[type=button]')]
       .filter(visible).filter(b => OK.test(btnText(b)));
     if (list.length !== 1) return null;
@@ -178,9 +178,9 @@ _MARK_JS = r"""
   const el = list[index];
   if (!el) return null;
   el.setAttribute(attr, '1');
-  return what === 'account' ? norm(el.getAttribute('data-identifier')) : 'ok';
+  return what === 'account' ? norm(__ja.attr(el, 'data-identifier')) : 'ok';
 }
-"""
+""")
 
 
 def shadow_hosts(page: "Page") -> int:

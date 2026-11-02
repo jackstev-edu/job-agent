@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from . import config
+from . import config, extract
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -38,7 +38,7 @@ MIN_VALUE_DIGITS = 7           # a phone or postal number, read through its digi
 # account area; each as structure only. No .value, no option values, no
 # text of anything but labels, legends, buttons and options (page
 # vocabulary, filtered again in Python against the profile).
-_DUMP_JS = r"""
+_DUMP_JS = extract.safe(r"""
 (limits) => {
   const SKIP = 'header, [role=banner], nav, [data-automation-id*="account" i], [data-automation-id*="profile" i],'
              + ' [data-automation-id="header"], [data-automation-id="navigationHeader"], [data-automation-id="candidateHome"]';
@@ -48,17 +48,17 @@ _DUMP_JS = r"""
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
   const tagOf = el => {
-    let t = el.tagName.toLowerCase();
-    if (el.id) t += '#' + el.id.slice(0, 60);
-    const aid = el.getAttribute('data-automation-id');
+    let t = __ja.tag(el).toLowerCase();
+    if (__ja.id(el)) t += '#' + __ja.id(el).slice(0, 60);
+    const aid = __ja.attr(el, 'data-automation-id');
     if (aid) t += '[data-automation-id=' + aid.slice(0, 60) + ']';
-    const role = el.getAttribute('role');
+    const role = __ja.attr(el, 'role');
     if (role) t += '[role=' + role + ']';
     return t;
   };
   const chainOf = el => {
     const out = [];
-    for (let p = el.parentElement; p && p !== document.documentElement; p = p.parentElement) out.push(tagOf(p));
+    for (let p = __ja.parent(el); p && p !== document.documentElement; p = __ja.parent(p)) out.push(tagOf(p));
     return out.slice(0, limits.chain);
   };
   const byId = id => document.getElementById(id);
@@ -66,7 +66,7 @@ _DUMP_JS = r"""
   // text, never dumped as text itself.
   const HOLDS_VALUE = 'input, textarea, select, button, [contenteditable], [role=combobox], [role=textbox],'
                     + ' [role=listbox], [role=option], [aria-haspopup]';
-  const holdsValue = el => el.matches(HOLDS_VALUE);
+  const holdsValue = el => __ja.matches(el, HOLDS_VALUE);
   // A label's own words: a clone with every value-holding descendant removed.
   const cleanText = (node, own) => {
     // A value-holding root (a dropdown named by its own id) has no words of its
@@ -77,13 +77,13 @@ _DUMP_JS = r"""
     return norm(c.textContent);
   };
   const labelOf = el => {
-    const al = el.getAttribute('aria-label'); if (al && !holdsValue(el)) return norm(al);
-    const lb = el.getAttribute('aria-labelledby');
+    const al = __ja.attr(el, 'aria-label'); if (al && !holdsValue(el)) return norm(al);
+    const lb = __ja.attr(el, 'aria-labelledby');
     if (lb) { const t = norm(lb.split(/\s+/).map(i => cleanText(byId(i))).join(' ')); if (t) return t; }
-    if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) return cleanText(l); }
-    const w = el.closest('label'); if (w) return cleanText(w);
-    let p = el.parentElement;
-    for (let i = 0; i < 4 && p; i++, p = p.parentElement) {
+    if (__ja.id(el)) { const l = document.querySelector('label[for="' + CSS.escape(__ja.id(el)) + '"]'); if (l) return cleanText(l); }
+    const w = __ja.closest(el, 'label'); if (w) return cleanText(w);
+    let p = __ja.parent(el);
+    for (let i = 0; i < 4 && p; i++, p = __ja.parent(p)) {
       const n = p.querySelector(':scope > legend, :scope > label, :scope > .label'); if (n) return cleanText(n);
     }
     return '';
@@ -93,47 +93,47 @@ _DUMP_JS = r"""
   // its text and often in aria-label: neither is dumped (a chosen gender,
   // country or state is a value).
   const TEXTUAL = new Set(['label', 'legend', 'a', 'option', 'h1', 'h2', 'h3', 'h4', 'summary', 'th']);
-  const isChooser = el => el.hasAttribute('aria-haspopup') || ['combobox', 'listbox', 'option', 'textbox'].includes(el.getAttribute('role') || '')
-                      || (el.tagName === 'BUTTON' && !!el.closest('[data-automation-id^="formField"]'));
-  const plainButton = el => el.tagName === 'BUTTON' && !isChooser(el);
+  const isChooser = el => __ja.has(el, 'aria-haspopup') || ['combobox', 'listbox', 'option', 'textbox'].includes(__ja.attr(el, 'role') || '')
+                      || (__ja.tag(el) === 'BUTTON' && !!__ja.closest(el, '[data-automation-id^="formField"]'));
+  const plainButton = el => __ja.tag(el) === 'BUTTON' && !isChooser(el);
   const sel = 'input, select, textarea, button, [role], [data-automation-id], label, legend, fieldset, a[href],'
             + ' [aria-haspopup], [contenteditable], h1, h2, h3, h4';
   const out = [];
   const els = [...document.querySelectorAll(sel)];
   for (let i = 0; i < els.length && out.length < limits.elements; i++) {
     const el = els[i];
-    if (el.closest(SKIP)) continue;
-    const tag = el.tagName.toLowerCase();
+    if (__ja.closest(el, SKIP)) continue;
+    const tag = __ja.tag(el).toLowerCase();
     const chooser = isChooser(el);
     const aria = {};
-    for (const a of el.attributes) {
+    for (const a of __ja.attrs(el)) {
       // The value-like aria attributes: a number, a text, a chosen / pressed state.
       if (!a.name.startsWith('aria-') || ['aria-valuenow', 'aria-valuetext', 'aria-checked', 'aria-selected', 'aria-pressed'].includes(a.name)) continue;
       if (a.name === 'aria-label' && (chooser || holdsValue(el))) continue;   // may carry the choice or the value
       aria[a.name] = norm(a.value);
     }
     const entry = {
-      i: out.length, tag, type: el.getAttribute('type') || null, role: el.getAttribute('role') || null,
-      automation_id: el.getAttribute('data-automation-id') || null,
-      name: el.getAttribute('name') || null, id: el.id || null,
-      label: ['input', 'select', 'textarea'].includes(tag) || el.getAttribute('role') || chooser || el.hasAttribute('contenteditable') ? labelOf(el) : '',
+      i: out.length, tag, type: __ja.attr(el, 'type') || null, role: __ja.attr(el, 'role') || null,
+      automation_id: __ja.attr(el, 'data-automation-id') || null,
+      name: __ja.attr(el, 'name') || null, id: __ja.id(el) || null,
+      label: ['input', 'select', 'textarea'].includes(tag) || __ja.attr(el, 'role') || chooser || __ja.has(el, 'contenteditable') ? labelOf(el) : '',
       text: (TEXTUAL.has(tag) && !chooser && !holdsValue(el)) ? cleanText(el) : plainButton(el) ? cleanText(el, true) : '',
       chooser,
-      required: el.required === true || el.getAttribute('aria-required') === 'true' || el.hasAttribute('required'),
-      disabled: el.disabled === true || el.getAttribute('aria-disabled') === 'true',
-      readonly: el.readOnly === true || el.getAttribute('readonly') !== null,
+      required: el.required === true || __ja.attr(el, 'aria-required') === 'true' || __ja.has(el, 'required'),
+      disabled: el.disabled === true || __ja.attr(el, 'aria-disabled') === 'true',
+      readonly: el.readOnly === true || __ja.attr(el, 'readonly') !== null,
       visible: visible(el), aria,
-      classes: [...el.classList].slice(0, 4), chain: chainOf(el),
+      classes: [...__ja.classes(el)].slice(0, 4), chain: chainOf(el),
     };
     if (tag === 'select') entry.options = [...el.options].slice(0, limits.options).map(o => norm(o.text));
-    if (tag === 'input' && (el.getAttribute('type') || '').toLowerCase() === 'file') entry.accept = el.getAttribute('accept') || null;
+    if (tag === 'input' && (__ja.attr(el, 'type') || '').toLowerCase() === 'file') entry.accept = __ja.attr(el, 'accept') || null;
     out.push(entry);
   }
   return {title: norm(document.title), elements: out, total: els.length,
           frames: document.querySelectorAll('iframe, frame').length,
           shadow_hosts: [...document.querySelectorAll('*')].filter(e => e.shadowRoot).length};
 }
-"""
+""")
 
 LIMITS = {"text": 200, "chain": 12, "elements": 1500, "options": 60}
 

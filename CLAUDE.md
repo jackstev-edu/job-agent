@@ -24,6 +24,15 @@ run as `python apply.py <command>` (no make).
   recorded answer on the identical key, or to the user, whatever the
   classifier said.
 - `agent/extract.py` — injects JS to pull a compact field list out of the page.
+  Also holds `SAFE_JS` / `safe()` (Jack, 2026-11-01 evening, item 1): every
+  injected script of snapshot, extract, pages, ledger, chooser, submit,
+  outcome, follow, google, accounts and filler is wrapped so it reads id,
+  name, type, action, method, tagName, getAttribute, hasAttribute,
+  matches, closest, parentElement, classList and attributes through the
+  prototypes' own getters and methods called on the element (`__ja`),
+  never through `el.id` and the like: a form whose control is named "id"
+  answers `form.id` with that control (DOM clobbering), which crashed
+  `apply.py snapshot` on a real posting page.
 - `agent/mapper.py` — answers ordinary fields in batches of 10, under a prompt
   that forces `null` rather than a guess.
 - `agent/filler.py` — types answers into the page.
@@ -521,6 +530,23 @@ lines where they conflict:
 4. "Fold all four: touch marks in the hook's read; the learn-versus-edit
    race; no per-poll log fetch on an open card; refuse to save over a
    learned.yaml that didn't parse (keep the old file, report it)."
+
+Added by Jack on 2026-11-01 (evening, the fix round after his live test
+with auto-submit OFF: Greenhouse filled, paused, picked up and learned 9
+answers, two of them against his rules; a posting page with the form at
+its bottom parked as an account page and crashed `apply.py snapshot`; an
+Avature sign-up typed a new generated password on every Continue and
+its confirmation page parked on every Continue; the Memory page's
+buttons did nothing useful). His items, one commit each: 1 DOM-
+clobbering-safe page scripts; 2 the posting-with-form page filled, not
+handed to accounts.py; 3 the strict confirmation check on every resume,
+with the address rule (a path segment equal to success, confirmation,
+thank-you, thankyou or thanks) beside the no-fillable-control rule; 4
+sign-up retries (one generated password per host per job, stored once
+the page moved on); 5 learning rules (per-company and opt-in questions
+never learned, "same company" is the tenant, violating entries removed
+on load); 6 the Memory page buttons; 7 the owed folds. His decision on
+item 4 is in the password rule below.
 
 ## Design rules — do not relax these
 

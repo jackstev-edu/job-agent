@@ -53,14 +53,14 @@ def is_mygreenhouse_sign_in(url: str) -> bool:
 # MFA / two-factor / passcode / a verification, security, auth, SMS,
 # confirmation or access code. Hidden boxes count too: a page can show
 # them later.
-_KIND_JS = (r"""
+_KIND_JS = extract.safe(r"""
 () => {
   const SECRET_RX = new RegExp(""" + json.dumps(extract.SECRET_WORDS) + r""", 'iu');
   const camel = t => t.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
   const boxes = new Set(document.querySelectorAll(
       'input[type=password i], [autocomplete*="password" i], [data-ja-secret]'));
   for (const el of document.querySelectorAll('input')) {
-    const t = [el.name, el.id, el.getAttribute('aria-label'), el.getAttribute('placeholder'),
+    const t = [__ja.name(el), __ja.id(el), __ja.attr(el, 'aria-label'), __ja.attr(el, 'placeholder'),
                ...[...(el.labels || [])].map(l => l.innerText)]
               .filter(Boolean).join(' ').normalize('NFKC');
     if (SECRET_RX.test(t) || SECRET_RX.test(camel(t))) boxes.add(el);
@@ -71,8 +71,8 @@ _KIND_JS = (r"""
   const codeRx = /one\s?time|(?<![a-z])otp(?![a-z])|(?<![a-z])2fa(?![a-z])|(?<![a-z])mfa(?![a-z])|two\s?factor|passcode|(verification|verify|security|auth\w*|sms|confirmation|access)\s*code/i;
   const code = !!document.querySelector('[autocomplete="one-time-code" i]')
     || [...document.querySelectorAll('input')].some(el =>
-         codeRx.test(split([el.name, el.id, el.getAttribute('aria-label'),
-                            el.getAttribute('placeholder')].filter(Boolean).join(' '))));
+         codeRx.test(split([__ja.name(el), __ja.id(el), __ja.attr(el, 'aria-label'),
+                            __ja.attr(el, 'placeholder')].filter(Boolean).join(' '))));
   return {pw, newPw, code};
 }
 """)

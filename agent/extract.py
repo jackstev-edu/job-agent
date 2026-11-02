@@ -56,6 +56,55 @@ SECRET_WORDS = (r"pass[\s_-]*word|passw|passwd|pwd|passcode|pass[\s_-]*phrase|"
 # it finds, so a later "show password" toggle doesn't make the box readable.
 # The constants are baked in, so the submit hook in outcome.py, which embeds
 # _SNAPSHOT_JS as a function, needs no extra arguments.
+# --- DOM clobbering (Jack, 2026-11-01 evening, item 1) ---------------------
+# A <form> answers form.id, form.name, form.action, form.method, form.tagName,
+# form.closest, form.getAttribute and the rest with the CONTROL of that name
+# inside it, not the attribute or the method (named controls shadow the
+# form's own properties). A page whose form holds an input named "id" made
+# snapshot.dump crash (el.id.slice is not a function) and can make any
+# script that walks up to the form misread or throw. Every injected script
+# therefore reads those through the prototypes' own getters and methods,
+# called on the element, never through el.id and the like; `safe` puts the
+# helpers in scope of each evaluated script (fragments spliced into one
+# assume them).
+SAFE_JS = r"""
+const __ja = (() => {
+  const own = (proto, p) => { const d = Object.getOwnPropertyDescriptor(proto, p); return d && d.get; };
+  const tagGet = own(Element.prototype, 'tagName'), idGet = own(Element.prototype, 'id'),
+        attrsGet = own(Element.prototype, 'attributes'), classGet = own(Element.prototype, 'classList'),
+        parentGet = own(Node.prototype, 'parentElement');
+  const getAttr = Element.prototype.getAttribute, hasAttr = Element.prototype.hasAttribute,
+        matchesFn = Element.prototype.matches, closestFn = Element.prototype.closest;
+  const typeGet = {INPUT: own(HTMLInputElement.prototype, 'type'), BUTTON: own(HTMLButtonElement.prototype, 'type'),
+                   SELECT: own(HTMLSelectElement.prototype, 'type'), TEXTAREA: own(HTMLTextAreaElement.prototype, 'type')};
+  const isEl = el => el instanceof Element;
+  const tag = el => isEl(el) ? String(tagGet.call(el)) : '';
+  const attr = (el, n) => isEl(el) ? getAttr.call(el, n) : null;
+  return {
+    isEl, tag, attr,
+    id: el => isEl(el) ? String(idGet.call(el) || '') : '',
+    name: el => isEl(el) ? String(attr(el, 'name') || '') : '',
+    // What el.type gives on a control (an input's "text" default, a
+    // button's "submit" default), the attribute on anything else.
+    type: el => { if (!isEl(el)) return ''; const g = typeGet[tag(el)]; return String((g ? g.call(el) : attr(el, 'type')) || ''); },
+    action: el => isEl(el) ? String(attr(el, 'action') || '') : '',
+    method: el => isEl(el) ? String(attr(el, 'method') || '') : '',
+    has: (el, n) => isEl(el) && hasAttr.call(el, n),
+    matches: (el, s) => isEl(el) && matchesFn.call(el, s),
+    closest: (el, s) => isEl(el) ? closestFn.call(el, s) : null,
+    parent: n => (n instanceof Node) ? parentGet.call(n) : null,
+    classes: el => isEl(el) ? [...classGet.call(el)] : [],
+    attrs: el => isEl(el) ? [...attrsGet.call(el)] : [],
+  };
+})();
+"""
+
+
+def safe(script: str) -> str:
+    """`script` (one function expression) with the __ja helpers in its scope; called with the same arguments."""
+    return "(...a) => {" + SAFE_JS + "\n  return (" + script + ")(...a);\n}"
+
+
 _SECRET_JS = (r"""
   const SECRET_ATTR = """ + json.dumps(SECRET_ATTR) + r""";
   const SECRET_RX = new RegExp(""" + json.dumps(SECRET_WORDS) + r""", 'iu');
@@ -64,13 +113,13 @@ _SECRET_JS = (r"""
   const camelSplit = t => t.replace(/([a-z])([A-Z])/g, '$1 $2')
                            .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
   const isSecret = (el, label) => {
-    if (el.hasAttribute(SECRET_ATTR)) return true;
-    const text = [el.name, el.id, label, el.getAttribute('placeholder'),
-                  el.getAttribute('aria-label'),
+    if (__ja.has(el, SECRET_ATTR)) return true;
+    const text = [__ja.name(el), __ja.id(el), label, __ja.attr(el, 'placeholder'),
+                  __ja.attr(el, 'aria-label'),
                   ...[...(el.labels || [])].map(l => l.innerText)]
                  .filter(Boolean).join(' ').normalize('NFKC');
-    const hit = (el.type || '').toLowerCase() === 'password'
-      || /password/i.test(el.getAttribute('autocomplete') || '')
+    const hit = (__ja.type(el) || '').toLowerCase() === 'password'
+      || /password/i.test(__ja.attr(el, 'autocomplete') || '')
       || SECRET_RX.test(text) || SECRET_RX.test(camelSplit(text));
     if (hit) el.setAttribute(SECRET_ATTR, '1');
     return hit;
@@ -106,7 +155,7 @@ _TEXT_OF_JS = (r"""
   const VALUE_SHOWN = """ + json.dumps(_VALUE_SHOWN) + r""";
   const textOf = (root, field) => {
     if (!root || root === field || (field && field.contains(root))
-        || root.closest(VALUE_SHOWN)) return '';
+        || __ja.closest(root, VALUE_SHOWN)) return '';
     // innerText's rule: a rendered root drops unrendered text inside it; an
     // unrendered one (a display:none label named by aria-labelledby) gives
     // all of it.
@@ -115,12 +164,12 @@ _TEXT_OF_JS = (r"""
     const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walk.nextNode(); n; n = walk.nextNode()) {
       let skip = false;
-      for (let e = n.parentElement; e && e !== root; e = e.parentElement) {
-        if (e === field || e.matches(VALUE_SHOWN)) { skip = true; break; }
+      for (let e = __ja.parent(n); e && e !== root; e = __ja.parent(e)) {
+        if (e === field || __ja.matches(e, VALUE_SHOWN)) { skip = true; break; }
       }
       if (skip) continue;
       if (rendered) {
-        const p = n.parentElement;
+        const p = __ja.parent(n);
         if (!p.getClientRects().length) continue;
         const s = getComputedStyle(p);
         if (s.visibility === 'hidden' || s.display === 'none') continue;
@@ -136,15 +185,15 @@ _TEXT_OF_JS = (r"""
 # type=submit, so a typeless button inside a form counts. Checked on the
 # element and on the button or input around it: a click on a div inside a
 # submit button is a click on that button.
-_SUBMITS_JS = r"""el => [el, el.closest('button, input')].some(e => !!e
-    && ['BUTTON', 'INPUT'].includes(e.tagName) && !!e.form
-    && ['submit', 'image'].includes(String(e.type || '').toLowerCase()))"""
+_SUBMITS_JS = safe(r"""el => [el, __ja.closest(el, 'button, input')].some(e => !!e
+    && ['BUTTON', 'INPUT'].includes(__ja.tag(e)) && !!e.form
+    && ['submit', 'image'].includes(String(__ja.type(e) || '').toLowerCase()))""")
 
 # Does a dropdown's box hold any text? Only true or false leaves the page,
 # never the text or its length. The password test runs first, and a box (or
 # any box inside it) that's secret is never read at all: it counts as
 # holding text, so it isn't opened.
-_HOLDS_TEXT_JS = ("""
+_HOLDS_TEXT_JS = safe("""
 el => {
 """ + _SECRET_JS + r"""
   const boxes = [el, ...el.querySelectorAll('input, textarea, [contenteditable]')];
@@ -154,9 +203,9 @@ el => {
   // search text, and counting it kept the menu shut for nothing.
   const shown = b => b.getClientRects().length > 0
       && getComputedStyle(b).visibility !== 'hidden';
-  const typed = b => b.tagName === 'TEXTAREA' || (b.tagName === 'INPUT'
+  const typed = b => __ja.tag(b) === 'TEXTAREA' || (__ja.tag(b) === 'INPUT'
       && ['text', 'search', 'email', 'tel', 'url', 'number'].includes(
-           String(b.type || 'text').toLowerCase()));
+           String(__ja.type(b) || 'text').toLowerCase()));
   return boxes.some(b => shown(b) && (typed(b) ? String(b.value) !== ''
       : b.isContentEditable && b.textContent.trim() !== ''));
 }
@@ -185,7 +234,7 @@ _RAW_RULES_JS = (r"""
 
 # --- the injected JavaScript -------------------------------------------------
 # This runs inside the page, in the browser, with full access to the DOM.
-_SCAN_JS = r"""
+_SCAN_JS = safe(r"""
 ([GROUP, GEN]) => {
   const REF = 'data-ja-ref';
   const SUBMITS = """ + _SUBMITS_JS + r""";
@@ -199,10 +248,10 @@ _SCAN_JS = r"""
   // With a name attribute, it's a stable identity; an id or a placeholder
   // alone isn't one. Built by textOf like every other label, so it holds no
   // value either.
-  const explicitLabel = el => ((el.getAttribute('aria-label') || '').trim()
+  const explicitLabel = el => ((__ja.attr(el, 'aria-label') || '').trim()
       || [...(el.labels || [])].map(l => textOf(l, el)).filter(Boolean).join(' '))
       .slice(0, 300);
-  const stableIdentity = el => !!(el.getAttribute('name') || '').trim() || !!explicitLabel(el);
+  const stableIdentity = el => !!(__ja.attr(el, 'name') || '').trim() || !!explicitLabel(el);
   let counter = 0;
   const fields = [];
 
@@ -219,9 +268,9 @@ _SCAN_JS = r"""
   // `text` reads one source: textOf for anything sent to the model, so none
   // of them can carry a value.
   const labelWith = (el, text) => {
-    if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').trim();
+    if (__ja.attr(el, 'aria-label')) return __ja.attr(el, 'aria-label').trim();
 
-    const labelledBy = el.getAttribute('aria-labelledby');
+    const labelledBy = __ja.attr(el, 'aria-labelledby');
     if (labelledBy) {
       const joined = labelledBy.split(/\s+/)
         .map(id => text(document.getElementById(id), el))
@@ -229,23 +278,23 @@ _SCAN_JS = r"""
       if (joined) return joined;
     }
 
-    if (el.id) {
-      const explicit = text(document.querySelector(`label[for="${CSS.escape(el.id)}"]`), el);
+    if (__ja.id(el)) {
+      const explicit = text(document.querySelector(`label[for="${CSS.escape(__ja.id(el))}"]`), el);
       if (explicit) return explicit;
     }
 
-    const wrapping = text(el.closest('label'), el);
+    const wrapping = text(__ja.closest(el, 'label'), el);
     if (wrapping) return wrapping;
 
     // Last resort: climb a few levels looking for a legend or label sibling.
-    let parent = el.parentElement;
-    for (let i = 0; i < 4 && parent; i++, parent = parent.parentElement) {
+    let parent = __ja.parent(el);
+    for (let i = 0; i < 4 && parent; i++, parent = __ja.parent(parent)) {
       const nearby = text(parent.querySelector(
           ':scope > legend, :scope > label, :scope > .label'), el);
       if (nearby) return nearby;
     }
 
-    return (el.getAttribute('placeholder') || el.getAttribute('name') || '').trim();
+    return (__ja.attr(el, 'placeholder') || __ja.attr(el, 'name') || '').trim();
   };
   const labelFor = el => labelWith(el, textOf);
   // The same label read whole, as innerText, for the password test only. It
@@ -253,12 +302,12 @@ _SCAN_JS = r"""
   // sees at least what it saw before labels were filtered.
   const rawLabelFor = el => labelWith(el, r => (r?.innerText || '').trim());
   // Help text read whole, for the raw-label check only.
-  const rawHelpFor = el => (el.getAttribute('aria-describedby') || '').split(/\s+/)
+  const rawHelpFor = el => (__ja.attr(el, 'aria-describedby') || '').split(/\s+/)
       .map(id => document.getElementById(id)?.innerText || '').join(' ');
 
   // Helper text under a field often contains the real question.
   const helpFor = el => {
-    const describedBy = el.getAttribute('aria-describedby');
+    const describedBy = __ja.attr(el, 'aria-describedby');
     if (!describedBy) return '';
     return describedBy.split(/\s+/)
       .map(id => textOf(document.getElementById(id), el))
@@ -271,8 +320,8 @@ _SCAN_JS = r"""
   const stamp = el => {
     const r = GEN + '-f' + (counter++);
     el.setAttribute(REF, r);
-    sigs[r] = [el.tagName.toLowerCase(), String(el.type || '').toLowerCase(),
-               el.getAttribute('name') || ''];
+    sigs[r] = [__ja.tag(el).toLowerCase(), String(__ja.type(el) || '').toLowerCase(),
+               __ja.attr(el, 'name') || ''];
     return r;
   };
 
@@ -287,7 +336,7 @@ _SCAN_JS = r"""
   const buttonGroup = box => {
     if (!isVisible(box)) return;
     const optionText = b => (b.innerText || '').trim()
-                         || (b.getAttribute('data-option') || '').trim();
+                         || (__ja.attr(b, 'data-option') || '').trim();
     const buttons = [...box.querySelectorAll('button')]
       .filter(b => isVisible(b) && optionText(b));
     if (!buttons.length) return;
@@ -296,10 +345,10 @@ _SCAN_JS = r"""
     // then the first option's tag doubles as the group's.
     const optionRefs = buttons.map(b => stamp(b));
 
-    const title = box.closest('.ashby-application-form-field-entry')
+    const title = __ja.closest(box, '.ashby-application-form-field-entry')
       ?.querySelector('.ashby-application-form-question-title');
     const hidden = box.querySelector('input');
-    const pressed = buttons.find(b => b.getAttribute('aria-pressed') === 'true');
+    const pressed = buttons.find(b => __ja.attr(b, 'aria-pressed') === 'true');
 
     fields.push({
       ref: optionRefs[0],
@@ -311,7 +360,7 @@ _SCAN_JS = r"""
       option_refs: optionRefs,
       // Ashby marks required on the question title's class, not the input.
       required: /required/i.test(title?.className || '') || !!hidden?.required
-             || box.getAttribute('aria-required') === 'true',
+             || __ja.attr(box, 'aria-required') === 'true',
       help_text: helpFor(box),
       current_value: pressed ? optionText(pressed) : '',
       ...rawFlags([title?.innerText, rawLabelFor(box), rawHelpFor(box)].join(' ')),
@@ -321,10 +370,10 @@ _SCAN_JS = r"""
   // GROUP is in this selector so a button group lands in page order: the
   // container comes before the hidden checkbox inside it.
   document.querySelectorAll(`input, select, textarea, ${GROUP}`).forEach(el => {
-    if (el.matches(GROUP)) { buttonGroup(el); return; }
-    if (el.closest(GROUP)) return;      // its hidden checkbox; the group covers it
+    if (__ja.matches(el, GROUP)) { buttonGroup(el); return; }
+    if (__ja.closest(el, GROUP)) return;      // its hidden checkbox; the group covers it
 
-    const type = (el.type || el.tagName).toLowerCase();
+    const type = (__ja.type(el) || __ja.tag(el)).toLowerCase();
     if (['hidden','submit','button','reset','image'].includes(type)) return;
     if (el.disabled || el.readOnly || !isVisible(el)) return;
     // react-select (Greenhouse) renders an invisible <input required
@@ -332,15 +381,15 @@ _SCAN_JS = r"""
     // validation. It isn't a question, and without this it appears twice.
     // Deliberately not an opacity check: styled radios hide the real input
     // with opacity 0, and those must still be read.
-    if (el.getAttribute('aria-hidden') === 'true' && el.tabIndex === -1) return;
+    if (__ja.attr(el, 'aria-hidden') === 'true' && el.tabIndex === -1) return;
 
     if (type === 'radio') {
-      const groupKey = el.name || labelFor(el);
+      const groupKey = __ja.name(el) || labelFor(el);
       if (seenGroups.has(groupKey)) return;
       seenGroups.add(groupKey);
 
-      const peers = el.name
-        ? [...document.querySelectorAll(`input[type=radio][name="${CSS.escape(el.name)}"]`)]
+      const peers = __ja.name(el)
+        ? [...document.querySelectorAll(`input[type=radio][name="${CSS.escape(__ja.name(el))}"]`)]
         : [el];
 
       // Stamp the options FIRST, then reuse the first option's tag as the
@@ -352,14 +401,14 @@ _SCAN_JS = r"""
       fields.push({
         ref: optionRefs[0],
         type: 'radio',
-        name: el.name || '',
-        label: (textOf(el.closest('fieldset')?.querySelector('legend'), el)
+        name: __ja.name(el) || '',
+        label: (textOf(__ja.closest(el, 'fieldset')?.querySelector('legend'), el)
                 || labelFor(el)).trim().slice(0, 300),
         options: peers.map(p => labelFor(p)).filter(Boolean),
         option_refs: optionRefs,
         required: peers.some(p => p.required),
         help_text: helpFor(el),
-        ...rawFlags([el.closest('fieldset')?.querySelector('legend')?.innerText,
+        ...rawFlags([__ja.closest(el, 'fieldset')?.querySelector('legend')?.innerText,
                      rawLabelFor(el), rawHelpFor(el)].join(' ')),
       });
       return;
@@ -369,10 +418,10 @@ _SCAN_JS = r"""
     // (or aria-autocomplete) instead of being a real <select>. If we tag that
     // as 'text' here, the later [role=combobox] pass skips it — it's already
     // stamped — and enrich_comboboxes never opens it to read the options.
-    const isCustomCombobox = el.getAttribute('role') === 'combobox'
-        || el.getAttribute('aria-autocomplete') === 'list';
+    const isCustomCombobox = __ja.attr(el, 'role') === 'combobox'
+        || __ja.attr(el, 'aria-autocomplete') === 'list';
 
-    const tag = el.tagName.toLowerCase();
+    const tag = __ja.tag(el).toLowerCase();
     // The scan reads no input's value at all: what's in a box is read only by
     // the snapshot, for refs Python has cleared. It does mark a box marked,
     // hinted or named as a password, since a "show password" toggle flips
@@ -383,13 +432,13 @@ _SCAN_JS = r"""
       ref: stamp(el),
       type: isCustomCombobox ? 'combobox'
           : tag === 'select' ? 'select' : tag === 'textarea' ? 'textarea' : type,
-      name: el.name || el.id || '',
+      name: __ja.name(el) || __ja.id(el) || '',
       label: label.slice(0, 300),
-      placeholder: el.getAttribute('placeholder') || '',
-      required: !!el.required || el.getAttribute('aria-required') === 'true',
+      placeholder: __ja.attr(el, 'placeholder') || '',
+      required: !!el.required || __ja.attr(el, 'aria-required') === 'true',
       help_text: helpFor(el),
       maxlength: el.maxLength > 0 ? el.maxLength : null,
-      tag, dom_name: el.name || '', dom_id: el.id || '',
+      tag, dom_name: __ja.name(el) || '', dom_id: __ja.id(el) || '',
       explicit_label: explicitLabel(el),
       stable_identity: stableIdentity(el),
       ...rawFlags([rawLabelFor(el), rawHelpFor(el)].join(' ')),
@@ -405,21 +454,21 @@ _SCAN_JS = r"""
   // Custom dropdowns that aren't real <select> elements. Ashby and Workday
   // both use these; they need click-then-type rather than a direct set.
   document.querySelectorAll('[role=combobox], [role=listbox]').forEach(el => {
-    if (el.hasAttribute(REF) || !isVisible(el)) return;
+    if (__ja.has(el, REF) || !isVisible(el)) return;
     fields.push({
       ref: stamp(el),
       type: 'combobox',
-      name: el.getAttribute('name') || el.id || '',
+      name: __ja.attr(el, 'name') || __ja.id(el) || '',
       stable_identity: stableIdentity(el),
-      label: (el.getAttribute('aria-label') || labelFor(el) || '').slice(0, 300),
+      label: (__ja.attr(el, 'aria-label') || labelFor(el) || '').slice(0, 300),
       options: [],
-      required: el.getAttribute('aria-required') === 'true',
+      required: __ja.attr(el, 'aria-required') === 'true',
       help_text: '',
       note: 'custom dropdown — filled by clicking and typing',
       // A typeless <button> in a form is a submit button. Opening this
       // dropdown would click it, so it's handed to you and never clicked.
       submits: SUBMITS(el),
-      ...rawFlags([el.getAttribute('aria-label'), rawLabelFor(el), rawHelpFor(el)].join(' ')),
+      ...rawFlags([__ja.attr(el, 'aria-label'), rawLabelFor(el), rawHelpFor(el)].join(' ')),
     });
   });
 
@@ -429,7 +478,7 @@ _SCAN_JS = r"""
       'input[type=password i], [autocomplete*="password" i]');
   return {fields, sigs, url: location.href, has_password: hasPassword};
 }
-"""
+""")
 
 # Fields that are on the page but have nothing to do with the application.
 _NOISE = ("search", "cookie", "newsletter", "subscribe", "promo code",
@@ -589,14 +638,14 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
 # editable region, a dropdown or listbox widget, or react-select's display of
 # the chosen value. innerText alone already drops what's typed in inputs and
 # textareas, but not an editable region's text or a widget's chosen option.
-_PAGE_TEXT_JS = r"""
+_PAGE_TEXT_JS = safe(r"""
 () => {
   const SKIP = 'form, ' + """ + json.dumps(_VALUE_SHOWN) + r""";
   const out = [];
   const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-    const el = n.parentElement;
-    if (!el || el.closest(SKIP)) continue;
+    const el = __ja.parent(n);
+    if (!el || __ja.closest(el, SKIP)) continue;
     if (!el.getClientRects().length) continue;              // not rendered
     const s = getComputedStyle(el);
     if (s.visibility === 'hidden' || s.display === 'none') continue;
@@ -605,7 +654,7 @@ _PAGE_TEXT_JS = r"""
   }
   return out.join(String.fromCharCode(10));
 }
-"""
+""")
 
 
 def page_text(page: "Page", limit: int = 3000) -> str:
@@ -895,7 +944,7 @@ def enrich_comboboxes(page: "Page", fields: list[dict], contained: bool = False)
 # also skips, without touching the value, any element that is now secret:
 # marked, type=password, hinted or named as a password. Same refusal as
 # filler.py.
-_SNAPSHOT_JS = r"""
+_SNAPSHOT_JS = safe(r"""
 (items) => {
 """ + _SECRET_JS + r"""
   const out = {};
@@ -912,18 +961,18 @@ _SNAPSHOT_JS = r"""
     const all = document.querySelectorAll(`[data-ja-ref="${CSS.escape(ref)}"]`);
     if (all.length !== 1) continue;
     const el = all[0];
-    const t = (el.type || '').toLowerCase();
+    const t = (__ja.type(el) || '').toLowerCase();
     // The element must still be what the scan saw: same tag, type and name.
-    if (el.tagName.toLowerCase() !== tag || String(el.type || '').toLowerCase() !== type
-        || (el.getAttribute('name') || '') !== name) continue;
+    if (__ja.tag(el).toLowerCase() !== tag || String(__ja.type(el) || '').toLowerCase() !== type
+        || (__ja.attr(el, 'name') || '') !== name) continue;
     if (isSecret(el, '')) continue;
     // A read that can return text needs a stable identity: a name, or a
     // label from a real <label> or aria-label. Ticked / pressed state is
     // only ever true or false, so it can't carry a typed value.
     const flag = t === 'checkbox' || t === 'radio'
-        || (el.tagName !== 'SELECT' && t !== 'file' && el.hasAttribute('aria-pressed'));
-    const stable = !!(el.getAttribute('name') || '').trim()
-        || !!(el.getAttribute('aria-label') || '').trim()
+        || (__ja.tag(el) !== 'SELECT' && t !== 'file' && __ja.has(el, 'aria-pressed'));
+    const stable = !!(__ja.attr(el, 'name') || '').trim()
+        || !!(__ja.attr(el, 'aria-label') || '').trim()
         || [...(el.labels || [])].some(l => (l.innerText || '').trim());
     if (!flag && !stable) continue;
     let v;
@@ -931,16 +980,16 @@ _SNAPSHOT_JS = r"""
     // A file box: the chosen files' names, in order, and nothing else. The
     // count is the list's length. File contents are never opened.
     else if (t === 'file') v = Array.from(el.files || [], f => String(f.name));
-    else if (el.tagName === 'SELECT') v = el.selectedOptions[0]?.text.trim() ?? '';
+    else if (__ja.tag(el) === 'SELECT') v = el.selectedOptions[0]?.text.trim() ?? '';
     // Before 'value': a <button> has one, and it's always empty.
-    else if (el.hasAttribute('aria-pressed')) v = el.getAttribute('aria-pressed') === 'true';
+    else if (__ja.has(el, 'aria-pressed')) v = __ja.attr(el, 'aria-pressed') === 'true';
     else if ('value' in el) {
       v = el.value;
       // react-select (Greenhouse) shows the chosen option in a sibling; its
       // own <input> holds only the search text, empty once a choice is made.
       // Reading the input logged every answered dropdown as "you cleared it".
-      if (!v && el.getAttribute('role') === 'combobox') {
-        const shown = el.closest('[class*="control"]')
+      if (!v && __ja.attr(el, 'role') === 'combobox') {
+        const shown = __ja.closest(el, '[class*="control"]')
           ?.querySelector('[class*="single-value"], [class*="singleValue"]');
         if (shown) v = shown.innerText.trim();
       }
@@ -950,7 +999,7 @@ _SNAPSHOT_JS = r"""
   }
   return out;
 }
-"""
+""")
 
 
 def _flag_field(f: dict) -> bool:
@@ -1049,7 +1098,7 @@ def partly_read(fields: list[dict], raw: dict) -> bool:
 # hidden native checkboxes, because a consent box styled out of sight still
 # counts. Labels are reported twice, as rendered (innerText) and as written
 # (textContent), so text hidden with CSS shows up as a difference.
-_CHECKBOX_CENSUS_JS = r"""
+_CHECKBOX_CENSUS_JS = safe(r"""
 (GROUP) => {
   const norm = t => (t || '').replace(/\s+/g, ' ').trim();
   const visible = el => {
@@ -1059,31 +1108,31 @@ _CHECKBOX_CENSUS_JS = r"""
   const texts = els => ({inner: els.map(e => e.innerText).join(' '),
                          content: els.map(e => e.textContent).join(' ')});
   const labelOf = el => {
-    const aria = el.getAttribute('aria-label');
+    const aria = __ja.attr(el, 'aria-label');
     if (aria && aria.trim()) return {source: 'aria-label', inner: aria, content: aria};
-    const ids = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+    const ids = (__ja.attr(el, 'aria-labelledby') || '').split(/\s+/).filter(Boolean);
     const byId = ids.map(id => document.getElementById(id)).filter(Boolean);
     if (byId.length) return {source: 'aria-labelledby', ...texts(byId)};
-    if (el.id) {
-      const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (__ja.id(el)) {
+      const l = document.querySelector(`label[for="${CSS.escape(__ja.id(el))}"]`);
       if (l) return {source: 'for', ...texts([l])};
     }
-    const wrap = el.closest('label');
+    const wrap = __ja.closest(el, 'label');
     if (wrap) return {source: 'wrap', ...texts([wrap])};
     // A role=checkbox element is usually named by its own text.
-    if (el.tagName !== 'INPUT' && norm(el.textContent)) return {source: 'self', ...texts([el])};
+    if (__ja.tag(el) !== 'INPUT' && norm(el.textContent)) return {source: 'self', ...texts([el])};
     return {source: 'none', inner: '', content: ''};
   };
-  const described = el => (el.getAttribute('aria-describedby') || '').split(/\s+/)
+  const described = el => (__ja.attr(el, 'aria-describedby') || '').split(/\s+/)
       .map(id => document.getElementById(id)?.textContent || '').join(' ');
 
   return [...document.querySelectorAll('input[type=checkbox], [role=checkbox], [role=switch]')]
     .map(el => {
-      const group = el.closest(GROUP);
+      const group = __ja.closest(el, GROUP);
       const lab = labelOf(el);
       return {
-        ref: el.getAttribute('data-ja-ref'),
-        checked: el.tagName === 'INPUT' ? !!el.checked : el.getAttribute('aria-checked') === 'true',
+        ref: __ja.attr(el, 'data-ja-ref'),
+        checked: __ja.tag(el) === 'INPUT' ? !!el.checked : __ja.attr(el, 'aria-checked') === 'true',
         visible: visible(el),
         label_source: lab.source,
         label_inner: norm(lab.inner),
@@ -1097,26 +1146,26 @@ _CHECKBOX_CENSUS_JS = r"""
         // trailing * on the label): true on any such sign, so the gate's
         // optional-empties waiver (version 8) can only apply to a box the
         // page itself marks as optional on every reading.
-        required: el.required === true || el.getAttribute('aria-required') === 'true'
+        required: el.required === true || __ja.attr(el, 'aria-required') === 'true'
                   || /\*\s*$/.test(lab.content || '') || /\*\s*$/.test(lab.inner || ''),
       };
     });
 }
-"""
+""")
 
 # Invisible means zero-size, display:none or visibility:hidden, computed on
 # the frame element itself. Zero-size is judged on the computed content box
 # too: a width=0 height=0 iframe still draws its default border, so its
 # bounding box alone would call it a visible 4x4.
-_FRAMES_JS = r"""
+_FRAMES_JS = safe(r"""
 () => [...document.querySelectorAll('iframe, frame')].map(f => {
   const r = f.getBoundingClientRect(), s = getComputedStyle(f);
   const sized = r.width > 0 && r.height > 0
              && parseFloat(s.width) > 0 && parseFloat(s.height) > 0;
-  return {src: f.getAttribute('src') || '',
+  return {src: __ja.attr(f, 'src') || '',
           visible: sized && s.visibility !== 'hidden' && s.display !== 'none'};
 })
-"""
+""")
 
 
 def checkbox_census(page: "Page") -> list[dict]:
