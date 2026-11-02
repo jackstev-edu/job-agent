@@ -25,6 +25,20 @@
   </fieldset>
   <button type="button">Save and Continue</button>
 </form></template>
+<template id="info_pin"><form id="mi">
+  <fieldset><legend>My Information</legend>
+  <label for="fn">First Name</label><input id="fn" name="firstName" required>
+  <label for="pin">PIN</label><input id="pin" name="accessPin">
+  </fieldset>
+  <button type="button">Save and Continue</button>
+</form></template>
+<template id="info_renamed"><form id="mi">
+  <fieldset><legend>My Information</legend>
+  <label for="fn">First Name</label><input id="fn" name="firstName" required>
+  <label for="em3">Email</label><input id="em3" name="emailAddress" type="email">
+  </fieldset>
+  <button type="button">Save and Continue</button>
+</form></template>
 <script>
 function show(n) {
   document.getElementById('app').replaceChildren(document.getElementById(n).content.cloneNode(true));

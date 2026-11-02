@@ -58,9 +58,10 @@ def test_my_information_at_the_sign_up_address_is_read_and_the_gate_no_longer_st
         key = extract.page_key(page.url)
         check(signup and all(f.get("credential_step") for f in signup) and key in guard.credential_pages,
               "the sign-up scan: a credential step, the address tainted")
-        check(("input", "email", "email") in guard.credential_identities.get(key, set())
-              and any(i[2] == "password" for i in guard.credential_identities[key]),
-              f"the identities beside the password boxes are remembered ({sorted(guard.credential_identities.get(key, set()))})")
+        beside = guard.credential_identities.get(key, set())
+        check(("input", "email", "name", "email") in beside and ("input", "email", "label", "email") in beside
+              and any(i[2:] == ("name", "password") for i in beside),
+              f"the identities beside the password boxes are remembered, by name and by label ({sorted(beside)})")
         page.evaluate("() => show('info')")
         fill = _info_fill(page, guard, prof)
         check(fill is not None and fill.fields and not any(f.get("credential_step") for f in fill.fields),
@@ -129,7 +130,7 @@ def test_a_field_sharing_an_identity_with_a_sign_up_field_keeps_the_page_unreada
         by = {f["label"]: f for f in fields}
         check(not any(f.get("secret") for f in fields) and "Email" in by,
               "My Information with an email box like the sign-up's: no secret field")
-        check(extract.field_identity(by["Email"]) in guard.credential_identities[extract.page_key(page.url)],
+        check(extract.field_identities(by["Email"]) & guard.credential_identities[extract.page_key(page.url)],
               "its identity (input, email, name email) is one scanned beside the password boxes")
         check(all(f.get("credential_step") for f in fields) and extract.readable_refs(fields) == [],
               "so the whole scan stays a credential step: First Name is not read either")
@@ -139,6 +140,37 @@ def test_a_field_sharing_an_identity_with_a_sign_up_field_keeps_the_page_unreada
         plain = extract.extract_fields(page, guard)
         check(plain and not any(f.get("credential_step") for f in plain),
               "the variant without the shared box is readable")
+        # Fold of 49f3d78's finding 1: a renamed box still matches by its label.
+        page.evaluate("() => show('info_renamed')")
+        renamed = extract.extract_fields(page, guard)
+        by = {f["label"]: f for f in renamed}
+        check(by["Email"].get("dom_name") == "emailAddress" and all(f.get("credential_step") for f in renamed),
+              "an email box renamed since the sign-up scan, labelled Email as before: still a credential step")
+    check.done()
+
+
+def test_a_secret_field_alone_keeps_the_page_a_credential_step():
+    # The implementation's one condition stricter than decision A as
+    # written: a scan holding a field secret by any layer stays a
+    # credential step even with no password box, no hint and no shared
+    # identity. Mutation check: deleting the `any(is_secret(f) ...)` term
+    # in extract_fields makes this fail (49f3d78's finding 2).
+    check = Checks()
+    with mock_page(FIXTURE) as page:
+        guard = extract.ReadGuard()
+        extract.extract_fields(page, guard)
+        page.evaluate("() => show('info_pin')")
+        fields = extract.extract_fields(page, guard)
+        by = {f["label"]: f for f in fields}
+        beside = guard.credential_identities[extract.page_key(page.url)]
+        check(by["PIN"].get("secret") and not by["First Name"].get("secret"),
+              "the PIN box is secret by the password-word layer, First Name is not")
+        check(not any(extract.field_identities(f) & beside for f in fields),
+              "no field of this scan shares an identity with the sign-up's")
+        check(all(f.get("credential_step") for f in fields) and extract.readable_refs(fields) == [],
+              "the secret field alone keeps the page a credential step: First Name is not read")
+        page.fill("#fn", "Test")
+        check(extract.snapshot(page, fields) == {}, "nothing read back")
     check.done()
 
 
@@ -147,10 +179,12 @@ def test_the_snapshot_js_check_is_unchanged():
     check("input[type=password i], [autocomplete*=\"password\" i]" in extract._SNAPSHOT_JS
           and "return out;" in extract._SNAPSHOT_JS and "if (document.querySelector(" in extract._SNAPSHOT_JS,
           "the in-page read still returns nothing while any password box or hint is in the document")
-    check(extract.field_identity({"tag": "input", "type": "text"}) == ("input", "text", "")
-          and extract.field_identity({"tag": "input", "type": "text", "dom_name": "", "explicit_label": "Last  Name"})
-          == ("input", "text", "last name"),
-          "an anonymous field has the empty identity; a labelled one its normalised label")
+    check(extract.field_identities({"tag": "input", "type": "text"}) == {("input", "text", "anon", "")}
+          and extract.field_identities({"tag": "input", "type": "text", "dom_name": "", "explicit_label": "Last  Name"})
+          == {("input", "text", "label", "last name")}
+          and extract.field_identities({"tag": "input", "type": "text", "dom_name": "ln", "explicit_label": "Last Name"})
+          == {("input", "text", "name", "ln"), ("input", "text", "label", "last name")},
+          "an anonymous field has the one anonymous identity; a named and labelled one both keys")
     check.done()
 
 

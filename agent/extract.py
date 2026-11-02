@@ -546,18 +546,27 @@ class ReadGuard:
         self.credential_identities: dict[str, set[tuple]] = {}
 
 
-def field_identity(f: dict) -> tuple:
+def field_identities(f: dict) -> set[tuple]:
     """
-    Decision A's identity of a field: its tag, its type, and its name, or
-    with no name its explicit label (a real <label> or aria-label), in the
-    label normalisation secret_keys_of uses. A field with neither name nor
-    explicit label has the empty identity, which every such field shares:
-    an anonymous box on a page where an anonymous box sat beside a
-    password box keeps the page unreadable (fails safe).
+    Decision A's identity of a field, as the keys it is known by: its tag,
+    its type, and its name ("name", <name>) and, separately, its explicit
+    label ("label", <label>: a real <label> or aria-label, in the
+    normalisation secret_keys_of uses), each only when it has one, so a
+    re-render that renames a field still matches on its label, as the
+    sticky secret keys do (fold of 49f3d78's finding 1). A field with
+    neither has the one anonymous identity, which every such field
+    shares: an anonymous box on a page where an anonymous box sat beside
+    a password box keeps the page unreadable (fails safe).
     """
+    tag, ftype = str(f.get("tag") or f.get("type") or "").lower(), str(f.get("type") or "").lower()
     label = " ".join(unicodedata.normalize("NFKC", str(f.get("explicit_label") or "")).split()).casefold()
     name = str(f.get("dom_name") if "dom_name" in f else f.get("name") or "").strip()
-    return (str(f.get("tag") or f.get("type") or "").lower(), str(f.get("type") or "").lower(), name or label)
+    keys = set()
+    if name:
+        keys.add((tag, ftype, "name", name))
+    if label:
+        keys.add((tag, ftype, "label", label))
+    return keys or {(tag, ftype, "anon", "")}
 
 
 def page_key(url: str) -> str:
@@ -653,9 +662,9 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
     on it is read. Decision A (Jack, 2026-11-02, "loosen, with limits"): a
     scan at a credential page reads again only when this scan finds no
     password box and no password hint in the document, no field of it is
-    secret by any layer, and no field of it shares its identity
-    (field_identity) with a field scanned at that page while a password
-    box was present; the page keeps its taint, so every later scan there
+    secret by any layer, and no field of it shares an identity key
+    (field_identities: by name or by explicit label) with a field scanned
+    at that page while a password box was present; the page keeps its taint, so every later scan there
     is judged the same way, and a password box reappearing makes it a
     credential step again (the in-page read refuses on its own too).
     Without a guard (a lone scan), a fresh one is used, and it records
@@ -672,7 +681,7 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
     has_password = bool(scanned.get("has_password"))
     if has_password:
         guard.credential_pages.add(here)
-        guard.credential_identities.setdefault(here, set()).update(field_identity(f) for f in fields)
+        guard.credential_identities.setdefault(here, set()).update(k for f in fields for k in field_identities(f))
     for f in fields:
         f["sigs"] = {r: list(sigs[r]) for r in (f.get("option_refs") or [f.get("ref")])
                      if r in sigs}
@@ -695,7 +704,7 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
     credential = here in guard.credential_pages
     if credential and not has_password:
         beside = guard.credential_identities.get(here, set())
-        credential = any(is_secret(f) for f in fields) or any(field_identity(f) in beside for f in fields)
+        credential = any(is_secret(f) for f in fields) or any(field_identities(f) & beside for f in fields)
     for f in fields:
         f["credential_step"] = credential
     return [
@@ -1091,9 +1100,12 @@ def readable_refs(fields: list[dict]) -> list[str]:
          label from a real <label> or aria-label (ticked / pressed state,
          only ever true or false, is exempt);
       4. it isn't on a credential step: a page (host and path) where this
-         run has seen a password box or password hint. Nothing there is
-         read. The page also checks afresh at read time, and reads nothing
-         while any password box or hint is in the document.
+         run has seen a password box or password hint, unless the scan it
+         came from met decision A's conditions (extract_fields: no
+         password box or hint, no secret field, no identity shared with a
+         field scanned beside one; Jack, 2026-11-02). The page also
+         checks afresh at read time, and reads nothing while any
+         password box or hint is in the document.
     The page also refuses an element whose tag, type or name differs from
     what the scan saw. Anything else is unreadable, which stops a zero-edit
     claim.
