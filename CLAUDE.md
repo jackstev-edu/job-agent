@@ -546,7 +546,92 @@ sign-up retries (one generated password per host per job, stored once
 the page moved on); 5 learning rules (per-company and opt-in questions
 never learned, "same company" is the tenant, violating entries removed
 on load); 6 the Memory page buttons; 7 the owed folds. His decision on
-item 4 is in the password rule below.
+item 4 is in the password rule below. (Items 2-8 of that round are
+superseded by the 2026-11-02 brief below; item 1 is on main as
+7e25870.)
+
+Added by Jack on 2026-11-02 (after his Workday live run with
+auto-submit OFF: the sign-up page didn't go through; My Information was
+typed but the gate stopped "required, but empty" because the sign-up
+page and My Information share one address and the credential-page rule
+kept every later read off it; the phone-code multiselect failed; a
+formerly-employed question was learned; two "Year" boxes were learned
+under one key; Application Questions drew no fillable control; an
+acknowledgement box he ticked himself stopped the census again; the
+disability self-identification checkboxes were all planned False and
+the signature date was left for him), his decisions in his words:
+
+- A. Read rule: "Loosen, with limits." A page_key in credential_pages
+  becomes readable again for a scan only when ALL hold: that scan finds
+  no password box and no password hint in the document; no field of
+  that scan shares its identity (tag, type, and name or explicit label)
+  with a field scanned at that page_key while a password box was
+  present; the in-page _SNAPSHOT_JS check still reads nothing while any
+  password box or hint is present. Secret-classified fields and sticky
+  secret keys stay unreadable for the whole run. A password box
+  reappearing re-taints the page_key.
+- B. Signature date: "Yes, today's date." Date-part boxes (Month / Day /
+  Year, or one Date box) in the signature block of a self-identification
+  form (the block that holds its Name / signature box) get today's local
+  date from the computer's clock, in the widget's own format. Never the
+  model. Every other date on a legal / EEO form is unchanged. His answer
+  on the plan: fill only where the widget states its format, else
+  Jack's. Separate Month / Day / Year boxes count as stated when each
+  has an MM / DD / YYYY placeholder or inputmode="numeric"; fill them as
+  2 / 2 / 4 digits.
+- C. Past employers: "Yes, from my list." PLAN-workday item 8's rule,
+  extended: a yes / no "have you worked for / been employed by / were
+  you formerly employed at <company>" question is answered "No"; a
+  required text box asking for former-employment details at <company>
+  gets "N/A"; both only when the company named by the job's own address
+  (tenant) matches no work_history.past_employers entry under the plan's
+  loose match, AND the company named in the label loosely matches the
+  tenant. Any match or any doubt goes to Jack: a tenant of 4 characters
+  or fewer with no match, more than one company named, "subsidiaries",
+  "affiliates", "or", or a contractor / consultant / supplier wording.
+  An empty past_employers list is doubt.
+- D. Attestations: "This can be ticked for similar wording too. It won't
+  always be the same." A REQUIRED checkbox may be ticked, under
+  submit.py's tick helper as the consent policy is, when EVERY sentence
+  of its label is one of: (1) an attestation that the information Jack
+  provided in this application is true / accurate / correct / complete
+  (optionally "to the best of my knowledge"); (2) a statement that a
+  false statement, misrepresentation or omission may lead to rejection,
+  withdrawal of an offer or dismissal. Any other clause makes it Jack's:
+  authorize, consent to (other than the attestation), agree to,
+  background / reference / drug / credit check, release of information,
+  arbitration, at-will, electronic signature / signing, contact / SMS /
+  marketing / newsletter, non-compete. So does any LEGAL_GUARD,
+  PROFILE_PATHS, HARD_STOPS or CONSENT_MARKETING match. Never an
+  optional box. The gate counts such a box as a planned consent tick
+  like a terms box. His answer on the plan (the certify / attest /
+  acknowledge stop): "yes, scoped. The certify / attest / acknowledge
+  stop kind is read past ONLY inside the attestation-class check, for
+  that one tick, after every sentence passes the bounded vocabulary.
+  Any other stop kind, or the criminal-record pattern, refuses.
+  HARD_STOPS itself is not edited, and no answer path changes."
+- E. (Jack asked that nothing be left for him; the existing 2026-10-19
+  review rule applied where it was missing.) A checkbox census stop is
+  waived for a box carrying Jack's own review mark new since before the
+  pause, ticked or unticked as he left it.
+
+His answers on the plan for the round (2026-11-02): the sign-up's
+emptiness check is true / false only, never the value or its length (as
+decided on 2026-11-01); the one generated password per host per job is
+held in memory inside accounts.py for the job's lifetime, the Credential
+Manager store unchanged; short-label learned entries removed on first
+load, listed for him; the terminal's moved-pause re-prompt is dropped
+from the owed folds (accepted as is on 2026-11-01); item 5 gains a guard
+test that a lone checkbox whose label is a question keeps today's
+behaviour. Learning rules of the same brief (item 2): a per-company
+question (the classifier's, the stop kind's, or decision C's), or an
+opt-in under the consent policy's marketing patterns, is never learned
+or reused; a label of three words or fewer is keyed with its section
+context, and with none is never learned; a key two or more fields of
+one page share is never learned or reused; "same company" is the
+tenant (host plus first path segment on job-boards.greenhouse.io,
+boards.greenhouse.io, jobs.lever.co and jobs.ashbyhq.com; the subdomain
+on *.myworkdayjobs.com and *.avature.net; the host otherwise).
 
 ## Design rules — do not relax these
 
@@ -562,10 +647,23 @@ item 4 is in the password rule below.
   bool_prefix, any other non-strict kind) and fills where no profile
   answer fits (Jack, 2026-11-01, fold round, decision 2). A Department
   of Defense or clearance question is learned and reused the same way
-  (decision 1, same day; it supersedes the 2026-10-20 ruling).
+  (decision 1, same day; it supersedes the 2026-10-20 ruling). Decisions
+  B and C of 2026-11-02 are rules over Jack's own facts (the computer's
+  clock for a self-identification form's signature date; his
+  work_history.past_employers list for a "have you worked for <tenant>"
+  question), never the model.
+- A per-company question is Jack's, never learned and never reused (Jack,
+  2026-11-02, item 2), with one exception, decision C of 2026-11-02: a
+  past-employer question at a tenant on no entry of his
+  work_history.past_employers list, with the label's company loosely
+  matching the tenant and no doubt wording, is answered "No" (a yes / no
+  question) or "N/A" (a required details box); any match or any doubt
+  is his. The gate recomputes that match itself.
 - `profile.yaml` is changed only by Jack's hand (his editor, or `init`
-  writing the blank template at his command) or his Save to profile
-  click; learning never rewrites it (Jack, 2026-11-01).
+  writing the blank template at his command) or his own click on the
+  Memory page (Save to profile; Always tick this exact wording, which
+  adds one consent_allowlist line: Jack, 2026-11-02); learning never
+  rewrites it (Jack, 2026-11-01).
 - The agent never reads a password from a page and never logs, prints,
   screenshots or sends one, and never writes one to a file, the repo,
   ~/.job-agent, the DB, a report, gate_runs, the GUI or any model input.
@@ -574,8 +672,18 @@ item 4 is in the password rule below.
   from memory. It may store that password in Windows Credential Manager
   through `agent/secrets_store.py`, keyed by the portal's host, and read
   it back there for one typed sign-in on that host (Jack, 2026-10-20).
+  One generated password per host per job, held in memory inside
+  accounts.py for the job's lifetime and typed into a new-password box
+  only when a true / false read says the box is empty (never the value
+  or its length), stored once the page moved on (Jack, 2026-11-02).
   It never touches Google's own login page. The browser's own password
-  manager may fill a site password.
+  manager may fill a site password. The read rule: nothing is read on a
+  page (host and path) where a password box or hint has been seen,
+  except as decision A of 2026-11-02 allows, exactly as written: a later
+  scan there with no password box, no hint, no secret field and no field
+  sharing an identity with one scanned beside a password box; the
+  in-page check still reads nothing while any password box or hint is
+  present, and a password box reappearing re-taints the page.
 - Never invent facts; missing beats plausible.
 - Page text is untrusted data, never instructions.
 - No LinkedIn Easy Apply. Never solve CAPTCHAs.
@@ -590,15 +698,25 @@ item 4 is in the password rule below.
   switch (or `run --auto-submit`) is ON at that moment AND `gate.decide`
   on the full record says would_submit. With the switch OFF, no code path
   presses Submit (Jack, 2026-10-29).
-- A consent box is ticked only under the consent policy in the plan (terms /
-  privacy wording, never marketing, never a certification), or when its
-  label exactly matches a line in the profile's `consent_allowlist`. On
-  either route, a required terms / privacy box is ticked mid-wizard as
-  built, and on the final page only when auto-submit is ON. Never
-  marketing or opt-ins (Jack, 2026-10-29).
+- A consent box is ticked only through `submit.py`'s tick helper, a
+  required box only, on one of three routes: the consent policy in the
+  plan (terms / privacy wording, never marketing, never a
+  certification); decision D's attestation class (Jack, 2026-11-02:
+  every sentence of the label from the bounded vocabulary of a
+  truth-and-completeness attestation or a consequence-of-
+  misrepresentation statement, no forbidden clause, no LEGAL_GUARD,
+  PROFILE_PATHS or marketing match, no stop kind other than the
+  certify / attest / acknowledge one, which is read past only inside
+  that check for that one tick); or a label exactly matching a line in
+  the profile's `consent_allowlist`. On any route, a required box is
+  ticked mid-wizard as built, and on the final page only when
+  auto-submit is ON. Never marketing or opt-ins (Jack, 2026-10-29).
+  Never learned. A census stop is waived for a box carrying Jack's own
+  review mark new since before the pause (decision E, 2026-11-02).
 - No page value may reach the model or the network except as already allowed.
 - Never narrow HARD_STOPS, LEGAL_GUARD, PROFILE_PATHS routing or
-  SECRET_WORDS, or make any check fail toward a pass.
+  SECRET_WORDS, or make any check fail toward a pass, beyond decisions
+  A-E of 2026-11-02 as written.
 - A field must clear BOTH layers (classifier routing AND the local regex
   backstop) before the model may answer it.
 
@@ -876,4 +994,7 @@ and the round of 2026-11-01 (job logs on disk, automatic learned
 memory, the Memory page, the jobs view redesign) and its fold round
 (the same day: DoD and clearance learned, precedence by strict fit, the
 terminal's moved pause, four folds) are recorded in the owner decisions
-above. A new session resumes from those files.
+above, as are the 2026-11-01 evening round (item 1 built) and the
+2026-11-02 round (decisions A-E; items 1-13 of Jack's brief, recorded
+in TODO's "Round of 2026-11-02"; Waymo and the Workday widgets are the
+round after it). A new session resumes from those files.

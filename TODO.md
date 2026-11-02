@@ -3590,3 +3590,29 @@ Decisions for Jack (fold round, 2026-11-01):
   4fdca04's 2) and C's three (note_use, the empty file's message, the
   per-poll glob): fold together in one small commit next round, or
   leave; recommendation: fold.
+
+## Round of 2026-11-02 (Jack's decisions A-E after his Workday live run)
+
+This brief replaces items 2-8 of the 2026-11-01 evening round (item 1
+of it, DOM-clobbering-safe page scripts, is on main as 7e25870). Jack's
+decisions A (the read rule, loosened with limits), B (the signature
+date from the clock), C (past employers from his list), D (the
+attestation class) and E (the census waiver for a box carrying his
+review mark) are in CLAUDE.md in his words, with his five answers on
+the plan.
+
+Items, one commit each, pushed after each item's review: 1 records
+(this entry; CLAUDE.md); 2 learning cleanup (per-company, past-employer
+and opt-in questions never learned; the section in a short label's key;
+shared keys never learned; "same company" is the tenant; violating
+entries removed on load and listed); 3 decision A; 4 auto-capture of
+page structure (snapshots of every page the wizard scans, pauses on or
+resumes, 40 per job, never a password page); 5 EEO checkbox groups as
+one choice field; 6 decisions D and E and the Memory page's "Always
+tick this exact wording"; 7 decision B; 8 decision C (the
+work_history.past_employers line); 9 the strict confirmation check on
+every resume; 10 sign-up retries and the fixed error categories; 11
+the Memory page buttons; 12 the owed folds (the moved-pause re-prompt
+dropped by Jack) and the four unwrapped scripts; 13 the report. Waymo
+and the Workday widgets (phone-code multiselect, dropdown buttons, year
+boxes, repeating sections) are the next round, from item 4's snapshots.
