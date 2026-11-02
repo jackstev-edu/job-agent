@@ -78,6 +78,17 @@ def test_per_company_past_employer_and_opt_in_questions_are_never_learned_or_reu
         ("a talent-community opt-in",
          {"ref": "q6", "type": "select", "label": "Join our talent community?", "options": ["Yes", "No"]},
          "No", "unknown"),
+        # Fold of 168606b's finding 1: a legal word in help text (eeo /
+        # work authorization) does not make a past-employer question a
+        # learnable legal one; only a DoD / clearance question is.
+        ("decision C's wording beside an EEO word in help text",
+         {"ref": "q7", "type": "select", "label": "Have you worked at Acme?", "options": ["Yes", "No"],
+          "help_text": "Veterans and visa holders welcome"},
+         "No", "unknown"),
+        ("decision C's wording beside a pay word in an option",
+         {"ref": "q8", "type": "select", "label": "Were you previously employed by this company?",
+          "options": ["Yes", "No", "Yes, salaried"]},
+         "No", "unknown"),
     ]
     for what, field, now, category in cases:
         learned = memory.learn([_change(field, now, category=category)], url=PLAIN, portal="generic", prof=prof, store=store)
@@ -88,6 +99,9 @@ def test_per_company_past_employer_and_opt_in_questions_are_never_learned_or_reu
         check(decision is None, f"{what}: a planted entry is never reused ({decision})")
     check(all(e.get("answer") for e in store.entries) and not Path(store.at).exists(),
           "nothing was saved: the planted entries stayed in memory only")
+    dod = {"ref": "d1", "type": "select", "label": "Have you worked for the Department of Defense?", "options": ["Yes", "No"]}
+    check(memory.never_reason(dod, "work_authorization") is None,
+          "a Department of Defense question keeps decision 1 of the fold round: learnable as Jack's legal answer")
     check.done()
 
 
@@ -155,8 +169,11 @@ def test_company_a_and_company_b_on_a_shared_board_do_not_share_a_free_text_answ
           and memory.tenant_of("https://jobs.ashbyhq.com/epsilon/123") == "jobs.ashbyhq.com/epsilon"
           and memory.tenant_of(WORKDAY) == "acme" and memory.tenant_of(AVATURE) == "acme"
           and memory.tenant_of(PLAIN) == "careers.b.example"
-          and memory.tenant_of("https://job-boards.greenhouse.io/") == "" and memory.tenant_of("") == "",
-          "the tenant: host plus slug on the shared boards, the subdomain on Workday and Avature, the host elsewhere")
+          and memory.tenant_of("https://job-boards.greenhouse.io/") == "" and memory.tenant_of("") == ""
+          and memory.tenant_of("https://boards.greenhouse.io/embed/job_app?for=Acme&token=1") == "boards.greenhouse.io/acme"
+          and memory.tenant_of("https://boards.greenhouse.io/embed/job_app?token=1") == "",
+          "the tenant: host plus slug on the shared boards (an embedded board's `for` slug), the subdomain on "
+          "Workday and Avature, the host elsewhere")
     essay = {"ref": "e1", "type": "textarea", "label": "Why do you want to work here?"}
     learned = memory.learn([_change(essay, "Because of the mission.", category="free_text")],
                            url=GH_A, portal="greenhouse", prof=prof, store=store)
@@ -200,11 +217,15 @@ def test_stored_violating_entries_are_removed_on_load_and_listed():
         entry("City", "KEPT-CITY", key=json.dumps(["city", "text", [], "address"])),
         entry("Why do you want to work here?", "KEPT-ESSAY", scope="job-boards.greenhouse.io", posting=GH_A),
         entry("Are you a protected veteran?", "KEPT-VET", options=("Yes", "No", "I don't wish to answer")),
+        entry("Tell us about a project you are proud of", "KEPT-WORKDAY", scope="acme.wd5.myworkdayjobs.com", posting=WORKDAY),
     ]
     at.write_text(yaml.safe_dump({"version": 1, "entries": entries}, sort_keys=False), encoding="utf-8")
     store = memory.Learned.load(at)
     kept = {e["answer"] for e in store.entries}
-    check(kept == {"KEPT-CITY", "KEPT-ESSAY", "KEPT-VET"}, f"the violating entries are gone ({kept})")
+    check(kept == {"KEPT-CITY", "KEPT-ESSAY", "KEPT-VET", "KEPT-WORKDAY"}, f"the violating entries are gone ({kept})")
+    workday = next(e for e in store.entries if e["answer"] == "KEPT-WORKDAY")
+    check(workday["scope"] == "acme" and workday["id"] == memory.entry_id(workday["key"], workday["kind"], "acme", "KEPT-WORKDAY"),
+          f"a Workday host scope from before 2026-11-02 is rescoped to its subdomain ({workday['scope']})")
     essay = next(e for e in store.entries if e["answer"] == "KEPT-ESSAY")
     check(essay["scope"] == "job-boards.greenhouse.io/acme"
           and essay["id"] == memory.entry_id(essay["key"], essay["kind"], essay["scope"], essay["answer"]),
@@ -241,12 +262,15 @@ def test_the_scan_reads_a_fields_section_from_a_legend_a_group_label_or_the_near
         fields = extract.extract_fields(page)
         by_name = {f.get("name"): f for f in fields}
         want = {"edu_year": "Education", "work_year": "Work history", "award_year": "Awards",
-                "lang_level": "Languages", "note_year": "Notes", "bare_year_1": "Notes", "bare_year_2": "Notes"}
+                "lang_level": "Languages", "note_year": "Notes", "bare_year_1": "Notes", "bare_year_2": "Notes",
+                # A form with no heading inside it takes the page's nearest preceding heading outside the
+                # header / navigation: never the signed-in greeting in <header>.
+                "other_form_year": "Notes"}
         for name, section in want.items():
             check(by_name.get(name, {}).get("section") == section, f"{name}: section {section!r} ({by_name.get(name, {}).get('section')!r})")
         dumped = json.dumps(fields)
-        check("SECRET-VALUE" not in dumped and "VALUE-IN-HEADING" not in dumped,
-              "no input value reaches the scan through a legend, a label or a heading")
+        check("SECRET-VALUE" not in dumped and "VALUE-IN-HEADING" not in dumped and "SECRET-NAME" not in dumped,
+              "no input value, and nothing from the page header, reaches the scan through a legend, a label or a heading")
         check(gate.question_key(by_name["edu_year"]) != gate.question_key(by_name["work_year"]),
               "the two Year boxes are two keys")
         shared = memory.shared_keys(fields)

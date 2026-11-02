@@ -335,8 +335,16 @@ _SCAN_JS = safe(r"""
         if (by) return by.slice(0, 120);
       }
     }
+    // The headings inside the field's own form when it has any; else the
+    // page's, outside its header / navigation, so a signed-in greeting
+    // there ("Welcome back, <name>") is never a section (fold of 168606b's
+    // finding 6). A page with no form (Workday) takes the latter pool.
+    const form = __ja.closest(el, 'form');
+    const inForm = form ? headings.filter(h => form.contains(h)) : [];
+    const pool = inForm.length ? inForm
+               : headings.filter(h => !__ja.closest(h, 'header, nav, [role=banner], [role=navigation]'));
     let last = null;
-    for (const h of headings) {
+    for (const h of pool) {
       if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) last = h;
       else break;
     }

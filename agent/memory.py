@@ -47,7 +47,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 import yaml
 
@@ -103,6 +103,11 @@ def tenant_of(url: str) -> str:
         return ""
     if host in SHARED_BOARDS:
         first = next((seg for seg in (parts.path or "").split("/") if seg), "")
+        if first.lower() == "embed":
+            # Greenhouse's embedded board (/embed/job_app?for=<slug>): the
+            # slug is the `for` parameter, and every employer shares the
+            # path (fold of 168606b's finding 2).
+            first = next((v for k, v in parse_qsl(parts.query or "") if k == "for"), "")
         return f"{host}/{first.lower()}" if first else ""
     if host.endswith(SUBDOMAIN_HOSTS):
         return host.split(".")[0]
@@ -111,6 +116,22 @@ def tenant_of(url: str) -> str:
 
 def _norm(value: Any) -> str:
     return gate.normalize_label(value)
+
+
+# The guard kinds decision 1 of the 2026-11-01 fold round names: "Have you
+# worked for the Department of Defense?" is a legal question learned as
+# Jack's own answer, not an employer question. No other guard kind lifts
+# decision C's wording (fold of 168606b's finding 1: a legal word in help
+# text or an option must not make a past-employer question learnable).
+_DOD_KINDS = frozenset({"dod", "clearance"})
+
+
+def _past_employer(field: dict, text: str) -> bool:
+    """Decision C's past-employer wording, off a Department of Defense / clearance question."""
+    if not sensitive.is_past_employer_question(text):
+        return False
+    kinds = set(sensitive.legal_guard_kinds(field))
+    return not (kinds and kinds <= _DOD_KINDS)
 
 
 def is_opt_in(field: dict) -> bool:
@@ -142,12 +163,7 @@ def never_reason(field: dict, category: str) -> str | None:
     # Per-company by any reading (Jack, 2026-11-02, item 2): the classifier's
     # category (NEVER_CATEGORIES above), the stop kind, or decision C's
     # past-employer wording; and any opt-in the consent policy refuses.
-    # Decision C's wording is per-company only off the legal guard: "Have
-    # you worked for the Department of Defense?" is a legal question
-    # learned as Jack's own answer (fold round, decision 1), not an
-    # employer question.
-    if "per_company" in sensitive.stop_kinds(text) or (
-            sensitive.is_past_employer_question(text) and sensitive.legal_guard(field) is None):
+    if "per_company" in sensitive.stop_kinds(text) or _past_employer(field, text):
         return "a per-company question is never learned"
     if is_opt_in(field):
         return "a marketing / communications opt-in is never learned"
@@ -204,7 +220,7 @@ def _violation(e: dict) -> str | None:
     field = {"label": e.get("question"), "type": e.get("type"), "options": e.get("options") or []}
     text = sensitive._question_text(field)
     if (e.get("category") == "per_company" or "per_company" in sensitive.stop_kinds(text)
-            or (sensitive.is_past_employer_question(text) and sensitive.legal_guard(field) is None)):
+            or _past_employer(field, text)):
         return "per-company"
     if is_opt_in(field):
         return "opt-in"
@@ -273,13 +289,17 @@ class Learned:
         stamp = _now()
         for e in self.entries:
             why = _violation(e)
-            if why is None and e.get("scope") in SHARED_BOARDS:
-                tenant = tenant_of(e.get("posting") or "")
-                if tenant and tenant != e.get("scope"):
+            scope = str(e.get("scope") or "")
+            if why is None and (scope in SHARED_BOARDS or scope.endswith(SUBDOMAIN_HOSTS)):
+                # A scope from before 2026-11-02: a shared board's bare host
+                # (rescoped from the posting, or removed when it names no
+                # slug) or a Workday / Avature host (its subdomain).
+                tenant = tenant_of(e.get("posting") or "") if scope in SHARED_BOARDS else tenant_of(f"https://{scope}/")
+                if tenant and tenant != scope:
                     e["scope"] = tenant
                     e["id"] = entry_id(e["key"], e["kind"], tenant, e.get("answer"))
                     changed = True
-                else:
+                elif scope in SHARED_BOARDS:
                     why = "a shared board's bare host (no slug in the posting address)"
             if why is None:
                 kept.append(e)
@@ -295,7 +315,7 @@ class Learned:
     def _refresh(self) -> None:
         """Under the lock: the file as it is now replaces this copy, before a write is applied to it."""
         fresh = Learned.load(self.at)
-        self.entries, self.unreadable = fresh.entries, fresh.unreadable
+        self.entries, self.unreadable, self.removed = fresh.entries, fresh.unreadable, fresh.removed
         if self.unreadable:
             raise Unreadable(self.unreadable)
 
