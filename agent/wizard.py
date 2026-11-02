@@ -42,13 +42,17 @@ from typing import TYPE_CHECKING
 
 from . import (accounts, approve, browser as browser_mod, chooser, corrections, extract,
                follow, gate, google, gui as gui_mod, intake, ledger, pages, pause as pause_mod,
-               pipeline, submit as submit_mod)
+               pipeline, snapshot as snapshot_mod, submit as submit_mod)
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
 
 STEP_CAP = 25
 TIME_CAP_S = 60 * 60
+# Structure snapshots per job (Jack, 2026-11-02, item 4): one of every
+# page scanned, every page paused on and every page after a Continue, to
+# the gitignored snapshots/ folder, so the next live run yields fixtures.
+SNAPSHOT_CAP = 40
 
 # How long a page gets to render its form before the scan concludes "no
 # fields" (Jack, 2026-10-26). Workday draws My Information client-side
@@ -252,8 +256,12 @@ class Wizard:
     def __init__(self, page: "Page", prof, *, url: str, portal: str, portal_method: str,
                  company: str, role: str, resume, posting_text: str, pauser, echo=print,
                  clock=time.monotonic, agent_submissions_today=None, reload_profile=None,
-                 on_pause=None, intake_steps=None, auto_submit=None, on_log=None):
+                 on_pause=None, intake_steps=None, auto_submit=None, on_log=None,
+                 job_id=None, snapshot_dir=None):
         self.page, self.prof, self.url = page, prof, url
+        # The job's id names its structure snapshots (item 4); `snapshot_dir`
+        # is the repo's snapshots/ folder unless a test says otherwise.
+        self.job_id, self.snapshot_dir, self._snaps = job_id, snapshot_dir, 0
         # The auto-submit switch, read through this callable at the final
         # page and never captured here (Jack, 2026-10-29). None is OFF.
         self.auto_submit = auto_submit
@@ -330,6 +338,37 @@ class Wizard:
     def _page_record(self, fill: pipeline.PageFill, events: list[dict]) -> dict:
         return self._record([fill.step], events, wizard=True)
 
+    # -- structure snapshots (Jack, 2026-11-02, item 4) --------------------------
+    def _capture(self, what: str) -> None:
+        """
+        One structure snapshot of the page now (snapshot.dump: no input
+        value, the header / account area skipped, every profile string
+        replaced by "[profile]") to snapshots/<date>-<job id>-<n>-<what>-
+        <host>.json, at most SNAPSHOT_CAP per job. Never on Google's host
+        and never on a page holding a password box (pages._KIND_JS counts
+        them, hidden ones included; a count that can't be read is a
+        password box). A failure is one log line and never stops the job.
+        """
+        if self._snaps >= SNAPSHOT_CAP:
+            return
+        try:
+            url = self.page.url
+            if google.is_google_host(url):
+                return
+            kind = self.page.evaluate(pages._KIND_JS)
+            if not isinstance(kind, dict) or not isinstance(kind.get("pw"), int) or kind["pw"] > 0:
+                return
+            snap = snapshot_mod.dump(self.page, getattr(self.prof, "data", None) or {})
+            if snap.get("error"):
+                self.out.log.append(f"snapshot not written ({_clean(str(snap['error']))})")
+                return
+            self._snaps += 1
+            name = f"{time.strftime('%Y-%m-%d')}-{self.job_id or 'job'}-{self._snaps:02d}-{what}"
+            path = snapshot_mod.write(snap, name, folder=self.snapshot_dir)
+            self.out.log.append(f"snapshot written: {path.name}")
+        except Exception as e:
+            self.out.log.append(f"snapshot not written ({type(e).__name__})")
+
     def _parked(self, reason: str) -> Outcome:
         # The terminal's park; a GUI park logs the same line in
         # park_for_continue (fold of f2cd52c's review).
@@ -372,6 +411,7 @@ class Wizard:
         re-enters the loop at `pending` when Jack presses Continue.
         """
         extra = dict(extra or {})
+        self._capture(f"pause-{kind}")
         fill = extra.get("fill")
         if fill is not None and getattr(fill, "fields", None) and extra.get("watch") is None:
             # The override watch on this page (decision A): read-only, the
@@ -1135,6 +1175,7 @@ class Wizard:
                 raise _Parked(f"{verdict.replace('_', ' ')}: the page left the application's site")
             kind = pending.get("kind")
             self.out.log.append(f"resumed after a {kind} pause")
+            self._capture("continue")
             # Jack's overrides under the pause, from the watch's last good
             # read (the page now if it still shows the form, else the last
             # poll or his own press before it moved on), before anything
@@ -1283,6 +1324,7 @@ class Wizard:
                 # an account page), and never carries to a later page.
                 protect, self._protect_held = self._protect_held, False
                 self._reload_if_changed()
+                self._capture("scan")
                 with self.activity.filling(page):
                     try:
                         fill = pipeline.fill_page(page, self.prof, guard=self.guard,

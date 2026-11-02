@@ -1138,7 +1138,8 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
     gains is appended there as it lands (Jack, 2026-11-01).
     """
     pauser = pauser or pause.Pauser()
-    sink = joblog.Sink(job_id or secrets.token_hex(6), url)
+    job_id = job_id or secrets.token_hex(6)
+    sink = joblog.Sink(job_id, url)
     landing = intake.open_link(ctx, url, new_tab=new_tab)
     for step in landing.steps:
         _print_safely(f"{DIM}  {step}{OFF}")
@@ -1175,7 +1176,7 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
                               posting_text=extract.page_text(page, 6000), pauser=pauser, echo=print,
                               reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause,
                               intake_steps=landing.steps, auto_submit=auto_submit,
-                              on_log=lambda o: _flush_log(o, report_to, sink))
+                              on_log=lambda o: _flush_log(o, report_to, sink), job_id=job_id)
             return finish_outcome(w.park_for_continue(landing.parked), finish, on_wait=on_wait)
         _park(url, landing.parked, company=company, role=role, ats=ats)
         return NEEDS_YOU, landing.parked
@@ -1197,7 +1198,7 @@ def run_one(ctx, url: str, prof, args, pauser: "pause.Pauser | None" = None, *,
         agent_submissions_today=submitted_today,
         reload_profile=lambda: Profile.load(args.profile), on_pause=on_pause,
         intake_steps=landing.steps, auto_submit=auto_submit,
-        on_log=lambda o: _flush_log(o, report_to, sink))
+        on_log=lambda o: _flush_log(o, report_to, sink), job_id=job_id)
     return finish_outcome(out, finish, on_wait=on_wait)
 
 
@@ -1629,6 +1630,9 @@ def cmd_snapshot(args) -> None:
             print(f"{RED}That tab is on Google's site: nothing there is dumped.{OFF}")
             return
         snap = snapshot.dump(target, prof.data)
+        if snap.get("error"):
+            print(f"{RED}The page couldn't be dumped ({snap['error']}); try again once it has settled.{OFF}")
+            return
         path = snapshot.write(snap, args.name)
     print(f"{GREEN}Wrote {path}{OFF} {DIM}({len(snap['elements'])} elements of {snap['total_matched']} matched; "
           f"profile values replaced by {snapshot.REDACTED}).{OFF}")

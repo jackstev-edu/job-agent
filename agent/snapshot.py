@@ -193,9 +193,33 @@ def strip_values(obj: Any, texts: set[str], digits: set[str]) -> Any:
     return obj
 
 
+NAVIGATING = "navigating"            # the page moved under the read, twice
+_DESTROYED = "Execution context was destroyed"
+
+
 def dump(page: "Page", profile_data: Any) -> dict:
-    """The structure of the page the tab shows, stripped of profile values."""
-    got = page.evaluate(_DUMP_JS, LIMITS)
+    """
+    The structure of the page the tab shows, stripped of profile values.
+    A read that lands on a navigation ("Execution context was destroyed")
+    is tried once more after a short wait; a second one, or any other
+    failure, gives {"error": <a fixed category>} with no elements, never
+    an exception and never the message text (Jack, 2026-11-02, item 4).
+    """
+    got = None
+    for attempt in (1, 2):
+        try:
+            got = page.evaluate(_DUMP_JS, LIMITS)
+            break
+        except Exception as e:
+            navigating = _DESTROYED in str(e)
+            if attempt == 1 and navigating:
+                try:
+                    page.wait_for_timeout(500)
+                except Exception:
+                    pass
+                continue
+            return {"error": NAVIGATING if navigating else f"unreadable:{type(e).__name__}",
+                    "url": "", "title": "", "elements": []}
     if not isinstance(got, dict):
         got = {"title": "", "elements": [], "total": 0}
     parts = urlsplit(page.url)
