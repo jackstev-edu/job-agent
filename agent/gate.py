@@ -646,6 +646,12 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
     after = _group_boxes(census)
     prefill = record.get("prefill_census")
     before = _group_boxes(prefill) if isinstance(prefill, list) else None
+    # The boxes of a checkbox group answering one question (item 5, Jack,
+    # 2026-11-02): each is judged against the group's planned answer
+    # instead of the consent rule, once the question itself went through
+    # 2 and 3 above as a traced choice field.
+    grouped = {r: (f, o) for f in fields if f.get("widget") == "checkboxes"
+               for r, o in zip(f.get("option_refs") or [], f.get("options") or [])}
     for box in census:
         shown = box.get("label_inner") or box.get("label_content") or "(unlabelled)"
         name = f"checkbox '{shown[:80]}'"
@@ -660,6 +666,16 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         # ticked.
         if box.get("checked") is not False and box.get("visible") is not True:
             content.append(f"{name}: hidden, and ticked")
+        if box.get("ref") in grouped:
+            group, option = grouped[box["ref"]]
+            if group.get("ref") in reviewed:
+                continue                      # Jack's own answer to the group
+            planned = (plan.get(group.get("ref")) or {}).get("value")
+            if planned is None:
+                content.append(f"{name}: its checkbox group is not answered")
+            elif box.get("checked") is not (normalize_label(option) == normalize_label(planned)):
+                content.append(f"{name}: ticked differently from the group's planned answer")
+            continue
         if box.get("in_button_group"):
             group = plan.get(box.get("group_ref"))
             if not group or group.get("value") is None:

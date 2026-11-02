@@ -216,6 +216,7 @@ el => {
 # and help read whole, as innerText, before any value display is skipped;
 # only true / false ever comes back.
 _RAW_RULES_JS = (r"""
+  const STATEMENT = new RegExp(""" + json.dumps(sensitive.STATEMENT_LABEL) + r""", 'iu');
   const RAW_STOPS = """ + json.dumps(sensitive.RAW_PATTERNS["stops"]) + r""".map(p => new RegExp(p, 'iu'));
   const RAW_LEGAL = """ + json.dumps(sensitive.RAW_PATTERNS["legal"]) + r""".map(p => new RegExp(p, 'iu'));
   const INVIS = new RegExp(""" + json.dumps(sensitive.INVISIBLE_JS) + r""", 'gu');
@@ -420,6 +421,46 @@ _SCAN_JS = safe(r"""
     // Deliberately not an opacity check: styled radios hide the real input
     // with opacity 0, and those must still be read.
     if (__ja.attr(el, 'aria-hidden') === 'true' && el.tabIndex === -1) return;
+
+    if (type === 'checkbox') {
+      // A checkbox group answering one question (Jack, 2026-11-02, item
+      // 5): two or more visible, enabled checkboxes in one fieldset or
+      // role=group whose own labels all read as answer statements ("Yes,
+      // I have...", "No, I do not...", "I do not want to answer") are one
+      // choice field, emitted as a radio group with widget 'checkboxes'
+      // and the statements as its options; the filler ticks the matched
+      // box and unticks the rest. Any other checkbox stays a lone one.
+      const box = __ja.closest(el, 'fieldset, [role=group]');
+      if (box) {
+        if (seenGroups.has(box)) return;
+        const peers = [...box.querySelectorAll('input[type=checkbox]')].filter(p => isVisible(p) && !p.disabled);
+        const labels = peers.map(p => labelFor(p));
+        if (peers.length >= 2 && labels.every(l => STATEMENT.test(l))) {
+          seenGroups.add(box);
+          const optionRefs = peers.map(p => stamp(p));
+          const legend = __ja.tag(box) === 'FIELDSET' ? box.querySelector(':scope > legend') : null;
+          const title = legend ? textOf(legend, el)
+              : ((__ja.attr(box, 'aria-label') || '').trim()
+                 || (__ja.attr(box, 'aria-labelledby') || '').split(/\s+/).filter(Boolean)
+                      .map(id => textOf(document.getElementById(id), el)).join(' ').trim());
+          fields.push({
+            ref: optionRefs[0],
+            type: 'radio',
+            widget: 'checkboxes',
+            name: __ja.name(el) || '',
+            label: title.slice(0, 300),
+            options: labels,
+            option_refs: optionRefs,
+            required: peers.some(p => p.required) || __ja.attr(box, 'aria-required') === 'true',
+            help_text: helpFor(el),
+            section: sectionOf(box),
+            ...rawFlags([legend?.innerText, __ja.attr(box, 'aria-label'), ...peers.map(p => rawLabelFor(p)),
+                         rawHelpFor(el)].join(' ')),
+          });
+          return;
+        }
+      }
+    }
 
     if (type === 'radio') {
       const groupKey = __ja.name(el) || labelFor(el);

@@ -172,6 +172,44 @@ _DECLINE = re.compile(
     re.I,
 )
 
+# A checkbox label that is an answer statement, not a question (Jack,
+# 2026-11-02, item 5): "Yes, I have...", "No, I do not...", "I do not want
+# to answer", any decline wording. Two or more such boxes in one fieldset
+# or group are one choice question (the scan emits them as a group); one
+# on its own is Jack's, never a bool tick. Matched by the page's scan (as
+# JavaScript, same source) and here.
+STATEMENT_LABEL = r"^\s*(?:yes|no)\b(?![a-z])|^\s*i\b|" + _DECLINE.pattern
+_STATEMENT = re.compile(STATEMENT_LABEL, re.I)
+
+
+def is_statement_label(label: Any) -> bool:
+    """Does any reading of this checkbox label read as an answer statement rather than a question?"""
+    return any(_STATEMENT.search(v) for v in text_variants(str(label or "")))
+
+
+_YES_START, _NO_START = re.compile(r"^\s*yes\b(?![a-z])", re.I), re.compile(r"^\s*no\b(?![a-z])", re.I)
+
+
+def _fit_group(raw: Any, options: list) -> tuple[Any, str | None]:
+    """
+    The strict fits only, for a checkbox group's statement options (item
+    5): a real true / false takes the one option opening with "Yes" /
+    "No" (exactly one, else nothing); a text value its exact option; a
+    decline value the one decline option. Never a substring guess.
+    """
+    if isinstance(raw, bool):
+        hits = [o for o in options if (_YES_START if raw else _NO_START).search(o)]
+        return (hits[0], "bool") if len(hits) == 1 else (None, None)
+    target = str(raw).strip().lower()
+    for opt in options:
+        if opt.strip().lower() == target:
+            return opt, "exact"
+    if _DECLINE_VALUE.fullmatch(target):
+        hits = [o for o in options if _DECLINE.search(o.lower())]
+        return (hits[0], "decline") if len(hits) == 1 else (None, None)
+    return None, None
+
+
 # ---------------------------------------------------------------------------
 #  The legal backstop. Eligibility, EEO and pay, matched on the question's
 #  own words, whole words only, locally. A field that matches never goes to
@@ -583,7 +621,10 @@ def decide(field: dict, category: str, profile) -> dict:
                     "reason": f"`{path}` is blank in profile.yaml. Fill it in and "
                               f"this stops being manual."}
         value, fit = fit_with_kind(raw, field)
-        if value is None or (guard and fit not in LEGAL_FITS):
+        # A checkbox group takes the strict fits only, guard or no guard
+        # (item 5: exactly the matched box is ticked, the rest unticked).
+        if value is None or (guard and fit not in LEGAL_FITS) or (
+                field.get("widget") == "checkboxes" and fit not in LEGAL_FITS):
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"Your answer is '{raw}' but this form offers "
                               f"{field.get('options') or 'a box to type in'}. "
@@ -616,7 +657,15 @@ def fit_with_kind(raw: Any, field: dict) -> tuple[Any, str | None]:
     ftype = (field.get("type") or "").lower()
 
     if ftype == "checkbox":
+        # A lone box whose label is an answer statement ("I have a
+        # disability") is Jack's: a tick would assert the statement, and a
+        # bool line can't say which statement (item 5). A box whose label
+        # is the question itself keeps the bool fit.
+        if is_statement_label(field.get("label")):
+            return None, None
         return (raw, "bool") if isinstance(raw, bool) else (None, None)
+    if field.get("widget") == "checkboxes":
+        return _fit_group(raw, options)
 
     if not options:
         if isinstance(raw, bool):

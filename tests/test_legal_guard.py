@@ -207,14 +207,18 @@ def test_checkboxes_take_only_a_real_true_or_false_from_the_same_area():
           "'I am a protected veteran' with veteran_status 'Prefer not to say': not ticked")
     check(not any(final.get(i) for i in ("r1", "r2", "r3")),
           "a race[] list with race_ethnicity 'Prefer not to say': no box ticked")
-    check(final.get("auth") is True,
-          "a true authorized_to_work_us line and a work-authorization box: ticked")
+    # Since 2026-11-02 (item 5) a lone checkbox whose label is an answer
+    # statement ("I am authorized...") is Jack's, never a bool tick, so the
+    # true line no longer ticks it; a question-labelled box still takes it.
+    check(final.get("auth") is False,
+          "a true authorized_to_work_us line and a work-authorization STATEMENT box: not ticked, Jack's")
     check(final.get("reloc") is False,
           "a pay question whose closest line is eligibility.willing_to_relocate: not ticked")
     rec = records[-1] if records else {}
     by_label = {f.get("label"): f["ref"] for f in rec.get("fields", [])}
     flagged = {fl["ref"] for fl in rec.get("flags") or []}
     held = {by_label.get(k) for k in ("I am a protected veteran", "White", "Asian", "Black",
+                                      "I am authorized to work in the United States",
                                       "I am willing to relocate if the pay is right")}
     check(None not in held and held <= flagged, "  ...and every one of those came to you")
     check.done()
@@ -310,9 +314,16 @@ def test_a_typed_box_or_a_two_area_box_comes_to_you():
     v = sensitive.decide(two, "personal_fact", prof)
     check(v["action"] == "human" and "more than one kind" in v.get("reason", ""),
           f"a checkbox asking two legal things at once: yours, not ticked ({v['action']})")
-    one = {"label": "I am authorized to work in the US", "type": "checkbox"}
+    # A one-area box whose label is the question itself is still ticked from
+    # its line (so the refusal above is the two areas'); one whose label is
+    # an answer statement ("I am authorized...") is Jack's since 2026-11-02
+    # (item 5: a lone statement checkbox is never a bool tick).
+    one = {"label": "Are you legally authorized to work in the US?", "type": "checkbox"}
     check(sensitive.decide(one, "personal_fact", prof)["action"] == "fill",
-          "the one-area box is still ticked from its line (so the refusal above is the two areas')")
+          "the one-area question box is still ticked from its line (so the refusal above is the two areas')")
+    statement = {"label": "I am authorized to work in the US", "type": "checkbox"}
+    check(sensitive.decide(statement, "personal_fact", prof)["action"] == "human",
+          "the one-area statement box is Jack's (item 5, 2026-11-02)")
     check.done()
 
 

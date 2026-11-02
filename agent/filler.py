@@ -170,6 +170,9 @@ def fill_one(page: "Page", field: dict, value, contained: bool = False) -> tuple
         if field_type == "radio" and field.get("widget") == "buttons":
             return _press_option_button(page, field, str(value))
 
+        if field_type == "radio" and field.get("widget") == "checkboxes":
+            return _tick_group(page, field, str(value))
+
         if field_type == "radio":
             options = field.get("options", [])
             option_refs = field.get("option_refs", [])
@@ -537,6 +540,51 @@ _BUTTON_FACTS_JS = extract.safe(r"""
   pressed: __ja.attr(el, 'aria-pressed'),
 })
 """)
+
+
+def _group_box_changed(now: dict, field: dict, option: str) -> str | None:
+    """
+    The checkbox branch's click-time re-read, for one box of a checkbox
+    group (item 5): the box's label and name as they read now against the
+    scan's question text plus this option's statement. A stop match, or a
+    PROFILE_PATHS line or LEGAL_GUARD kind set that differs at all, refuses.
+    """
+    label, name = str(now.get("label") or ""), str(now.get("name") or "")
+    now_text = f"{label} {name} {sensitive._identifier_words(name)}"
+    scan_name = str(field.get("name") or "")
+    scan_text = f"{sensitive._question_text(field)} {option} {sensitive._identifier_words(scan_name)}"
+    if sensitive.stop_reason(now_text):
+        return "refused — this box now reads like terms or consent; it's yours"
+    if (sensitive.all_profile_lines(now_text) != sensitive.all_profile_lines(scan_text)
+            or set(sensitive.legal_guard_kinds({"label": label, "name": name}))
+            != set(sensitive.legal_guard_kinds({**field, "options": [option]}))):
+        return "refused — this box now reads as a different question; it's yours"
+    return None
+
+
+def _tick_group(page: "Page", field: dict, value: str) -> tuple[bool, str]:
+    """
+    A checkbox group answering one question (Jack, 2026-11-02, item 5):
+    exactly the box whose statement equals `value` is ticked and every
+    other box of the group is unticked, each box re-read at click time
+    like a lone checkbox (a box that reads differently now refuses the
+    whole group, nothing touched). `value` must be one of the options.
+    """
+    options = [str(o) for o in field.get("options") or []]
+    option_refs = list(field.get("option_refs") or [])
+    if value not in options or len(options) != len(option_refs):
+        return False, f"'{value}' is not one of the group's statements"
+    boxes = []
+    for ref, option in zip(option_refs, options):
+        element = _element(page, ref)
+        now = element.evaluate(_CHECKBOX_LABEL_JS) or {}
+        why = _group_box_changed(now, field, option)
+        if why:
+            return False, why
+        boxes.append((element, option == value))
+    for element, on in boxes:
+        element.set_checked(on, timeout=4000)
+    return True, "ticked one of the group"
 
 
 def _press_option_button(page: "Page", field: dict, value: str) -> tuple[bool, str]:
