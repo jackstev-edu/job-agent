@@ -525,14 +525,31 @@ _current = {"gen": None}
 class ReadGuard:
     """
     One run's memory of what may never be read, whatever the page says now:
-    every key of every field ever seen as secret, and every page (host and
-    path) where a password box or password autocomplete hint was seen. Pass
-    the same guard to every scan in a run.
+    every key of every field ever seen as secret, every page (host and
+    path) where a password box or password autocomplete hint was seen, and
+    the identity (tag, type, name or explicit label) of every field scanned
+    there while one was present (decision A, Jack, 2026-11-02). Pass the
+    same guard to every scan in a run.
     """
 
     def __init__(self):
         self.secret_keys: set[tuple] = set()
         self.credential_pages: set[str] = set()
+        self.credential_identities: dict[str, set[tuple]] = {}
+
+
+def field_identity(f: dict) -> tuple:
+    """
+    Decision A's identity of a field: its tag, its type, and its name, or
+    with no name its explicit label (a real <label> or aria-label), in the
+    label normalisation secret_keys_of uses. A field with neither name nor
+    explicit label has the empty identity, which every such field shares:
+    an anonymous box on a page where an anonymous box sat beside a
+    password box keeps the page unreadable (fails safe).
+    """
+    label = " ".join(unicodedata.normalize("NFKC", str(f.get("explicit_label") or "")).split()).casefold()
+    name = str(f.get("dom_name") if "dom_name" in f else f.get("name") or "").strip()
+    return (str(f.get("tag") or f.get("type") or "").lower(), str(f.get("type") or "").lower(), name or label)
 
 
 def page_key(url: str) -> str:
@@ -625,8 +642,16 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
     re-render replaces the element, so a field with any key in the guard
     stays secret whatever the page says now, and every field on a page the
     guard knows as a credential step is marked as being on one, so nothing
-    on it is read. Without a guard (a lone scan), a fresh one is used, and
-    it records this page's password boxes all the same.
+    on it is read. Decision A (Jack, 2026-11-02, "loosen, with limits"): a
+    scan at a credential page reads again only when this scan finds no
+    password box and no password hint in the document, no field of it is
+    secret by any layer, and no field of it shares its identity
+    (field_identity) with a field scanned at that page while a password
+    box was present; the page keeps its taint, so every later scan there
+    is judged the same way, and a password box reappearing makes it a
+    credential step again (the in-page read refuses on its own too).
+    Without a guard (a lone scan), a fresh one is used, and it records
+    this page's password boxes all the same.
     """
     guard = ReadGuard() if guard is None else guard
     secret_keys = guard.secret_keys
@@ -636,11 +661,11 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
     fields = scanned.get("fields") or []
     sigs = scanned.get("sigs") or {}
     here = page_key(str(scanned.get("url") or ""))
-    if scanned.get("has_password"):
+    has_password = bool(scanned.get("has_password"))
+    if has_password:
         guard.credential_pages.add(here)
-    credential = here in guard.credential_pages
+        guard.credential_identities.setdefault(here, set()).update(field_identity(f) for f in fields)
     for f in fields:
-        f["credential_step"] = credential
         f["sigs"] = {r: list(sigs[r]) for r in (f.get("option_refs") or [f.get("ref")])
                      if r in sigs}
     sticky = []
@@ -659,6 +684,12 @@ def extract_fields(page: "Page", guard: ReadGuard | None = None) -> list[dict]:
         # The page forgot (or never knew); mark the element again, so every
         # in-page reader refuses it too.
         page.evaluate(_MARK_SECRET_JS, [sticky, SECRET_ATTR])
+    credential = here in guard.credential_pages
+    if credential and not has_password:
+        beside = guard.credential_identities.get(here, set())
+        credential = any(is_secret(f) for f in fields) or any(field_identity(f) in beside for f in fields)
+    for f in fields:
+        f["credential_step"] = credential
     return [
         f for f in fields
         if not any(word in f"{f.get('label','')} {f.get('name','')}".lower()

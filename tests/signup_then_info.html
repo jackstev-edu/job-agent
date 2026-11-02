@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Apply (mock, one address)</title></head>
+<body>
+<h1>Apply (mock)</h1>
+<div id="app"></div>
+<template id="signup"><form id="su">
+  <label for="em">Email</label><input id="em" name="email" type="email">
+  <label for="p1">Create Password</label><input id="p1" name="password" type="password" autocomplete="new-password">
+  <label for="p2">Verify Password</label><input id="p2" name="verifyPassword" type="password" autocomplete="new-password">
+  <button type="button" onclick="show('info')">Create Account</button>
+</form></template>
+<template id="info"><form id="mi">
+  <fieldset><legend>My Information</legend>
+  <label for="fn">First Name</label><input id="fn" name="firstName" required>
+  <label for="ln">Last Name</label><input id="ln" name="lastName">
+  <label for="a1">Address Line 1</label><input id="a1" name="addressLine1">
+  <label for="ci">City</label><input id="ci" name="city">
+  </fieldset>
+  <button type="button">Save and Continue</button>
+</form></template>
+<template id="info_email"><form id="mi">
+  <fieldset><legend>My Information</legend>
+  <label for="fn">First Name</label><input id="fn" name="firstName" required>
+  <label for="em2">Email</label><input id="em2" name="email" type="email">
+  </fieldset>
+  <button type="button">Save and Continue</button>
+</form></template>
+<script>
+function show(n) {
+  document.getElementById('app').replaceChildren(document.getElementById(n).content.cloneNode(true));
+}
+// A "show password" toggle: type=text, the hints gone, the names kept.
+window.toggle = () => document.querySelectorAll('#su input[type=password]').forEach(el => {
+  el.type = 'text'; el.removeAttribute('autocomplete');
+});
+// The toggle plus the names gone: only the ids are left to know the boxes by.
+window.strip = () => document.querySelectorAll('#su input').forEach(el => el.removeAttribute('name'));
+// A password box drawn into My Information later (an account dialog redrawn).
+window.addPassword = () => document.getElementById('mi').insertAdjacentHTML('beforeend',
+  '<input type="password" name="pw3">');
+show('signup');
+</script>
+</body></html>
