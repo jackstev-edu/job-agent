@@ -275,7 +275,11 @@ class State:
                         "seen": int(e.get("seen") or 0), "uses": int(e.get("uses") or 0),
                         "posting": str(e.get("posting") or ""),
                         "can_save": group == "candidate" and bool(e.get("line"))})
-        return {"ok": True, "entries": out, "groups": list(self.GROUPS)}
+        # What the load removed as against the learning rules (Jack,
+        # 2026-11-02, item 2): the questions only, never a value.
+        removed = [{"at": str(r.get("at") or ""), "question": str(r.get("question") or ""),
+                    "why": str(r.get("why") or "")} for r in (store.removed or [])[-memory.REMOVED_KEPT:]]
+        return {"ok": True, "entries": out, "groups": list(self.GROUPS), "removed": removed}
 
     def memory_edit(self, entry_id: str, answer: str) -> dict:
         """Jack tunes an answer: the entry keeps its question and kind; the next job routes on the new value."""
@@ -675,7 +679,7 @@ button.primary { background: #16202b; color: #fff; border-color: #16202b; }
                   ['candidate', 'Profile candidates', 'typed text that differs from your profile; Save to profile writes it'],
                   ['legal', 'Legal & EEO', 'your own answers, reused only on the identical question; edit by hand here or delete'],
                   ['portal', 'Portal answers', 'answers with no profile line; free text and per-company ones at the same host only']];
-  let memoryEntries = [];
+  let memoryEntries = [], memoryRemoved = [];
   const drawMemory = () => {
     const q = (document.getElementById('memory-search').value || '').toLowerCase();
     const box = document.getElementById('memory-groups'); box.replaceChildren();
@@ -714,9 +718,17 @@ button.primary { background: #16202b; color: #fff; border-color: #16202b; }
       box.appendChild(g);
     }
     if (!shown) box.appendChild(el('p', memoryEntries.length ? 'nothing matches' : 'nothing learned yet', 'muted'));
+    if (memoryRemoved.length) {
+      const g = el('div', undefined, 'mgroup');
+      g.appendChild(el('h2', 'Removed on load (' + memoryRemoved.length + ')'));
+      g.appendChild(el('div', 'Entries against the learning rules (a per-company or opt-in question, a short label with no section, a shared board with no company), dropped when the file was read.', 'muted'));
+      const ul = el('ul');
+      for (const r of memoryRemoved) ul.appendChild(el('li', r.question + ' - ' + r.why + (r.at ? ' (' + r.at + ')' : '')));
+      g.appendChild(ul); box.appendChild(g);
+    }
   };
   const loadMemory = () => fetch('/memory', {headers: {'X-Token': TOKEN}}).then(r => r.json()).then(r => {
-    memoryEntries = (r && r.ok && r.entries) ? r.entries : []; drawMemory();
+    memoryEntries = (r && r.ok && r.entries) ? r.entries : []; memoryRemoved = (r && r.ok && r.removed) ? r.removed : []; drawMemory();
     if (r && r.ok === false && r.error) { const box = document.getElementById('memory-groups'); box.replaceChildren(el('p', r.error, 'broken')); }
   }).catch(() => {});
   const showTab = which => {

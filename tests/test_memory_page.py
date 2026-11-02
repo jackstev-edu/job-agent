@@ -31,7 +31,8 @@ EVIL = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>B
 
 
 def _entry(store, kind, question, answer, *, options=(), line=None, legal=False, scope=memory.ANY, line_value=None):
-    field = {"label": question, "type": "select" if options else "text", "options": list(options)}
+    field = {"label": question, "type": "select" if options else "text", "options": list(options),
+             "section": "About you"}      # a short label's key carries its section (Jack, 2026-11-02)
     e = {"id": memory.entry_id(gate.question_key(field), kind, scope, answer), "kind": kind,
          "key": gate.question_key(field), "question": question, "type": field["type"], "options": list(options),
          "answer": answer, "line": line, "legal": legal, "scope": scope, "host": "" if scope == memory.ANY else scope,
@@ -81,7 +82,7 @@ def test_memory_lists_four_groups_and_edit_and_delete_take_effect_on_the_next_jo
         check(status == 200 and "SENTINEL-LEGAL" not in json.dumps(body) and "entries" not in body,
               "the jobs view carries nothing of memory")
         origin = f"http://127.0.0.1:{server.port}"
-        field = {"ref": "p1", "type": "select", "label": "State / Province", "options": ["XX - Example State", "YY - Other"]}
+        field = {"ref": "p1", "type": "select", "label": "State / Province", "section": "About you", "options": ["XX - Example State", "YY - Other"]}
         plan, _, _ = pipeline.route([field], {"p1": "personal_fact"}, prof, set(),
                                     learned=memory.Learned.load(state.memory_path), host="x.example")
         check(plan.get("p1", {}).get("value") == "XX - Example State", "before the edit the mapping answers")

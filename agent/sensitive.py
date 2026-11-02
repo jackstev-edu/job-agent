@@ -329,6 +329,25 @@ def stop_kinds(text: str) -> set[str]:
     return {kind for rx, kind in STOP_KINDS if any(rx.search(v) for v in variants)}
 
 
+# A past-employer question (decision C, Jack, 2026-11-02): "have you
+# worked for / been employed by / were you formerly employed at <company>",
+# in the wordings his runs met ("If you were formerly employed at X, please
+# provide..."; "Have you worked at X?"), which the per-company HARD_STOPS
+# row does not all catch. A match makes the question per-company for
+# learned memory (never learned, never reused); item 8 answers it from his
+# list under decision C's conditions.
+PAST_EMPLOYER = re.compile(
+    r"\b(have|were|are|had)\s+you\s+(ever\s+|previously\s+|formerly\s+|currently\s+)?"
+    r"(worked|been\s+employed|employed|an?\s+(former\s+|previous\s+)?employee)\b"
+    r"|\b(formerly|previously|ever)\s+(been\s+)?(worked|employed|an?\s+employee)\b"
+    r"|\bformer\s+employee\b|\bprior\s+employment\b|\bprevious(ly)?\s+employ\w*\b", re.I)
+
+
+def is_past_employer_question(text: str) -> bool:
+    """Does any reading of `text` ask about past employment at the company?"""
+    return any(PAST_EMPLOYER.search(v) for v in text_variants(text))
+
+
 # The two sponsorship lines are the one pair a question regularly matches
 # both of ("will you now or in the future require sponsorship" hits the
 # future line, "do you require sponsorship to begin" the now line, and

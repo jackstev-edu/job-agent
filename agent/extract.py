@@ -314,6 +314,35 @@ _SCAN_JS = safe(r"""
       .join(' ').trim().slice(0, 300);
   };
 
+  // The section a field sits in, for the learned key of a short label
+  // (Jack, 2026-11-02, item 2: two "Year" boxes under Education and Work
+  // history are two questions): the nearest ancestor fieldset's legend or
+  // group / region label, else the closest preceding heading. Built by
+  // textOf like every label, so it holds no value.
+  const headings = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6, [role=heading]')];
+  const sectionOf = el => {
+    for (let p = __ja.parent(el); p && p !== document.body; p = __ja.parent(p)) {
+      if (__ja.tag(p) === 'FIELDSET') {
+        const t = textOf(p.querySelector(':scope > legend'), el);
+        if (t) return t.slice(0, 120);
+      }
+      const role = __ja.attr(p, 'role') || '';
+      if (['group', 'region', 'radiogroup'].includes(role)) {
+        const al = (__ja.attr(p, 'aria-label') || '').trim();
+        if (al) return al.slice(0, 120);
+        const by = (__ja.attr(p, 'aria-labelledby') || '').split(/\s+/).filter(Boolean)
+          .map(id => textOf(document.getElementById(id), el)).join(' ').trim();
+        if (by) return by.slice(0, 120);
+      }
+    }
+    let last = null;
+    for (const h of headings) {
+      if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) last = h;
+      else break;
+    }
+    return last ? textOf(last, el).slice(0, 120) : '';
+  };
+
   // Each stamped element's tag, type and name, as the scan saw it. A read
   // refuses an element that no longer matches (a reused or swapped node).
   const sigs = {};
@@ -362,6 +391,7 @@ _SCAN_JS = safe(r"""
       required: /required/i.test(title?.className || '') || !!hidden?.required
              || __ja.attr(box, 'aria-required') === 'true',
       help_text: helpFor(box),
+      section: sectionOf(box),
       current_value: pressed ? optionText(pressed) : '',
       ...rawFlags([title?.innerText, rawLabelFor(box), rawHelpFor(box)].join(' ')),
     });
@@ -408,6 +438,7 @@ _SCAN_JS = safe(r"""
         option_refs: optionRefs,
         required: peers.some(p => p.required),
         help_text: helpFor(el),
+        section: sectionOf(el),
         ...rawFlags([__ja.closest(el, 'fieldset')?.querySelector('legend')?.innerText,
                      rawLabelFor(el), rawHelpFor(el)].join(' ')),
       });
@@ -437,6 +468,7 @@ _SCAN_JS = safe(r"""
       placeholder: __ja.attr(el, 'placeholder') || '',
       required: !!el.required || __ja.attr(el, 'aria-required') === 'true',
       help_text: helpFor(el),
+      section: sectionOf(el),
       maxlength: el.maxLength > 0 ? el.maxLength : null,
       tag, dom_name: __ja.name(el) || '', dom_id: __ja.id(el) || '',
       explicit_label: explicitLabel(el),
@@ -464,6 +496,7 @@ _SCAN_JS = safe(r"""
       options: [],
       required: __ja.attr(el, 'aria-required') === 'true',
       help_text: '',
+      section: sectionOf(el),
       note: 'custom dropdown — filled by clicking and typing',
       // A typeless <button> in a form is a submit button. Opening this
       // dropdown would click it, so it's handed to you and never clicked.

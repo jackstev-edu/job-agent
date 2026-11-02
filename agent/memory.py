@@ -21,7 +21,16 @@ loses to it (Jack, 2026-11-01, fold round). A Department of Defense or
 clearance question is learned and reused like any other legal one (same
 day, decision 1). Never learned, never reused: a file box, a password
 or anything secret-classified, a credential, a checkbox of any kind, a
-consent or legal-declaration field, any HARD_STOPS match. Local only: nothing here reaches a model or the
+consent or legal-declaration field, any HARD_STOPS match, a per-company
+question (the classifier's, the stop kind's or decision C's past-employer
+wording), a marketing / communications opt-in, a label of three words or
+fewer with no section context, and a key two or more fields of one page
+share (Jack, 2026-11-02, item 2). "Same company" is the tenant
+(tenant_of): host plus first path segment on the shared boards, the
+subdomain on Workday and Avature, the host elsewhere. Entries that break
+these rules are removed on load and listed (the questions, never a
+value); a shared board's bare-host entry is rescoped from its posting.
+Local only: nothing here reaches a model or the
 network; the model never sees a learned legal answer.
 WHY IT MATTERS: The profile fills every portal the same way; what one
 portal asks differently is answered the way Jack answered it there, and
@@ -52,8 +61,15 @@ SENSITIVE_PREFIXES = ("eligibility.", "eeo.", "compensation.")
 # Categories whose answer is reused at the same host only: what one
 # company asks in its own words, or about itself (Jack, 2026-11-01).
 HOST_ONLY_CATEGORIES = {"free_text", "per_company"}
-# Categories never learned: a credential, a consent, a legal declaration.
-NEVER_CATEGORIES = {"credential", "consent", "legal_declaration"}
+# Categories never learned: a credential, a consent, a legal declaration,
+# and (Jack, 2026-11-02) a per-company question.
+NEVER_CATEGORIES = {"credential", "consent", "legal_declaration", "per_company"}
+# Job boards many employers share: there "same company" is the host plus
+# the first path segment (the board's slug), never the bare host.
+SHARED_BOARDS = {"job-boards.greenhouse.io", "boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com"}
+# Hosts where the employer is the subdomain.
+SUBDOMAIN_HOSTS = (".myworkdayjobs.com", ".avature.net")
+REMOVED_KEPT = 50                             # removed-on-load questions kept in the file for the Memory page
 
 _LOCK = threading.RLock()
 
@@ -69,8 +85,48 @@ def host_of(url: str) -> str:
         return ""
 
 
+def tenant_of(url: str) -> str:
+    """
+    "Same company" for a host-only entry (Jack, 2026-11-02, item 2): on
+    job-boards.greenhouse.io, boards.greenhouse.io, jobs.lever.co and
+    jobs.ashbyhq.com the host plus the first path segment; on
+    *.myworkdayjobs.com and *.avature.net the subdomain; the host
+    otherwise. '' when the address has no host, or a shared board's
+    address names no slug.
+    """
+    try:
+        parts = urlsplit(str(url or ""))
+    except ValueError:
+        return ""
+    host = (parts.hostname or "").lower().rstrip(".")
+    if not host:
+        return ""
+    if host in SHARED_BOARDS:
+        first = next((seg for seg in (parts.path or "").split("/") if seg), "")
+        return f"{host}/{first.lower()}" if first else ""
+    if host.endswith(SUBDOMAIN_HOSTS):
+        return host.split(".")[0]
+    return host
+
+
 def _norm(value: Any) -> str:
     return gate.normalize_label(value)
+
+
+def is_opt_in(field: dict) -> bool:
+    """Does the question read as a marketing / communications / newsletter / SMS / talent-community opt-in (the consent policy's own patterns)?"""
+    return any(gate.CONSENT_MARKETING.search(v) for v in sensitive.text_variants(sensitive._question_text(field)))
+
+
+def shared_keys(fields: list[dict]) -> set[str]:
+    """The question keys two or more fields of one page share: never learned, never reused there."""
+    seen: dict[str, int] = {}
+    for f in fields:
+        if f.get("type") == "file":
+            continue
+        key = gate.question_key(f)
+        seen[key] = seen.get(key, 0) + 1
+    return {k for k, n in seen.items() if n > 1}
 
 
 def never_reason(field: dict, category: str) -> str | None:
@@ -80,8 +136,21 @@ def never_reason(field: dict, category: str) -> str | None:
         return f"a {ftype or 'secret'} box is never learned"
     if category in NEVER_CATEGORIES:
         return f"a {category.replace('_', ' ')} field is never learned"
-    if sensitive.stop_reason(sensitive._question_text(field)) is not None or field.get("raw_stop"):
+    text = sensitive._question_text(field)
+    if sensitive.stop_reason(text) is not None or field.get("raw_stop"):
         return "a hard-stop question is never learned"
+    # Per-company by any reading (Jack, 2026-11-02, item 2): the classifier's
+    # category (NEVER_CATEGORIES above), the stop kind, or decision C's
+    # past-employer wording; and any opt-in the consent policy refuses.
+    # Decision C's wording is per-company only off the legal guard: "Have
+    # you worked for the Department of Defense?" is a legal question
+    # learned as Jack's own answer (fold round, decision 1), not an
+    # employer question.
+    if "per_company" in sensitive.stop_kinds(text) or (
+            sensitive.is_past_employer_question(text) and sensitive.legal_guard(field) is None):
+        return "a per-company question is never learned"
+    if is_opt_in(field):
+        return "a marketing / communications opt-in is never learned"
     # A Department of Defense or clearance question is learned and reused
     # like every other legal question: Jack's own answer on the exact key,
     # a choice only as a current option, never the model (Jack,
@@ -89,6 +158,8 @@ def never_reason(field: dict, category: str) -> str | None:
     # DoD explicitly and supersedes the 2026-10-20 ruling).
     if not _norm(field.get("label")):
         return "a question with no label has no key"
+    if gate.short_label(field.get("label")) and not _norm(field.get("section")):
+        return "a short label with no section context has no key"
     return None
 
 
@@ -128,6 +199,25 @@ class Unreadable(Exception):
     """learned.yaml exists but couldn't be read as the store: nothing is saved over it."""
 
 
+def _violation(e: dict) -> str | None:
+    """Why a stored entry breaks the learning rules of 2026-11-02 (item 2), or None. Judged on the question, never a value."""
+    field = {"label": e.get("question"), "type": e.get("type"), "options": e.get("options") or []}
+    text = sensitive._question_text(field)
+    if (e.get("category") == "per_company" or "per_company" in sensitive.stop_kinds(text)
+            or (sensitive.is_past_employer_question(text) and sensitive.legal_guard(field) is None)):
+        return "per-company"
+    if is_opt_in(field):
+        return "opt-in"
+    try:
+        parts = json.loads(e["key"])
+    except (TypeError, ValueError):
+        parts = None                       # not a key this module wrote: matched by nothing, judged by nothing
+    if isinstance(parts, list) and gate.short_label(e.get("question")) and (
+            len(parts) < 4 or not str(parts[3] or "").strip()):
+        return "short label with no section context"
+    return None
+
+
 class Learned:
     """
     The store. Every write (learn, edit, delete) re-reads the file under
@@ -135,13 +225,22 @@ class Learned:
     a learn() racing each other lose nothing (fold of 580cfd0's finding
     2). A file that exists but didn't parse marks the store unreadable:
     it loads empty, every save is refused, and the file is kept as it is
-    for Jack to fix or delete (fold of fe30a9a's finding 3).
+    for Jack to fix or delete (fold of fe30a9a's finding 3). On load,
+    entries that break the learning rules (a per-company or opt-in
+    question, a short label with no section context) are removed and a
+    shared board's bare-host entry is rescoped from its posting, or
+    removed when the posting names no slug; the questions removed are
+    kept in the file (`removed`, the last REMOVED_KEPT) for the Memory
+    page and in `just_removed` for the job log (Jack, 2026-11-02).
     """
 
-    def __init__(self, entries: list[dict], at: Path | None = None, unreadable: str | None = None):
+    def __init__(self, entries: list[dict], at: Path | None = None, unreadable: str | None = None,
+                 removed: list[dict] | None = None):
         self.entries = entries
         self.at = at or path()
         self.unreadable = unreadable
+        self.removed: list[dict] = removed or []     # {"at", "question", "why"}, newest last
+        self.just_removed: list[str] = []            # what this load removed, as one line each
 
     @classmethod
     def load(cls, at: Path | None = None) -> "Learned":
@@ -152,12 +251,46 @@ class Learned:
                 raw = yaml.safe_load(at.read_text(encoding="utf-8")) if at.exists() else {"entries": []}
             except (OSError, yaml.YAMLError) as e:
                 raw, unreadable = None, type(e).__name__
-        if unreadable is None and not (isinstance(raw, dict) and isinstance(raw.get("entries"), list)):
-            unreadable = "not a mapping with an entries list"
-        entries = raw.get("entries") if isinstance(raw, dict) else None
-        good = [e for e in (entries if isinstance(entries, list) else []) if isinstance(e, dict) and isinstance(e.get("key"), str)
-                and e.get("kind") in (CHOICE, ANSWER, CANDIDATE) and isinstance(e.get("id"), str)]
-        return cls(good, at, unreadable)
+            if unreadable is None and not (isinstance(raw, dict) and isinstance(raw.get("entries"), list)):
+                unreadable = "not a mapping with an entries list"
+            entries = raw.get("entries") if isinstance(raw, dict) else None
+            good = [e for e in (entries if isinstance(entries, list) else []) if isinstance(e, dict) and isinstance(e.get("key"), str)
+                    and e.get("kind") in (CHOICE, ANSWER, CANDIDATE) and isinstance(e.get("id"), str)]
+            kept_removed = [r for r in ((raw.get("removed") if isinstance(raw, dict) else None) or [])
+                            if isinstance(r, dict) and isinstance(r.get("question"), str)]
+            store = cls(good, at, unreadable, kept_removed)
+            if unreadable is None and store._clean_up():
+                try:
+                    store.save()
+                except OSError:
+                    pass                   # the cleaned copy is still what this process uses
+        return store
+
+    def _clean_up(self) -> bool:
+        """Apply the load-time rules to self.entries; True when anything changed."""
+        changed = False
+        kept: list[dict] = []
+        stamp = _now()
+        for e in self.entries:
+            why = _violation(e)
+            if why is None and e.get("scope") in SHARED_BOARDS:
+                tenant = tenant_of(e.get("posting") or "")
+                if tenant and tenant != e.get("scope"):
+                    e["scope"] = tenant
+                    e["id"] = entry_id(e["key"], e["kind"], tenant, e.get("answer"))
+                    changed = True
+                else:
+                    why = "a shared board's bare host (no slug in the posting address)"
+            if why is None:
+                kept.append(e)
+                continue
+            question = str(e.get("question") or "")[:120]
+            self.removed.append({"at": stamp, "question": question, "why": why})
+            self.just_removed.append(f"'{question[:60]}' ({why})")
+            changed = True
+        self.entries = kept
+        self.removed = self.removed[-REMOVED_KEPT:]
+        return changed
 
     def _refresh(self) -> None:
         """Under the lock: the file as it is now replaces this copy, before a write is applied to it."""
@@ -174,8 +307,9 @@ class Learned:
             text = ("# Learned by job-agent from what you entered yourself (Jack, 2026-11-01).\n"
                     "# Reused only on the exact same question. Edit or delete entries on the\n"
                     "# GUI's Memory page; profile.yaml is never written from here.\n"
-                    + yaml.safe_dump({"version": 1, "entries": self.entries}, allow_unicode=True,
-                                     sort_keys=False, width=4096))
+                    + yaml.safe_dump({"version": 1, "entries": self.entries,
+                                      "removed": self.removed[-REMOVED_KEPT:]},
+                                     allow_unicode=True, sort_keys=False, width=4096))
             fd, tmp = tempfile.mkstemp(prefix=f".{self.at.name}.", suffix=".tmp", dir=str(self.at.parent))
             try:
                 with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
@@ -256,26 +390,31 @@ def _upsert(store: Learned, entry: dict) -> dict:
     return entry
 
 
-def learn(changes: list[dict], *, url: str, portal: str, prof, store: Learned | None = None) -> list[dict]:
+def learn(changes: list[dict], *, url: str, portal: str, prof, store: Learned | None = None,
+          fields: list[dict] | None = None) -> list[dict]:
     """
     One entry per change Jack made (corrections.changes: the field, the
     kind of change, what the agent held, what the box holds now, the
     plan's decision and the category). Returns the entries learned, in
     the store's shape, and saves. Values of a legal field are kept here
-    and nowhere else; a field never_reason refuses is skipped. Raises
-    Unreadable, saving nothing, when the file exists but didn't parse.
+    and nowhere else; a field never_reason refuses is skipped, and so is
+    one whose key another field of the page (`fields`, the whole page)
+    shares. Raises Unreadable, saving nothing, when the file exists but
+    didn't parse.
     """
     store = store or Learned.load()
     with _LOCK:
         store._refresh()
-        learned = _learn_into(store, changes, url=url, portal=portal, prof=prof)
+        learned = _learn_into(store, changes, url=url, portal=portal, prof=prof,
+                              shared=shared_keys(fields) if fields else set())
         if learned:
             store.save()
     return learned
 
 
-def _learn_into(store: Learned, changes: list[dict], *, url: str, portal: str, prof) -> list[dict]:
-    host = host_of(url)
+def _learn_into(store: Learned, changes: list[dict], *, url: str, portal: str, prof,
+                shared: set[str] = frozenset()) -> list[dict]:
+    host = tenant_of(url)                    # "same company" (Jack, 2026-11-02): the tenant, not the bare host
     learned: list[dict] = []
     for ch in changes:
         field, category = ch["field"], ch.get("category") or "unknown"
@@ -285,6 +424,8 @@ def _learn_into(store: Learned, changes: list[dict], *, url: str, portal: str, p
         if never_reason(field, category) is not None:
             continue
         key = gate.question_key(field)
+        if key in shared:
+            continue                         # two fields of the page ask this: nothing says which
         options = [str(o) for o in field.get("options") or []]
         answer = str(now).strip()
         if options and not any(_norm(o) == _norm(answer) for o in options):
@@ -313,14 +454,16 @@ def _learn_into(store: Learned, changes: list[dict], *, url: str, portal: str, p
         entry = {"id": entry_id(key, kind, scope, answer), "kind": kind, "key": key,
                  "question": str(field.get("label") or "")[:300], "type": (field.get("type") or "").lower(),
                  "options": options[:60], "answer": answer, "line": line,
-                 "legal": legal, "scope": scope, "host": host, "portal": portal or "",
+                 "legal": legal, "scope": scope, "host": host_of(url), "portal": portal or "",
+                 "category": category,
                  "first_seen": stamp, "last_seen": stamp, "seen": 1, "uses": 0, "posting": str(url)[:300],
                  "change": ch.get("kind") or "", **extra}
         learned.append(_upsert(store, entry))
     return learned
 
 
-def reuse(field: dict, category: str, verdict: dict, prof, store: Learned | None, host: str) -> dict | None:
+def reuse(field: dict, category: str, verdict: dict, prof, store: Learned | None, host: str,
+          shared: set[str] | None = None) -> dict | None:
     """
     The plan decision a learned entry gives this field, or None. The
     router (pipeline.route) calls this after sensitive.decide: on a human
@@ -332,9 +475,13 @@ def reuse(field: dict, category: str, verdict: dict, prof, store: Learned | None
     again here: a never_reason field, a choice that is no option of the
     form now, a choice mapping whose profile line changed since, and a
     legal entry on a field that doesn't read as legal now (or the
-    reverse) all give None.
+    reverse) all give None; so does a key shared by two or more fields of
+    the page (`shared`). `host` is the tenant (tenant_of) since
+    2026-11-02.
     """
     if store is None:
+        return None
+    if shared and gate.question_key(field) in shared:
         return None
     entry = store.match(field, category, host)
     if entry is None:

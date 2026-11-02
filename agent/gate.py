@@ -102,17 +102,28 @@ def normalize_label(text: Any) -> str:
     return t[:-1].rstrip() if t.endswith("*") else t
 
 
+def short_label(label: Any) -> bool:
+    """Three words or fewer (a word holds a letter or digit): the labels a key needs a section for."""
+    return len([w for w in normalize_label(label).split() if re.search(r"[^\W_]", w)]) <= 3
+
+
 def question_key(field: dict) -> str:
     """
     The question as asked, in the allowed normalisation and nothing
-    else: the label, the field type, and for a choice field the sorted
-    option texts. A learned answer (memory.py) is reused on this key
-    alone, and the gate recomputes it here from the record's own field
-    to trust a "learned" legal answer (Jack, 2026-11-01).
+    else: the label, the field type, for a choice field the sorted
+    option texts, and for a label of three words or fewer the field's
+    section context (the scan's value-free legend / group label /
+    heading; Jack, 2026-11-02, item 2: a bare "Year" is two questions
+    under two sections). A learned answer (memory.py) is reused on this
+    key alone, and the gate recomputes it here from the record's own
+    field to trust a "learned" legal answer (Jack, 2026-11-01).
     """
+    label = normalize_label(field.get("label"))
     options = sorted(normalize_label(o) for o in (field.get("options") or []) if str(o or "").strip())
-    return json.dumps([normalize_label(field.get("label")), normalize_label(field.get("type")), options],
-                      ensure_ascii=False)
+    key: list = [label, normalize_label(field.get("type")), options]
+    if short_label(label):
+        key.append(normalize_label(field.get("section")))
+    return json.dumps(key, ensure_ascii=False)
 
 
 def _same_text(a: Any, b: Any) -> bool:

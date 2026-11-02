@@ -64,7 +64,7 @@ def _route(field, category, prof, store, host):
     return plan.get(field["ref"]), flags, for_model
 
 
-STATE = {"ref": "f1", "type": "select", "label": "State / Province", "options": ["XX - Example State", "YY - Other"]}
+STATE = {"ref": "f1", "type": "select", "label": "State / Province", "section": "About you", "options": ["XX - Example State", "YY - Other"]}
 
 
 def test_a_choice_for_a_profile_line_is_stored_and_reused_and_the_profile_is_untouched():
@@ -98,7 +98,7 @@ def test_a_choice_for_a_profile_line_is_stored_and_reused_and_the_profile_is_unt
 def test_a_typed_correction_becomes_a_profile_candidate_reused_for_that_key_only():
     check = Checks()
     prof, store = _prof(), _store("candidate")
-    field = {"ref": "f2", "type": "text", "label": "Preferred first name"}
+    field = {"ref": "f2", "type": "text", "label": "Preferred first name", "section": "About you"}
     learned = memory.learn([_change(field, "Tess", kind="overwrote", agent="Test",
                                     decision={"value": "Test", "profile_path": "personal.first_name"})],
                            url=URL_A, portal="generic", prof=prof, store=store)
@@ -153,7 +153,7 @@ def test_a_legal_answer_is_reused_on_the_identical_question_only_and_the_model_n
         pipeline.ask_mapper(for_model2, prof, "", set(), plan)
     check(plan == {}, "no mapper call for a legal field, learned or not")
     # A typed legal answer (a salary box): the same host only.
-    salary = {"ref": "s1", "type": "text", "label": "Desired salary"}
+    salary = {"ref": "s1", "type": "text", "label": "Desired salary", "section": "Compensation"}
     learned = memory.learn([_change(salary, "100000", category="compensation")], url=URL_A, portal="generic",
                            prof=prof, store=store)
     check(learned and learned[0]["legal"] and learned[0]["scope"] == "jobs.a.example", f"typed legal: host-scoped ({learned})")
@@ -186,7 +186,7 @@ def test_the_gate_takes_a_learned_legal_answer_only_with_the_exact_key():
               f"{what}: would_stop ({res['content_reasons']})")
     # A typed legal answer in a box with no options: verbatim, with the key.
     rec = base()
-    rec["fields"].append({"ref": "s1", "type": "text", "label": "Desired salary", "required": False})
+    rec["fields"].append({"ref": "s1", "type": "text", "label": "Desired salary", "section": "Compensation", "required": False})
     rec["categories"]["s1"] = "compensation"
     key = gate.question_key(rec["fields"][-1])
     rec["plan"]["s1"] = {"value": "100000", "source": "learned", "fit": "verbatim", "confidence": "high",
@@ -243,7 +243,7 @@ def test_free_text_is_reused_at_the_same_host_only():
 def test_a_deleted_entry_is_never_reused():
     check = Checks()
     prof, store = _prof(), _store("delete")
-    field = {"ref": "n1", "type": "text", "label": "Nickname"}
+    field = {"ref": "n1", "type": "text", "label": "Nickname", "section": "About you"}
     [entry] = memory.learn([_change(field, "TP")], url=URL_A, portal="generic", prof=prof, store=store)
     decision, _, _ = _route(field, "personal_fact", prof, memory.Learned.load(store.at), "x.example")
     check(decision and decision["value"] == "TP", "reused before the delete")
@@ -273,7 +273,7 @@ def test_no_module_but_approve_can_write_the_profile():
     # And at run time: learn, reuse, edit and delete leave the profile as it was.
     prof, store = _prof("memory-profile-rt.yaml"), _store("runtime")
     before, mtime = prof.path.read_bytes(), prof.path.stat().st_mtime_ns
-    field = {"ref": "f1", "type": "text", "label": "Preferred first name"}
+    field = {"ref": "f1", "type": "text", "label": "Preferred first name", "section": "About you"}
     [e] = memory.learn([_change(field, "Tess", kind="overwrote", agent="Test",
                                 decision={"value": "Test", "profile_path": "personal.first_name"})],
                        url=URL_A, portal="generic", prof=prof, store=store)
@@ -366,7 +366,7 @@ def test_a_dod_or_clearance_answer_of_jacks_is_reused_on_the_identical_question_
 RELOCATE = {"ref": "r1", "type": "select", "label": "Are you willing to relocate?", "options": ["Yes, anywhere", "No"]}
 TRAVEL = {"ref": "t1", "type": "select", "label": "What percentage of travel are you willing to do?",
           "options": ["25%", "50%"]}
-GENDER = {"ref": "g2", "type": "select", "label": "Gender", "options": ["Male", "Female", "I do not wish to answer"]}
+GENDER = {"ref": "g2", "type": "select", "label": "Gender", "section": "Self-identification", "options": ["Male", "Female", "I do not wish to answer"]}
 
 
 def test_a_learned_entry_beats_a_loose_profile_fit_and_loses_to_a_strict_one():
@@ -442,7 +442,7 @@ def test_fill_learns_nothing():
     prof = _prof()
     at = memory.path()
     at.unlink(missing_ok=True)
-    fields = [{"ref": "f1", "type": "text", "label": "Nickname"}, VETERAN]
+    fields = [{"ref": "f1", "type": "text", "label": "Nickname", "section": "About you"}, VETERAN]
     plan = {"f1": {"value": None}, "g1": {"value": None}}
     categories = {"f1": "personal_fact", "g1": "eeo"}
     from contextlib import redirect_stdout

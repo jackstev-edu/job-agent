@@ -60,7 +60,8 @@ def resume_box(fields: list[dict]) -> dict | None:
 
 
 def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str],
-          held_reason: str = HELD_AFTER_UPLOAD, *, learned=None, host: str = "") -> tuple[dict, list[dict], list[dict]]:
+          held_reason: str = HELD_AFTER_UPLOAD, *, learned=None, host: str = "",
+          shared: set[str] | None = None) -> tuple[dict, list[dict], list[dict]]:
     """
     The policy for one page's fields: (plan from the profile, flags for you,
     fields for the mapper). Sensitive fields never reach the mapper. Shared
@@ -69,8 +70,12 @@ def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str]
     `held_reason` says why, on the review sheet. `learned` (memory.Learned,
     Jack, 2026-11-01) answers a field from his own recorded answer on the
     exact same question: a human verdict's gap, a choice mapping over a
-    profile fit, or ahead of the model; `host` scopes the host-only ones.
+    profile fit, or ahead of the model; `host` (the tenant) scopes the
+    host-only ones; `shared` (memory.shared_keys of the whole page) is
+    computed here when not given: a key two fields share is never reused.
     """
+    if shared is None:
+        shared = memory.shared_keys(fields)
     plan: dict[str, dict] = {}
     flags: list[dict] = []
     for_model: list[dict] = []
@@ -98,7 +103,8 @@ def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str]
             continue
         verdict = sensitive.decide(
             field, categories.get(field["ref"], "unknown"), prof)
-        remembered = memory.reuse(field, category, verdict, prof, learned, host) if learned is not None else None
+        remembered = (memory.reuse(field, category, verdict, prof, learned, host, shared)
+                      if learned is not None else None)
         if remembered is not None:
             plan[field["ref"]] = remembered
             continue
@@ -358,8 +364,12 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
     else:
         categories = classify.classify_fields([f for f in fields if f.get("type") != "file"
                                                and f["ref"] not in marked])
+    store = _learned_store()
+    for line in (getattr(store, "just_removed", None) or []):
+        lines.append(f"learned memory: removed on load, against the learning rules: {line}")
     plan, flags, for_model = route([f for f in fields if f["ref"] not in marked], categories, prof,
-                                   new_after_upload, learned=_learned_store(), host=memory.host_of(page.url))
+                                   new_after_upload, learned=store, host=memory.tenant_of(page.url),
+                                   shared=memory.shared_keys(fields))
     held: list[str] = []
     for f in fields:
         if f["ref"] in marked:

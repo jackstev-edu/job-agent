@@ -147,14 +147,16 @@ def rows_for(url: str, fields: list[dict], plan: dict, categories: dict, final: 
     return rows, unread
 
 
-def learn_from(changes_: list[dict], *, url: str, portal: str, prof, log: list | None = None) -> list[dict]:
+def learn_from(changes_: list[dict], *, url: str, portal: str, prof, log: list | None = None,
+               fields: list[dict] | None = None) -> list[dict]:
     """
     Jack's own entries into learned memory (Jack, 2026-11-01): one entry
     per change memory accepts; the job log names each by question and
-    kind, never by value. Never raises.
+    kind, never by value. `fields` is the whole page, so a key two of
+    its fields share is never learned (Jack, 2026-11-02). Never raises.
     """
     try:
-        learned = memory.learn(changes_, url=url, portal=portal, prof=prof)
+        learned = memory.learn(changes_, url=url, portal=portal, prof=prof, fields=fields)
     except memory.Unreadable as e:
         if log is not None:
             log.append(f"learned.yaml didn't parse ({e}): nothing learned or saved over it; fix or delete the file")
@@ -327,7 +329,7 @@ def log_overrides(watch: Watch | None, fill, *, url: str, portal: str, log: list
         if len(his) < len(found):
             log.append(f"{len(found) - len(his)} change(s) under the pause carried no touch mark of yours: "
                        "recorded, not learned")
-        learn_from(his, url=url, portal=portal, prof=prof, log=log)
+        learn_from(his, url=url, portal=portal, prof=prof, log=log, fields=watch.fields)
         return rows
     except Exception as e:
         log.append(f"couldn't record corrections ({type(e).__name__})")

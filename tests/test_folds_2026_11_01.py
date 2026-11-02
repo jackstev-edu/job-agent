@@ -32,9 +32,9 @@ from test_overrides import EMAIL2, _heading
 from test_pick_up import CITY_REQUIRED, _page, _run
 
 URL = "https://jobs.example-co.com/careers/engineer/apply"
-CITY = {"ref": "c1", "type": "text", "label": "City"}
-NICK = {"ref": "n1", "type": "text", "label": "Preferred name"}
-STATE_Q = {"ref": "s1", "type": "select", "label": "State / Province", "options": ["XX - Example State", "YY - Other"]}
+CITY = {"ref": "c1", "type": "text", "label": "City", "section": "Address"}
+NICK = {"ref": "n1", "type": "text", "label": "Preferred name", "section": "About you"}
+STATE_Q = {"ref": "s1", "type": "select", "label": "State / Province", "section": "About you", "options": ["XX - Example State", "YY - Other"]}
 
 
 def test_an_edit_in_the_instant_before_jacks_own_press_is_learned_from_the_hooks_marks():
