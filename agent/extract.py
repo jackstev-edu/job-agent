@@ -395,8 +395,20 @@ _SCAN_JS = safe(r"""
     if (!NAME_WORD_RX.test(labelFor(el))) return false;
     const block = blockWith(el, DATE_RX, true);
     if (!block) return false;
-    const controls = [...block.querySelectorAll('input, textarea')].filter(plainBox).concat([...block.querySelectorAll('select')]);
-    return controls.every(c => c === el || DATE_RX.test(labelFor(c).trim()));
+    // "Nothing else" is judged at the enclosing fieldset / section / group
+    // (nested row markup must not hide an Issuer box in a sibling row),
+    // counting every visible control: a checkbox, radio or combobox there
+    // is something else (fix of 5d099c5's review, finding 4).
+    let scope = block;
+    for (let p = block, i = 0; p && p !== document.body && i < 6; p = __ja.parent(p), i++) {
+      const tag = __ja.tag(p);
+      if (tag === 'FORM') break;
+      if (tag === 'FIELDSET' || tag === 'SECTION' || ['group', 'region'].includes(__ja.attr(p, 'role') || '')) { scope = p; break; }
+    }
+    const SKIP_TYPES = ['hidden', 'submit', 'button', 'reset', 'image'];
+    const controls = [...scope.querySelectorAll('input, textarea, select, [role=combobox], [role=listbox], [role=radio], [role=checkbox]')]
+      .filter(c => isVisible(c) && !SKIP_TYPES.includes((__ja.type(c) || '').toLowerCase()));
+    return controls.every(c => c === el || ((__ja.tag(c) === 'SELECT' || plainBox(c)) && DATE_RX.test(labelFor(c).trim())));
   };
 
   // Each stamped element's tag, type and name, as the scan saw it. A read

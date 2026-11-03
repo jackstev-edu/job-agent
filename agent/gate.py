@@ -773,7 +773,11 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         # A box that signs is never filled by any route (the filler
         # paragraph of CLAUDE.md); a plan with a value on one stops here,
         # whatever planned it (fix of 0530a70's review, finding 7).
-        if decision and decision.get("value") is not None and signdate.is_signature_box(f):
+        if (decision and decision.get("value") is not None and decision.get("source") != signdate.SOURCE
+                and signdate.is_signature_box(f)):
+            # A clock-dated "Signature date" box is the one exception: the
+            # clock branch above already recomputed it (5d099c5's review,
+            # finding 3).
             content.append(f"{name}: a box that signs was filled; nothing signs for you")
             continue
 

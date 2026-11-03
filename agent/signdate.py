@@ -189,10 +189,11 @@ _NAME_WORDS = frozenset({"your", "full", "legal", "printed", "print", "type", "t
 # "signs anything" line in CLAUDE.md). Read on every reading of the label,
 # help text, placeholder and the name attribute split into words (fix of
 # 0530a70's review: the label alone let a "Name" box with placeholder
-# "Signature" through). "initials", "initial here", never a lone "initial"
-# (a Middle initial box is no signature).
+# "Signature" through). "initial" / "initials" as in 0530a70: a "Middle
+# initial" box is caught too (a false positive, Jack's to lift; the
+# pattern was narrowed in 5d099c5 without his approval and is restored).
 _SIGN_WORDS = re.compile(r"\bsign(?:ature|atures|ed|ing|s|er|ers|ee|ees|atory|atories)?\b|\be-?sign\w*|\be-?sig\b"
-                         r"|\binitials\b|\binitial\s+here\b|\bautograph", re.I)
+                         r"|\binitials?\b|\bautograph", re.I)
 
 
 def _own_words(field: dict) -> list[str]:
@@ -271,8 +272,10 @@ def name_box_is_jacks(field: dict, fields: list[dict]) -> bool:
     list, a sign word anywhere), it is Jack's, never the model's (fix of
     0530a70's review); the gate stops on any other source for it.
     """
-    return bool(field.get("signature_name")) and (field.get("type") or "").lower() in ("text", "") \
-        and self_identification_page(fields)
+    # Whatever the box's type (a textarea, a combobox, an email box the scan
+    # marked): a mark with no profile_name plan is his (fix of 5d099c5's
+    # review, BLOCK 1).
+    return bool(field.get("signature_name")) and self_identification_page(fields)
 
 
 def verify_name(field: dict, decision: dict | None, fields: list[dict], prof, category: str | None = None) -> bool:

@@ -265,6 +265,14 @@ def test_a_date_box_whose_own_text_reads_as_a_legal_question_is_jacks_and_its_na
     with mock_page(_page("named", NAMED_DATE)) as page:
         fill = _fill(page, prof, [])
         check(_values(page).get("dt") == "11/02/2026", f"a plain Date box on the self-identification form still fills ({_values(page)})")
+        result = _gate(page, fill, prof)
+        check(not any("'Date'" in r for r in result["content_reasons"]),
+              f"...and the gate takes it: a clock-dated box whose name says 'signature' is no box that signs (fix of 5d099c5's review, finding 3) ({result['content_reasons']})")
+    with mock_page(_page("sigdate", '<label for="dt">Signature date</label><input id="dt" name="sig_date" placeholder="MM/DD/YYYY">')) as page:
+        fill = _fill(page, prof, [])
+        result = _gate(page, fill, prof)
+        check(_values(page).get("dt") == "11/02/2026" and not any("Signature date" in r for r in result["content_reasons"]),
+              f"a 'Signature date' text box with a stated format is dated from the clock and taken by the gate ({_values(page)}, {result['content_reasons']})")
     check.done()
 
 
@@ -355,6 +363,19 @@ CERTS = """<fieldset><legend>Certifications</legend>
 <label for="cn">Name</label><input id="cn" name="cert_name">
 <label for="ci">Issuer</label><input id="ci" name="cert_issuer">
 <label for="cy">Year</label><input id="cy" name="cert_year" placeholder="YYYY"></fieldset>"""
+# Nested rows: the smallest ancestor of the Name box holds only Name and
+# Year; the Issuer sits in a sibling row of the same fieldset (5d099c5's
+# review, finding 4).
+NESTED_CERTS = """<fieldset><legend>Certifications</legend>
+<div class="row"><label for="cn">Name</label><input id="cn" name="cert_name">
+<label for="cy">Year</label><input id="cy" name="cert_year" placeholder="YYYY"></div>
+<div class="row"><label for="ci">Issuer</label><input id="ci" name="cert_issuer"></div></fieldset>"""
+# A radio pair beside a Name and a Date: something else in the block.
+RADIO_BLOCK = """<fieldset><legend>Signature</legend>
+<label for="nm">Your Name</label><input id="nm" name="sig_name">
+<label><input type="radio" name="agree" value="y"> I agree</label><label><input type="radio" name="agree" value="n"> I do not agree</label>
+<label for="dt">Date</label><input id="dt" name="sig_date" placeholder="MM/DD/YYYY"></fieldset>"""
+SIG_BLOCK_HTML = '<fieldset id="sig"><legend>Signature</legend>\n<label for="nm">Your Name</label><input id="nm" name="sig_name">\n\n</fieldset>'
 
 
 def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it_refuse():
@@ -416,13 +437,44 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
         check(not by["cert_name"].get("signature_name") and fill.plan.get(by["cert_name"]["ref"], {}).get("source") != signdate.NAME_SOURCE
               and by["sig_name"].get("signature_name") and fill.plan.get(by["sig_name"]["ref"], {}).get("value") == "Test Person",
               "a Certifications Name box beside an Issuer box is not the signature Name box; the block's own is")
-    check(not signdate.is_signature_box({"type": "text", "label": "Middle initial"})
-          and not signdate.is_signature_box({"type": "text", "label": "Initial availability"})
+    with mock_page(_page("nested", SELECTS, eeo=DISABILITY + NESTED_CERTS)) as page:
+        fill = _fill(page, full, [])
+        by = {f["name"]: f for f in fill.fields}
+        check(not by["cert_name"].get("signature_name") and fill.plan.get(by["cert_name"]["ref"], {}).get("source") != signdate.NAME_SOURCE
+              and _values(page)["cn"] == "" and by["sig_name"].get("signature_name"),
+              "a nested-row Certifications Name box (the Issuer in a sibling row of the fieldset) is not the signature Name box")
+    html = PAGE.replace("EEO", DISABILITY).replace("DATES", "")
+    assert SIG_BLOCK_HTML in html, "the fixture's signature block as expected"
+    html = html.replace(SIG_BLOCK_HTML, RADIO_BLOCK)
+    p = TEST_HOME / "signname-radio.html"
+    p.write_text(html, encoding="utf-8")
+    with mock_page(p) as page:
+        fill = _fill(page, full, [])
+        by = {f["name"]: f for f in fill.fields}
+        check("sig_name" in by and not by["sig_name"].get("signature_name") and _values(page)["nm"] == "",
+              f"a radio pair in the block is something else: the Name box is not marked ({_values(page)})")
+    # A marked box of another type (a textarea "Full name") the route cannot
+    # fill is Jack's, never the model's (fix of 5d099c5's review, BLOCK 1).
+    seen = []
+    html = PAGE.replace("EEO", DISABILITY).replace("DATES", SELECTS).replace(
+        '<label for="nm">Your Name</label><input id="nm" name="sig_name">', '<label for="nm">Full name</label><textarea id="nm" name="sig_name"></textarea>')
+    p = TEST_HOME / "signname-textarea.html"
+    p.write_text(html, encoding="utf-8")
+    with mock_page(p) as page:
+        fill = _fill(page, full, seen)
+        by = {f["name"]: f for f in fill.fields}
+        flag = next((fl for fl in fill.flags if fl.get("ref") == by["sig_name"]["ref"]), None)
+        check(by["sig_name"].get("signature_name") and by["sig_name"]["ref"] not in fill.plan and flag and flag.get("source") == "human"
+              and "Full name" not in seen and page.evaluate("document.getElementById('nm').value") == "",
+              f"a textarea Name box: marked, not filled, Jack's, never the model ({flag and flag.get('reason')}, {seen})")
+    check(signdate.is_signature_box({"type": "text", "label": "Middle initial"})
+          and signdate.is_signature_box({"type": "text", "label": "Please initial"})
+          and signdate.is_signature_box({"type": "text", "label": "Initial"})
           and signdate.is_signature_box({"type": "text", "label": "Initials"})
           and signdate.is_signature_box({"type": "text", "label": "Name", "placeholder": "Signature"})
           and signdate.is_signature_box({"type": "text", "label": "Name", "name": "applicant_signature"})
           and signdate.is_signature_box({"type": "text", "label": "Signatory"}),
-          "sign words on any of the box's own texts; a Middle initial box is no signature")
+          "sign words on any of the box's own texts; 'initial' as in 0530a70 (a Middle initial box is a false positive, Jack's to lift)")
     # The gate: a model fill in the Name box stops; a filled box that signs stops; an eeo category on the Name box passes.
     from test_gate import profile as gate_profile
     named_prof = gate_profile(personal={"first_name": "Test", "last_name": "Person"})
@@ -444,6 +496,9 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
     v = gate_run(record(name_box, {"value": "Test Person", "source": "model", "confidence": "high"}), named_prof)
     check(v["content_verdict"] == gate.WOULD_STOP and any("name lines only" in x for x in v["content_reasons"]),
           f"the gate: a model fill in the signature Name box stops ({v['content_reasons']})")
+    v = gate_run(record(dict(name_box, type="textarea", label="Full name"), {"value": "Test Person", "source": "model", "confidence": "high"}), named_prof)
+    check(v["content_verdict"] == gate.WOULD_STOP and any("name lines only" in x for x in v["content_reasons"]),
+          f"the gate: a model fill in a marked textarea Name box stops too ({v['content_reasons']})")
     v = gate_run(record({"ref": "n1", "type": "text", "label": "Signature", "required": True},
                         {"value": "Test Person", "source": "model", "confidence": "high"}), named_prof)
     check(v["content_verdict"] == gate.WOULD_STOP and any("nothing signs for you" in x for x in v["content_reasons"]),
