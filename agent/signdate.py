@@ -107,13 +107,40 @@ def value_for(field: dict, today: datetime.date | None = None) -> str | None:
     return None
 
 
-def plan_for(field: dict, fields: list[dict], today: datetime.date | None = None) -> dict | None:
+# Classifier categories the clock never fills past (fold of 2c24303's
+# finding 3): sensitive.decide hands these to Jack, and the clock ran
+# before it.
+NEVER_CATEGORIES = frozenset({"credential", "consent", "per_company"})
+
+
+def _own_text(field: dict) -> dict:
+    """The box's own words (label, help text, placeholder), not its name and not the surrounding form's (Jack, 2026-11-03)."""
+    return {"label": field.get("label"), "help_text": field.get("help_text"), "placeholder": field.get("placeholder")}
+
+
+def reads_legal(field: dict) -> bool:
+    """
+    Does the box's own label, help text or placeholder hit any LEGAL_GUARD
+    kind or PROFILE_PATHS line on any reading, or did the page's own read
+    of its raw label (raw_legal) hit one? Jack, 2026-11-03, on 2c24303's
+    BLOCK: such a date box is his, whatever block it sits in ("Year your
+    work visa expires", "Month your disability began").
+    """
+    own = _own_text(field)
+    joined = " ".join(str(v or "") for v in own.values())
+    return (sensitive.legal_guard(own) is not None or bool(sensitive.all_profile_lines(joined))
+            or bool(field.get("raw_legal")))
+
+
+def plan_for(field: dict, fields: list[dict], today: datetime.date | None = None,
+             category: str | None = None) -> dict | None:
     """
     The plan decision decision B gives this field, or None: the box sits in
     a signature block (the scan's `signature_block`, a container that also
     holds a Name / signature box) on a page holding an EEO-guarded
-    question, names one date part, and its widget states its format.
-    Never the model; never a secret box.
+    question, names one date part, its own text reads as no legal
+    question, and its widget states its format. Never the model; never a
+    secret box; never a credential / consent / per-company category.
     """
     if not field.get("signature_block") or field.get("secret") or (field.get("type") or "").lower() == "password":
         return None
@@ -122,6 +149,8 @@ def plan_for(field: dict, fields: list[dict], today: datetime.date | None = None
     # HARD_STOPS is Jack's, whatever its date part (fix of d9461c9's BLOCK:
     # the clock read past a stop the profile route would have kept).
     if sensitive.stop_reason(sensitive._question_text(field)) is not None or field.get("raw_stop"):
+        return None
+    if reads_legal(field) or category in NEVER_CATEGORIES:
         return None
     if not self_identification_page(fields):
         return None
@@ -132,9 +161,10 @@ def plan_for(field: dict, fields: list[dict], today: datetime.date | None = None
             "source": SOURCE, "fit": "exact", "profile_path": None, "clock_part": date_part(field.get("label"))}
 
 
-def verify(field: dict, decision: dict | None, fields: list[dict], today: datetime.date | None = None) -> bool:
+def verify(field: dict, decision: dict | None, fields: list[dict], today: datetime.date | None = None,
+           category: str | None = None) -> bool:
     """The gate's recomputation: the same plan from the record's own field, equal to the decision's value."""
     if not decision or decision.get("source") != SOURCE:
         return False
-    plan = plan_for(field, fields, today)
+    plan = plan_for(field, fields, today, category)
     return plan is not None and str(plan["value"]) == str(decision.get("value"))

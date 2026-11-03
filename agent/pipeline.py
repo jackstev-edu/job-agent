@@ -105,7 +105,7 @@ def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str]
         # a self-identification form takes today's date from the clock, in
         # the widget's own stated format; never the model, never a secret
         # box. The gate recomputes the same plan from the record.
-        dated = signdate.plan_for(field, fields)
+        dated = signdate.plan_for(field, fields, category=category)
         if dated is not None:
             plan[field["ref"]] = dated
             continue

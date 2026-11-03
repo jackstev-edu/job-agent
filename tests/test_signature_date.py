@@ -181,6 +181,74 @@ def test_a_date_box_the_backstop_stops_stays_jacks_and_the_clock_runs_before_the
     check.done()
 
 
+NAMED_DATE = """<label for="dt">Date</label><input id="dt" name="disability_signature_date" placeholder="MM/DD/YYYY">"""
+
+
+def test_a_date_box_whose_own_text_reads_as_a_legal_question_is_jacks_and_its_name_is_not_read():
+    # Fix of 2c24303's BLOCK (Jack, 2026-11-03: "a date box whose own label,
+    # help or placeholder hits any LEGAL_GUARD kind is mine", the box's own
+    # text only). On 2c24303 each negative was dated from the clock.
+    check = Checks()
+    prof = _prof()
+    month = {"ref": "m1", "type": "select", "label": "Month", "options": ["Select", "10", "11", "12"],
+             "signature_block": True, "required": True}
+    year = {"ref": "y1", "type": "select", "label": "Year", "options": ["Select", "2025", "2026", "2027"],
+            "signature_block": True, "required": True}
+    eeo = {"ref": "e1", "type": "select", "label": "Are you a protected veteran?", "options": ["Yes", "No"]}
+    cases = [
+        ("a work-visa year in the help text", dict(year, help_text="Year your work visa expires"), "personal_fact"),
+        ("a clearance year in the help text", dict(year, help_text="Year your security clearance was granted"), "personal_fact"),
+        ("a Department of Defense wording", dict(year, help_text="Year of your Department of Defense service"), "personal_fact"),
+        ("a pay wording in the help text", dict(month, help_text="Month of your salary review"), "personal_fact"),
+        ("an EEO date in the help text", dict(month, help_text="Month your disability began"), "personal_fact"),
+        ("the page's own raw legal flag", dict(month, raw_legal=True), "personal_fact"),
+        ("a credential category", dict(month), "credential"),
+        ("a consent category", dict(month), "consent"),
+        ("a per-company category", dict(month), "per_company"),
+    ]
+    with mock.patch.object(signdate, "_today", return_value=TODAY):
+        for what, box_, category in cases:
+            check(signdate.plan_for(box_, [box_, eeo], category=category) is None, f"{what}: no clock plan")
+            plan, flags, for_model = pipeline.route([box_, eeo], {box_["ref"]: category, "e1": "eeo"}, prof, set())
+            check(box_["ref"] not in plan and any(fl["ref"] == box_["ref"] for fl in flags) and not for_model,
+                  f"{what}: routed to Jack, never the model ({plan}, {[fl.get('reason') for fl in flags]})")
+        named = dict(month, name="disability_signature_month")
+        check(signdate.plan_for(named, [named, eeo])["value"] == "11",
+              "the box's name is not its own text: a name holding 'disability' still takes the clock")
+        check(signdate.plan_for(month, [month, eeo], category="eeo")["value"] == "11"
+              and signdate.plan_for(month, [month, eeo], category="personal_fact")["value"] == "11",
+              "an eeo or personal_fact category (the classifier's two readings of a signature date) still takes the clock")
+    # The gate's recomputation refuses the same boxes.
+    def record(box_, category="eeo"):
+        r = base()
+        r["fields"] += [dict(box_), eeo]
+        r["categories"].update({box_["ref"]: category, "e1": "eeo"})
+        r["plan"]["e1"] = {"value": "No", "source": "profile", "profile_path": "eeo.veteran_status", "fit": "bool"}
+        r["results"]["e1"] = {"filled": True, "unconfirmed": False}
+        r["snapshot"]["e1"] = "No"
+        value = "11" if box_["label"] == "Month" else "2026"
+        r["plan"][box_["ref"]] = {"value": value, "source": "clock", "fit": "exact", "profile_path": None}
+        r["results"][box_["ref"]] = {"filled": True, "unconfirmed": False}
+        r["snapshot"][box_["ref"]] = value
+        return r
+    with mock.patch.object(signdate, "_today", return_value=TODAY):
+        v = gate_run(record(dict(year, help_text="Year your work visa expires")))
+        check(v["content_verdict"] == gate.WOULD_STOP and any("not recomputed from the clock" in x for x in v["content_reasons"]),
+              f"the gate: a visa year dated from the clock stops ({v['content_reasons']})")
+        v = gate_run(record(dict(month, raw_legal=True)))
+        check(v["content_verdict"] == gate.WOULD_STOP, "the gate: the raw legal flag stops a clock fill")
+        v = gate_run(record(dict(month), category="credential"))
+        check(v["content_verdict"] == gate.WOULD_STOP, "the gate: a credential category stops a clock fill")
+        v = gate_run(record(dict(month, name="disability_signature_month")))
+        check(v["content_verdict"] == gate.WOULD_SUBMIT, f"the gate: a name holding 'disability' is not the box's own text ({v['content_reasons']})")
+    # The positive Jack asked for: a plain Date box on the disability
+    # self-identification form, its name carrying the form's word, fills.
+    with mock_page(_page("named", NAMED_DATE)) as page:
+        fill = _fill(page, prof, [])
+        check(_values(page).get("dt") == "11/02/2026", f"a plain Date box on the self-identification form still fills ({_values(page)})")
+    check.done()
+
+
 def test_the_gate_takes_a_clock_fill_only_when_it_recomputes_the_same_value():
     # Fails on 2d0c2ee: a plan with source "clock" was "not traced" and stopped.
     check = Checks()
@@ -212,8 +280,8 @@ def test_the_gate_takes_a_clock_fill_only_when_it_recomputes_the_same_value():
         v = gate_run(record())
         check(v["content_verdict"] == gate.WOULD_SUBMIT, f"today's month from the clock, in a signature block on an EEO page: passes ({v['content_reasons']})")
         v = gate_run(record(value="10"))
-        check(v["content_verdict"] == gate.WOULD_STOP and any("not traced" in x for x in v["content_reasons"]),
-              "another month: not the clock's, stops")
+        check(v["content_verdict"] == gate.WOULD_STOP and any("not recomputed from the clock" in x for x in v["content_reasons"]),
+              f"another month: not the clock's, stops ({v['content_reasons']})")
         v = gate_run(record(block=False))
         check(v["content_verdict"] == gate.WOULD_STOP, "outside a signature block: stops")
         v = gate_run(record(with_eeo=False))

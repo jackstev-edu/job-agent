@@ -734,6 +734,16 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
                 content.append(reason)
             continue
 
+        # Decision B's plan (source "clock") is trusted only when the gate
+        # recomputes it from the record's own field, whatever the category:
+        # a credential / consent / per-company category, or a box whose own
+        # text reads as a legal question, is never the clock's (fold of
+        # 2c24303's finding 3; the sensitive branch below checks the same
+        # for a box the gate calls legal).
+        if (decision or {}).get("source") == signdate.SOURCE and not signdate.verify(f, decision, fields, category=category):
+            content.append(f"{name}: signature date not recomputed from the clock (left for you)")
+            continue
+
         # An allowlisted consent checkbox: your exact entry in consent_allowlist
         # answers it, the way a profile line answers an eligibility question.
         # It's waived only when it was handed to you as consent (by category,
@@ -784,7 +794,7 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             # identification form's signature block, recomputed here from
             # the record's own field (the block, the page's EEO question,
             # the part, the widget's stated format) and equal to the fill.
-            clock_ok = signdate.verify(f, decision, fields)
+            clock_ok = signdate.verify(f, decision, fields, category=category)
             if not (traced_to_profile or learned_ok or clock_ok):
                 content.append(f"{name}: legal/eligibility/EEO/pay answer not traced to a "
                                f"profile line or to your own answer on this question (left for you)")
