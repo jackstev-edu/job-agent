@@ -106,7 +106,8 @@ def test_false_ticks_the_no_statement_only_and_the_gate_passes_the_group():
         record = pipeline.build_record(page, URL, "generic", "default", "", [fill.step], fill.events, dry_run=False)
         stopped = gate.decide(record, prof)
         check(stopped["content_verdict"] == gate.WOULD_STOP
-              and any("ticked differently from the group's planned answer" in r for r in stopped["content_reasons"]),
+              and any("more than one box of its group is ticked" in r or "ticked differently" in r
+                      for r in stopped["content_reasons"]),
               f"two boxes ticked: the gate stops ({stopped['content_reasons']})")
         page.uncheck("#y"); page.uncheck("#n")            # none ticked
         record = pipeline.build_record(page, URL, "generic", "default", "", [fill.step], fill.events, dry_run=False)
@@ -245,6 +246,41 @@ def test_the_gate_trusts_a_group_only_from_a_strict_profile_fit_and_keeps_the_la
     r["human_reviewed"] = ["o1"]
     r["plan"].pop("o1")
     check(gate_run(r)["content_verdict"] == gate.WOULD_SUBMIT, "a group Jack answered himself is his")
+    # Fold of 2d0c2ee's findings 1-3 (each fails on 2d0c2ee).
+    r = record()
+    r["human_reviewed"] = ["o1"]
+    r["census"][-2]["checked"] = True                   # two boxes ticked, the group reviewed
+    v = gate_run(r)
+    check(v["content_verdict"] == gate.WOULD_STOP and any("more than one box" in x for x in v["content_reasons"]),
+          f"a reviewed group with two ticks still stops ({v['content_reasons']})")
+    v = gate_run(record(label_source="aria-label"))
+    check(any("visible <label>" in x for x in v["content_reasons"]), "a grouped box labelled by aria-label alone stops")
+    for wording in ("Yes, I would like to receive job alerts by email", "Yes, I certify that my answers are true",
+                    "Yes, I consent to a background check"):
+        rr = record()
+        rr["fields"][-1]["options"][1] = wording
+        rr["plan"]["o1"]["value"] = wording
+        rr["snapshot"]["o1"] = wording
+        rr["census"][-1]["label_inner"] = rr["census"][-1]["label_content"] = wording
+        v = gate_run(rr)
+        check(v["content_verdict"] == gate.WOULD_STOP and any("opt-in, a certification or a stop" in x for x in v["content_reasons"]),
+              f"a grouped box reading as an opt-in / certification / stop wording stops ({wording!r})")
+    # The BLOCK-1 gate scenario itself: a neutral group, a model-sourced plan,
+    # the census branch the only stop.
+    neutral = record(source="model", fit=None)
+    neutral["fields"][-1].update(label="Shift preference", options=["Yes, I prefer mornings", "No, I prefer afternoons"])
+    neutral["plan"]["o1"]["value"] = neutral["snapshot"]["o1"] = "No, I prefer afternoons"
+    neutral["census"][-2]["label_inner"] = neutral["census"][-2]["label_content"] = "Yes, I prefer mornings"
+    neutral["census"][-1]["label_inner"] = neutral["census"][-1]["label_content"] = "No, I prefer afternoons"
+    neutral["categories"]["o1"] = "personal_fact"
+    neutral["plan"]["o1"]["confidence"] = "high"
+    v = gate_run(neutral)
+    check(v["content_verdict"] == gate.WOULD_STOP and any("strict fit" in x for x in v["content_reasons"])
+          and not any("not traced" in x for x in v["content_reasons"]),
+          f"a non-legal group with a model-sourced plan: the census branch alone stops it ({v['content_reasons']})")
+    loose = record(fit="bool_prefix")
+    v = gate_run(loose)
+    check(any("strict fit" in x for x in v["content_reasons"]), "a loose fit: the census branch's own reason")
     check.done()
 
 

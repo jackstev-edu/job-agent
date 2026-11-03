@@ -840,17 +840,31 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             # the label checks above like any other box: judged against the
             # group's planned answer, which must be a strict profile fit (fix
             # of ab0a09e's BLOCK 1: a model-sourced plan vouches for no tick);
-            # a group Jack answered himself (human_reviewed) is his.
+            # a group Jack answered himself (human_reviewed) is his, as long
+            # as one box of it is ticked at most. Its label must be a visible
+            # <label> (the sources that tick) and read like no marketing,
+            # certification or stop wording (fold of 2d0c2ee's findings 1-3).
             group, option = grouped[box["ref"]]
-            if group.get("ref") in reviewed:
-                continue
-            decision = plan.get(group.get("ref")) or {}
-            planned = decision.get("value")
-            trusted = decision.get("source") == "profile" and decision.get("fit") in sensitive.LEGAL_FITS
-            if planned is None or not trusted:
-                content.append(f"{name}: its checkbox group is not answered from a profile line with a strict fit")
-            elif box.get("checked") is not (normalize_label(option) == normalize_label(planned)):
-                content.append(f"{name}: ticked differently from the group's planned answer")
+            label_text = str(box.get("label_inner") or "")
+            ticked_in_group = sum(1 for b in census if isinstance(b, dict) and b.get("ref") in grouped
+                                  and grouped[b["ref"]][0] is group and b.get("checked") is True)
+            if box.get("label_source") not in POLICY_LABEL_SOURCES:
+                content.append(f"{name}: a grouped box needs a visible <label> ({box.get('label_source')})")
+            elif any(CONSENT_MARKETING.search(v) or CONSENT_CERTIFY.search(v) or sensitive.stop_reason(v)
+                     for v in sensitive.text_variants(label_text)):
+                content.append(f"{name}: a grouped box that reads as an opt-in, a certification or a stop wording")
+            elif ticked_in_group > 1:
+                content.append(f"{name}: more than one box of its group is ticked")
+            elif group.get("ref") in reviewed:
+                pass
+            else:
+                decision = plan.get(group.get("ref")) or {}
+                planned = decision.get("value")
+                trusted = decision.get("source") == "profile" and decision.get("fit") in sensitive.LEGAL_FITS
+                if planned is None or not trusted:
+                    content.append(f"{name}: its checkbox group is not answered from a profile line with a strict fit")
+                elif box.get("checked") is not (normalize_label(option) == normalize_label(planned)):
+                    content.append(f"{name}: ticked differently from the group's planned answer")
         elif (normalize_label(box.get("label_inner")) not in allow
               and not consent_box_ok(box) and not attestation_box_ok(box)):
             reason = f"{name}: not on consent_allowlist, and not a terms / privacy consent"
