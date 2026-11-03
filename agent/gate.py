@@ -880,8 +880,14 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             content.append(f"{name}: hidden, and ticked")
         # Decision E (Jack, 2026-11-02): a box carrying his own review mark
         # new since before the pause is his answer, ticked or unticked as
-        # he left it; the hidden-and-ticked check above still applies.
-        if box.get("ref") and box.get("ref") in reviewed:
+        # he left it; the hidden-and-ticked check above still applies. Per
+        # element only (Jack, 2026-11-03): a checkbox group's ref is its
+        # first box's, and the wizard marks the group when he touches ANY
+        # of its boxes, so a grouped box is never waived here (fix of
+        # aa46374's BLOCK: the first box skipped every check on a sibling's
+        # touch); it is judged with its group below, where a group he
+        # answered passes only with its labels clean and one box ticked.
+        if box.get("ref") and box.get("ref") in reviewed and box.get("ref") not in grouped:
             continue
         if box.get("in_button_group"):
             group = plan.get(box.get("group_ref"))

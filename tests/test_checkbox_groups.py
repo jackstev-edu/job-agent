@@ -23,7 +23,7 @@ from unittest import mock
 
 from _fill_run import PROFILE, map_from_profile
 from _harness import REPO, TEST_HOME, Checks, mock_page, run_as_script
-from agent import extract, filler, gate, memory, pipeline, sensitive
+from agent import extract, filler, gate, memory, pipeline, sensitive, wizard
 from agent.profile import Profile
 import yaml
 
@@ -281,6 +281,73 @@ def test_the_gate_trusts_a_group_only_from_a_strict_profile_fit_and_keeps_the_la
     loose = record(fit="bool_prefix")
     v = gate_run(loose)
     check(any("strict fit" in x for x in v["content_reasons"]), "a loose fit: the census branch's own reason")
+    check.done()
+
+
+def test_decision_e_waives_per_element_only_never_a_sibling_of_a_touched_box():
+    # Fix of aa46374's BLOCK (Jack, 2026-11-03: "E's waiver is per element
+    # only"): the group's ref is its first box's, and a touch on box o2 put
+    # "o1" in human_reviewed, so box o1 skipped every census check. Each
+    # negative passes the gate on aa46374.
+    from test_gate import base, box, run as gate_run
+    check = Checks()
+    yes, no = "Yes, I have a disability", "No, I do not have a disability"
+
+    def record(first_label=yes, first_checked=False, second_checked=True, **first_over):
+        r = base()
+        r["fields"].append({"ref": "o1", "type": "radio", "widget": "checkboxes", "label": "Do you have a disability?",
+                            "options": [first_label, no], "option_refs": ["o1", "o2"], "required": True})
+        r["categories"]["o1"] = "eeo"
+        r["snapshot"]["o1"] = no if second_checked else (first_label if first_checked else "")
+        r["census"] += [dict(box(first_label, ref="o1", checked=first_checked), **first_over),
+                        box(no, ref="o2", checked=second_checked)]
+        r["human_reviewed"] = ["o1"]                     # Jack touched o2: the wizard marks the group's ref
+        return r
+
+    v = gate_run(record())
+    check(v["content_verdict"] == gate.WOULD_SUBMIT, f"the positive: he ticked one box of a required group, the group resolves ({v['content_reasons']})")
+    marketing = "Yes, I would like to hear about future opportunities"
+    v = gate_run(record(first_label=marketing, first_checked=True, second_checked=False))
+    check(v["content_verdict"] == gate.WOULD_STOP and any("opt-in, a certification or a stop" in x for x in v["content_reasons"]),
+          f"the first box, an opt-in the page ticked, is not waived by his touch on the second ({v['content_reasons']})")
+    v = gate_run(record(first_checked=True, second_checked=True))
+    check(v["content_verdict"] == gate.WOULD_STOP and any("more than one box" in x for x in v["content_reasons"]),
+          "both ticked: the first box's own check stops")
+    v = gate_run(record(first_checked=True, label_source="aria-label"))
+    check(any("visible <label>" in x for x in v["content_reasons"]), "the first box labelled by aria-label alone: judged, stops")
+    v = gate_run(record(described="see the handbook"))
+    check(any("fine print" in x for x in v["content_reasons"]), "the first box with fine print: judged, stops")
+    # A lone box (no group) with his mark is still his, as before.
+    r = base()
+    r["census"].append(box("I agree to the handbook", ref="c9", checked=True))
+    r["human_reviewed"] = ["c9"]
+    check(gate_run(r)["content_verdict"] == gate.WOULD_SUBMIT, "a lone box carrying his own mark is waived (unchanged)")
+    check.done()
+
+
+SHIFT_GROUP = """<fieldset><legend>Shift preference</legend>
+<input type="checkbox" id="am" name="shift_am" required><label for="am">Yes, I prefer mornings</label>
+<input type="checkbox" id="pm" name="shift_pm"><label for="pm">No, I prefer afternoons</label></fieldset>"""
+
+
+def test_jack_ticking_one_box_of_a_required_group_under_the_pause_moves_the_job_on():
+    # The positive Jack asked for (2026-11-03): a required checkbox group
+    # the profile does not answer pauses the gate; he ticks one box;
+    # Continue resolves the group and the job goes on through Submit.
+    # Fails on aa46374 only in what it proves about siblings (the gate case
+    # above); here it guards that the per-element rule costs nothing.
+    from test_pick_up import _page, _run
+    check = Checks()
+    with _run(_page(city=SHIFT_GROUP), auto_submit=lambda: True) as (page, w):
+        out = w.run()
+        check(out.status == wizard.WAITING and w.pending["kind"] == "gate", f"the gate pause on step 2 ({out.status}: {out.reason})")
+        check(_ticks(page) == {"am": False, "pm": False}, "the agent ticked nothing of a group the profile does not answer")
+        page.check("#pm")                                  # Jack's own click, under the pause
+        page.wait_for_timeout(300)
+        out = w.continue_from({})
+        check(out.status == "submitted", f"after Continue the job goes on through Submit ({out.status}: {out.reason})")
+        group_ref = next((r for r in w.human_reviewed), None)
+        check(group_ref is not None and len(w.human_reviewed) == 1, f"the group counts as his once ({w.human_reviewed})")
     check.done()
 
 

@@ -322,7 +322,18 @@ class Wizard:
             rec["snapshot"] = {**self.snapshots, **(rec.get("snapshot") or {})}
             now = rec.get("census") or []
             showing = {b.get("ref") for b in now if isinstance(b, dict) and b.get("ref")}
-            rec["census"] = [b for r, b in self.census.items() if r not in showing] + list(now)
+            # A checkbox group's boxes (item 5) are judged against their
+            # group field; a page record holds only this page's fields, so
+            # an earlier page's group boxes travel only with their field
+            # (the full record), else they would hit the consent rule on
+            # every later page (Jack's 2026-11-03 positive for E: a group
+            # he ticked resolves and the job moves on). Each such page
+            # passed its own gate with the group in hand.
+            included = {id(s) for s in steps}
+            elsewhere = {r for s in self.out.steps if id(s) not in included
+                         for f in (s.get("fields") or []) if f.get("widget") == "checkboxes"
+                         for r in (f.get("option_refs") or [])}
+            rec["census"] = [b for r, b in self.census.items() if r not in showing and r not in elsewhere] + list(now)
             # The pre-fill states of earlier pages' button-pair boxes too, so
             # the gate's pair exemption can still find a pair's "before".
             pre = rec.get("prefill_census")
