@@ -3616,3 +3616,22 @@ the Memory page buttons; 12 the owed folds (the moved-pause re-prompt
 dropped by Jack) and the four unwrapped scripts; 13 the report. Waymo
 and the Workday widgets (phone-code multiselect, dropdown buttons, year
 boxes, repeating sections) are the next round, from item 4's snapshots.
+
+## Round of 2026-11-03 (Jack's decisions on the report of the 2026-11-02 round)
+
+Step 1: the full suite alone at 941a777 (518 passed, 0 failed, 35:01);
+941a777 pushed. Items a-j (records; D's last attempt; Always tick
+refusals; E per element; B's own-text guard; the signature Name box; C's
+four holes; snapshot stripping; item 9 committed; this log).
+
+- Decision D's attestation route is OFF (gate.ATTESTATION_ROUTE_ON =
+  False; attestation_ok returns False for every label). 16b6ac3, the
+  third and last fix attempt Jack allowed, was BLOCKed (a bare place
+  "the statements in this application" still passed the subject slot),
+  so per his 2026-11-03 decision the route is switched off with E and
+  Always tick kept; the grammar stays as _attestation_grammar_ok, read
+  by tests only. An attestation box Jack ticks himself is now offered
+  for "Always tick this exact wording" like any box neither class
+  covers. Turning the route back on is Jack's call; the review's
+  smallest fix (drop the bare-place alternative from the the/this
+  branch) is recorded in reviews.md of this round's scratchpad.

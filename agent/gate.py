@@ -401,16 +401,40 @@ def _attestation_sentence_ok(sentence: str) -> bool:
     return all(_attestation_clause_ok(c) for c in _CLAUSE_SPLIT.split(sentence))
 
 
+# The attestation route is OFF (Jack, 2026-11-03): the fourth BLOCK on
+# decision D's check (16b6ac3's review: "the statements in this
+# application" still passed, a subject that can point at a sentence
+# printed on the page) used up the three fix attempts Jack allowed, and
+# his recorded consequence is that the check returns False, with E and
+# Always tick kept. The grammar below stays as the record of the attempt
+# (`_attestation_grammar_ok`, reachable by tests only); no tick, plan or
+# offer reads it while this is False. Turning it back on is Jack's call.
+ATTESTATION_ROUTE_ON = False
+
+
 def attestation_ok(label: Any) -> bool:
     """
-    Decision D's class: does every sentence of this label read as a
-    truth-and-completeness attestation or a consequence-of-
+    Decision D's class, as the gate and submit.py's tick helper read it:
+    False for every label while ATTESTATION_ROUTE_ON is False (Jack,
+    2026-11-03), so no attestation box is ever planned as a tick or
+    ticked. With the route on it would be _attestation_grammar_ok.
+    """
+    if not ATTESTATION_ROUTE_ON:
+        return False
+    return _attestation_grammar_ok(label)
+
+
+def _attestation_grammar_ok(label: Any) -> bool:
+    """
+    The check behind the route: does every sentence of this label read as
+    a truth-and-completeness attestation or a consequence-of-
     misrepresentation statement, by the two fixed grammars, with no
     forbidden clause, no marketing, legal-guard or profile-line match,
     no HARD_STOPS kind but the certify / attest / acknowledge entry and
     no criminal-record match, on any reading of the text? Nothing about
     the box's state, requiredness or fine print is judged here (see
-    attestation_box_ok).
+    attestation_box_ok). Known hole (16b6ac3's review): a bare place
+    ("the statements in this application") still passes.
     """
     text = str(label or "")
     # The length first, before any pattern runs (Jack, 2026-11-03): over
