@@ -117,6 +117,12 @@ def plan_for(field: dict, fields: list[dict], today: datetime.date | None = None
     """
     if not field.get("signature_block") or field.get("secret") or (field.get("type") or "").lower() == "password":
         return None
+    # The regex backstop and the page's own raw-stop flag as every other
+    # route reads them: a box whose label, help, placeholder or name hits
+    # HARD_STOPS is Jack's, whatever its date part (fix of d9461c9's BLOCK:
+    # the clock read past a stop the profile route would have kept).
+    if sensitive.stop_reason(sensitive._question_text(field)) is not None or field.get("raw_stop"):
+        return None
     if not self_identification_page(fields):
         return None
     value = value_for(field, today)

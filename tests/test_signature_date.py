@@ -158,6 +158,29 @@ def test_text_boxes_take_the_date_only_where_the_widget_states_its_format():
     check.done()
 
 
+def test_a_date_box_the_backstop_stops_stays_jacks_and_the_clock_runs_before_the_classifier():
+    # Fix of d9461c9's BLOCK: a "Month" box whose help text hits HARD_STOPS
+    # was dated from the clock; the classifier's category did not matter.
+    # Fails on d9461c9 (the stop was read past).
+    check = Checks()
+    prof = _prof()
+    month = {"ref": "m1", "type": "select", "label": "Month", "options": ["Select", "10", "11", "12"],
+             "signature_block": True, "help_text": "By selecting a date you acknowledge the terms above"}
+    eeo = {"ref": "e1", "type": "select", "label": "Are you a protected veteran?", "options": ["Yes", "No"]}
+    with mock.patch.object(signdate, "_today", return_value=TODAY):
+        check(signdate.plan_for(month, [month, eeo]) is None, "a HARD_STOPS phrase in the help text: no clock plan")
+        check(signdate.plan_for(dict(month, help_text="", raw_stop=True), [month, eeo]) is None,
+              "the page's raw-stop flag: no clock plan")
+        plan, flags, for_model = pipeline.route([month, eeo], {"m1": "personal_fact", "e1": "eeo"}, prof, set())
+        check("m1" not in plan and any(fl["ref"] == "m1" for fl in flags) and not for_model,
+              f"routed: Jack's, never the model ({[fl.get('reason') for fl in flags]})")
+        clean = dict(month, help_text="")
+        plan, flags, for_model = pipeline.route([clean, eeo], {"m1": "personal_fact", "e1": "eeo"}, prof, set())
+        check(plan.get("m1", {}).get("source") == "clock" and not any(f["ref"] == "m1" for f in for_model),
+              "the same box with no stop, classified personal_fact: dated from the clock, never handed to the mapper")
+    check.done()
+
+
 def test_the_gate_takes_a_clock_fill_only_when_it_recomputes_the_same_value():
     # Fails on 2d0c2ee: a plan with source "clock" was "not traced" and stopped.
     check = Checks()

@@ -366,7 +366,8 @@ _SCAN_JS = safe(r"""
       const tag = __ja.tag(p);
       if (tag === 'FORM') return false;             // the whole form is no block
       const boxes = [...p.querySelectorAll('input, textarea')].filter(plainBox);
-      if (boxes.length > 12) return false;
+      // Twelve controls at most, dropdowns counted (fold of d9461c9's finding 3).
+      if (boxes.length + p.querySelectorAll('select').length > 12) return false;
       if (boxes.some(b => b !== el && NAME_RX.test(labelFor(b).trim()))) return true;
       // A fieldset, group or section without a name box is the box's own
       // block: a name box in a sibling block says nothing about this one.
