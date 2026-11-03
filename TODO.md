@@ -3635,3 +3635,206 @@ four holes; snapshot stripping; item 9 committed; this log).
   covers. Turning the route back on is Jack's call; the review's
   smallest fix (drop the bare-place alternative from the the/this
   branch) is recorded in reviews.md of this round's scratchpad.
+
+Reviewer FLAGs of the round, one line each (unedited outputs in the
+session scratchpad's reviews.md; none folded unless named as a fold
+commit above or below):
+- fb2e3b9 (a): the 2026-11-03 block is a paraphrase, not Jack's words;
+  Jack confirms it as written or his verbatim answers are added here.
+- fb2e3b9 (a): the Design-rules per-company bullet names one exception
+  (decision C) while abb7fd0 keeps a DoD / clearance-only past-employer
+  wording learnable; add that second exception to the bullet (Jack's edit).
+- fb2e3b9 (a): "a typed answer at the same host only" vs the kept shared
+  Workday / Avature "acme" scope; amend to "the same tenant" or prefix the
+  portal family (Jack's call).
+- fb2e3b9 (a): the Design-rules D line's "one of two fixed patterns" is
+  2026-11-03 wording inside a "Jack, 2026-11-02:" parenthetical; mark it.
+- fb2e3b9 (a): E's "resolves and the job moves on" reads as one tick
+  clearing every stop; say "that group's required stop only".
+- fb2e3b9 (a): the fourth-BLOCK switch-off rule for D is a process change
+  the Workflow section does not note.
+- 16b6ac3 (b, BLOCKed, route since off): _WHERE's "throughout the
+  application process" with a passive "provided"; two of the nine negatives
+  were already refused on 0c7177b; the underscore test case was redundant
+  (fixed in 2bbaa21's tests).
+- 2bbaa21 (b off): submit.py:115, corrections.py:177, memory.py:264-266
+  and the Memory page text (gui.py:771) still describe the attestation
+  class as live; add "(off since 2026-11-03)".
+- 5da85c0 / d9c5b10 (c): overreach in the safe direction: bare "check"
+  refuses "Check this box to confirm you have read the handbook";
+  unanchored e-?sign refuses design / resign; `\bcontact` refuses "my
+  contact information"; Jack accepts or bounds them.
+- 5da85c0 (c): consent_allowlist lines written before 5da85c0 (the
+  2026-11-02 button, or by hand) are not re-checked against
+  ALLOWLIST_FORBIDDEN when ticked; Jack confirms hand-written lines are
+  his, or the gate skips a refused entry and logs it.
+- 5da85c0 (c): an offer made before 5da85c0 whose wording is now refused
+  stays listed on the Memory page; its button returns an error.
+- 398e6c5 (d): the wizard comment "each such page passed its own gate
+  with the group in hand" is false for a picked-up page and a ready park
+  (no box escapes: the full record judges every group box); reword.
+- 398e6c5 (d): test gaps: no wizard test that an earlier page's lone box
+  still travels into a later page's record; the wizard test does not
+  check the pause is the group's (added in d37a30b).
+- 9e3d5fb (e): test gaps folded in e2b51f4 (the PROFILE_PATHS-only help
+  text; the clock branch's own reason; a consent gate case).
+- 0530a70 / 5d099c5 (f): the mocked classifier never shows what the real
+  classifier calls a self-identification Name box; the signature block is
+  any block holding only a Name box and date parts on a page with an EEO
+  question (5d099c5 narrowed it from any block with a date box), which is
+  the implementer's structural premise, for Jack to confirm.
+- 0698a98 / b4623af (g): the list-doubt page test's address names no
+  tenant, so only the log line proves the rule there (the route cases
+  prove the rest); the gate reads final_url while the route reads page.url
+  (both recompute from their own address).
+- tests/test_wizard.py::test_a_page_that_moves_during_the_wait_is_checked_again_not_scanned
+  depends on timing (it failed once under four concurrent reviewers on
+  2026-11-02 with a different log line); it needs a real wait on the
+  moved page, not a race with the form render.
+- d9c5b10 (c, first fix): the at-will term was quietly bounded (folding a
+  logged FLAG); reverted in 7d34acc. The test file now holds guard rows
+  for the alternatives the pattern kept, so a dropped alternative fails.
+- b499329 / ba21953 (i, item 9): _HAS_FIELDS_JS is still not wrapped in
+  extract.safe (fails safe: an unreadable probe never confirms); it
+  belongs with item 12's four unwrapped scripts. The address rule now
+  counts only on a changed shape and an account pause with a pasted code
+  types the code first (folded as the safe direction in ba21953; Jack
+  confirms the reading of his 2026-11-01 item 3).
+- 99c5a77 (h): a PROFILE value redacted inside a select's option list or
+  a radio label has always marked the chosen answer by its position in a
+  snapshot (older than this round); the fold keeps that for profile
+  values and never redacts an option against a learned or planned answer.
+  Decision for Jack: stop redacting option entries altogether (the form's
+  vocabulary), or accept the positional mark for profile values.
+- 99c5a77 (h): a learned or planned "Yes" / "N/A" (three characters)
+  redacts every dumped string holding "yes" or "n/a", which blanks much of
+  the yes / no structure mocks are built from; Jack's floor as written.
+- d37a30b (d fold): test gaps: the human_marked remap on a resume has no
+  case in test_remap.py; no negative shows a mark present before the pause
+  or the agent's own tick under the agent flag stays out of human_marked;
+  the "out of a group" lone-box case is a guard with no named mutation
+  (one: waiving every lone box when any ref is reviewed fails it); a
+  duplicate gate call and an OR-ed log check in test_checkbox_groups.py.
+- d37a30b (d fold): a mark means "he touched this element", not "he left
+  it ticked": a box he ticked and unticked that the page re-ticks before
+  the census read counts as his (the same meaning E has for a lone box);
+  a later fix would record each marked box's state at his last touch.
+- e2b51f4 (e fold): decision for Jack: a signature-block date box the
+  classifier calls legal_declaration (its own description lists
+  e-signature) or unknown (the classifier failed) is still the clock's by
+  structure; adding those categories to signdate.NEVER_CATEGORIES would
+  refuse the very box decision B targets. Recommendation: leave them out
+  and say so in the comment. The same set also refuses the signature Name
+  box under work_authorization / compensation (safe, untested); the
+  "export control" route case pins only "not the clock's".
+- 5d099c5 / second fix (f): decisions for Jack: (1) "Middle initial" is a
+  false positive of the sign words (`\binitials?\b`, as 0530a70 had it;
+  the narrowing in 5d099c5 was reverted): every form with a Middle
+  initial text box leaves it to Jack. Recommendation: lift it by allowing
+  "middle initial" explicitly. (2) The Name box's closed word list ("Full
+  legal name", "Name of applicant" ...) is wider than decision B's NAME_RX
+  for the date side, so for those labels the Name box fills while the
+  block's dates stay Jack's; widen NAME_RX to the same list, or narrow the
+  Name box to NAME_RX. (3) A marked Name box on a page with no EEO
+  question goes to the mapper as before item f; flag it to Jack whatever
+  the page, or keep. (4) A Name box the classifier calls
+  legal_declaration is planned from the name lines and the gate accepts
+  it through verify_name (the main session resolved the planner / gate
+  disagreement toward agreement); confirm.
+- b4623af / second fix (g): decision for Jack: the yes / no grammar admits
+  "worked at", "been employed at", "(been) an employee of" and "were you
+  (ever) employed by" as variants of the decided phrases ("have you worked
+  for / been employed by / were you formerly employed at"); confirm them
+  or have them removed. Beside the label only placeholders pass now (any
+  help text makes the question his), which is stricter than his wording.
+- f8fa10c (h fold): a typed or learned value echoed into a later select's
+  options (a references page listing employers typed earlier) is no longer
+  stripped there (a value leak, local and gitignored; the position leak
+  was the worse one). Only the learned.yaml-unreadable route to "no file"
+  is tested; a failing step or fill part is not.
+- ba21953 (i fix): "no shape counts as changed" is now limited to the
+  no-fields park (7ef5c9b); Jack confirms that reading of his address rule
+  for a cap, CAPTCHA or account pause whose page still shows the form.
+- Decision C (item g) STOPPED after three failed fix attempts on the same
+  BLOCK (0698a98, b4623af, 62a4a5b; each review found the next hole of the
+  same class, a second company or a padded tenant turning into a "No").
+  Open at 62a4a5b, from its review: a second company in plain prose in the
+  section ("Former Contoso employees", "Northwind - part of Contoso"); a
+  help text, placeholder or option with no ASCII letter passes the
+  placeholder allowlist as empty (a Cyrillic help text naming Contoso);
+  a four-letter company with a pad of four or more letters
+  (acme-global.icims.com) reads as a long tenant; the name attribute is
+  not read for doubt; the "working for" grammar change has no guard test.
+  Decision for Jack: switch decision C's route off (employers.plan_for
+  returns None, the gate keeps its per-company stop) until these are
+  closed, or accept the holes as listed. Recommendation: switch it off.
+- Item c ("Always tick" refusals) STOPPED after three failed fix attempts
+  on the same BLOCK (d9c5b10, 7d34acc, df987d9; each review found the next
+  plain-language form of a wording Jack named). Open at df987d9, from its
+  review: four shapes the parent 7d34acc refused now pass ("Noncompetition",
+  "call or WhatsApp me", "reverify my employment history", an embedded "at
+  will" such as "employment_at_will"), and plain forms still pass ("reach
+  out to me", "end the employment relationship at any time", "jury trial",
+  "class action", "urine test", "credit file", "speak with my former
+  employers", "the right to obtain my records", "my tick ... has the same
+  effect as my written name", "not to work for a rival"). The regression
+  property in the test covers only the two older patterns and a fixed
+  sample list. Decision for Jack: a blacklist of stems is not converging;
+  refuse at the route anything that does not pass a narrow shape (an
+  agreement word plus a document word such as terms / policy / notice /
+  handbook / code of conduct, and no other clause), or switch "Always tick"
+  off until then. Recommendation: the narrow shape. CONSENT_DECLARE in the
+  route also refuses "I confirm that I have read and accept the Privacy
+  Policy", a label holding a year, "agency" (its bare `\bage`), which are
+  now always Jack's; `\ballow`, `\bcompet` (competencies), "withdraw my
+  consent at any time by", "screen reader" are refused too (overreach,
+  acceptable by Jack's rule).
+- Item f (the signature Name box) STOPPED after three failed fix attempts
+  on the same BLOCK (5d099c5, 98febb9, f00dbfa; each review found another
+  path by which a Name box reaches the model). Open at f00dbfa, from its
+  review: on a hold pass (protect_held after a park or pick-up) or in
+  follow mode the route sees only the open fields, so when the EEO
+  question already holds a value the page does not read as a
+  self-identification form and a marked Name box goes to the mapper (the
+  gate still stops it on the full record: not a stop turned into a pass,
+  but a model fill in a box that signs). Also: in a plain-div layout with
+  no fieldset / section / group within six levels the sole scope falls
+  back to the smallest block, so a nested-row Certifications Name box can
+  be filled and its Year dated; a vacuous clause in one test assertion.
+  Decision for Jack: pass the whole scanned page into route for the
+  self-identification test (and flag any marked Name box whatever the
+  page), or switch the Name route off (name_plan_for returns None; the
+  gate's stop on a marked box stays). Recommendation: the whole-page
+  argument, next round.
+- 7ef5c9b (i fold): the no-form park is told by the scan's own reason ("a
+  page with no fields"), which is the scan's view, not the probe's: a form
+  the scan skips (inside a header / nav / footer area) parks with that
+  reason and the address rule can confirm it; record the probe's result in
+  the park's pending. The moved-pause test rebuilds the pending from a
+  parked one (with a fill), not the exact three keys a real moved pause
+  carries.
+- 2119361 (i, second pick-up fix): the address rule counts two readable
+  shapes that differ at the same address as "changed", so a follow-up field
+  Jack's own answer revealed on a form at a /confirmation path with the
+  sentence would confirm it (within his rule as written); count only a
+  changed URL or a form gone, if he wants it closed. The test fails only
+  the first read after Continue, so the pick-up half is untested; the
+  docstrings of _confirmed_strict and _pick_up still describe the earlier
+  rules.
+- 44892f3 (h fold): a heading, <th> or <summary> that is itself an
+  option's title (card-style tiles, a Likert matrix) is still stripped
+  against the learned answers and can mark the chosen tile; accepted by
+  design, for Jack's note.
+- 24e483f (h, fourth fold): two privacy shapes left open after four
+  folds (each pass found a rarer markup; the files are local and
+  gitignored): a remove chip or a value display inside a wrapping label
+  that also holds a radio / checkbox / option row is a choice and keeps a
+  learned answer in clear; a link or role=button option group in a plain
+  fieldset (outside Ashby's container) is stripped against learned values
+  again and can mark the chosen one by position. Smallest fixes: count
+  only presentational descendants (role presentation / none / img, no
+  text, no aria-label) for the inside-a-label rule; blank the text and
+  aria-label of role=button / link elements outside the button-group
+  container as a chooser's are. Also: no negative test for either; the
+  per-element querySelectorAll over a wrapping label is quadratic on a
+  page with one huge labelled widget (cache per label).
