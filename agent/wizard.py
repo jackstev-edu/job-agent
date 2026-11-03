@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING
 
 from . import (accounts, approve, browser as browser_mod, chooser, corrections, extract,
                follow, gate, google, gui as gui_mod, intake, ledger, pages, pause as pause_mod,
-               pipeline, snapshot as snapshot_mod, submit as submit_mod)
+               memory, pipeline, snapshot as snapshot_mod, submit as submit_mod)
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -379,7 +379,7 @@ class Wizard:
             kind = self.page.evaluate(pages._KIND_JS)
             if not isinstance(kind, dict) or not isinstance(kind.get("pw"), int) or kind["pw"] > 0:
                 return
-            snap = snapshot_mod.dump(self.page, getattr(self.prof, "data", None) or {})
+            snap = snapshot_mod.dump(self.page, getattr(self.prof, "data", None) or {}, self._strip_values())
             if snap.get("error"):
                 self.out.log.append(f"snapshot not written ({_clean(str(snap['error']))})")
                 return
@@ -389,6 +389,31 @@ class Wizard:
             self.out.log.append(f"snapshot written: {path.name}")
         except Exception as e:
             self.out.log.append(f"snapshot not written ({type(e).__name__})")
+
+    def _strip_values(self) -> list:
+        """
+        What a snapshot must also strip (Jack, 2026-11-03): every learned
+        answer, and this job's typed values so far (every page's read-back
+        and every planned value, the fill in hand included). None of these
+        is ever a password (no plan or read-back holds one). A part that
+        can't be read contributes nothing; the strip is never skipped.
+        """
+        out: list = []
+        try:
+            out.extend(self.snapshots.values())
+            for step in self.out.steps:
+                out.extend(d.get("value") for d in (step.get("plan") or {}).values() if isinstance(d, dict))
+            held = (self.pending or {}).get("fill")
+            if held is not None:
+                out.extend(d.get("value") for d in (getattr(held, "plan", None) or {}).values() if isinstance(d, dict))
+                out.extend((getattr(held, "snapshot", None) or {}).values())
+        except Exception:
+            pass
+        try:
+            out.extend(e.get("answer") for e in memory.Learned.load().entries if isinstance(e, dict))
+        except Exception:
+            pass
+        return out
 
     def _parked(self, reason: str) -> Outcome:
         # The terminal's park; a GUI park logs the same line in

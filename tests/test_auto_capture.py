@@ -119,6 +119,47 @@ def test_a_password_page_writes_none_and_a_dump_failure_never_stops_the_job():
     check.done()
 
 
+def test_a_capture_strips_the_jobs_typed_values_and_every_learned_answer():
+    # Jack, 2026-11-03: snapshots also strip learned answers and the
+    # current fill's typed values. Fails on d9c5b10 (dump took no extra
+    # values; the wizard passed none).
+    from agent import memory
+    check = Checks()
+    folder = TEST_HOME / "snaps-extra"
+    shutil.rmtree(folder, ignore_errors=True)
+    store = memory.Learned.load()
+    # A label of four words: a shorter one is removed on load (item 2's rule).
+    store.entries.append({"id": "t-extra", "kind": "answer", "key": "[\"what is your favourite paint colour\", \"text\", []]",
+                          "question": "What is your favourite paint colour", "type": "text", "options": [],
+                          "answer": "LEARNED-EXTRA-SENTINEL", "line": None, "legal": False, "scope": "any",
+                          "host": "", "portal": "", "category": "personal_fact", "first_seen": "2026-11-03T00:00:00",
+                          "last_seen": "2026-11-03T00:00:00", "seen": 1, "uses": 0, "posting": "", "change": "filled_blank"})
+    store.save()
+    seen: list[list] = []
+    real = snapshot.dump
+
+    def spy(page, profile_data, extra_values=()):
+        seen.append(list(extra_values))
+        return real(page, profile_data, extra_values)
+
+    with _headless(_routes({"/steps": _page(city=CITY_OPTIONAL)})) as ctx:
+        ctx.add_init_script(ledger.ACTIVITY_INIT_SCRIPT)
+        page = ctx.new_page()
+        page.goto(f"{HOST}/steps")
+        with mock.patch("agent.classify.classify_fields", classify_by_label), \
+                mock.patch("agent.mapper.map_fields", map_from_profile), \
+                mock.patch.object(wizard, "FORM_WAIT_S", 1), mock.patch.object(snapshot, "dump", side_effect=spy), \
+                redirect_stdout(io.StringIO()):
+            w = _wizard(page, folder)
+            out = w.run()
+    check(out.status == "submitted", f"the mock run ends submitted ({out.status}: {out.reason})")
+    check(len(seen) >= 3 and all("LEARNED-EXTRA-SENTINEL" in s for s in seen),
+          f"every capture carries the learned answer ({len(seen)} captures)")
+    check(any("Test" in s for s in seen[1:]), "a later capture carries the first page's read-back value (the typed first name)")
+    check(not any(any(isinstance(v, str) and "hunter" in v for v in s) for s in seen), "nothing like a password is ever gathered (no plan holds one)")
+    check.done()
+
+
 class _FakePage:
     def __init__(self, raises):
         self.raises, self.calls, self.url = list(raises), 0, "https://x.example/apply?x=1#f"

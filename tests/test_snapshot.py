@@ -149,5 +149,44 @@ def test_a_dump_holds_structure_and_no_value_from_the_profile_the_boxes_or_the_h
     check.done()
 
 
+ECHO_PAGE = TEST_HOME / "snapshot_echo.html"
+ECHO_PAGE.write_text("""<!doctype html><html><head><meta charset="utf-8"><title>Review</title></head><body><main>
+<h2>You told us: TYPED-ECHO-SENTINEL</h2>
+<h3>Your answer: LEARNED-ECHO-SENTINEL</h3>
+<label for="st">State</label><button id="st" aria-haspopup="listbox" data-automation-id="stateDropdown">ZQ</button>
+<ul role="listbox"><li role="option">Alabama</li><li role="option">ZQ</li></ul>
+<label for="nm">Nickname</label><input id="nm" value="TYPED-ECHO-SENTINEL">
+</main></body></html>""", encoding="utf-8")
+
+
+def test_a_dump_also_strips_learned_answers_and_typed_values_and_never_a_dropdowns_shown_value():
+    # Jack, 2026-11-03: snapshots strip learned answers and the current
+    # fill's typed values (3+ characters) too; listbox option rows stay; a
+    # dropdown button's shown value is blanked whatever its length. Fails
+    # on d9c5b10 for the extra values (dump took none). The dropdown case
+    # is a guard: the page script never dumped a chooser's text (mutation
+    # check: drop `!chooser` from the text rule and "ZQ" appears).
+    check = Checks()
+    with mock_page(ECHO_PAGE) as page:
+        plain = snapshot.dump(page, {})
+        text = json.dumps(plain)
+        check("TYPED-ECHO-SENTINEL" in text and "LEARNED-ECHO-SENTINEL" in text,
+              "with nothing to strip, the page's own echo of a value stays (the point of the extras)")
+        d = snapshot.dump(page, {}, extra_values=["TYPED-ECHO-SENTINEL", "Learned-Echo-Sentinel", None, 7, "ab"])
+        text = json.dumps(d)
+        check("TYPED-ECHO-SENTINEL" not in text and "LEARNED-ECHO-SENTINEL".lower() not in text.lower(),
+              "a typed value and a learned answer echoed in the page's text are redacted whole")
+        h2 = next(e for e in d["elements"] if e["tag"] == "h2")
+        check(h2["text"] == snapshot.REDACTED, f"the heading is redacted ({h2['text']!r})")
+        check(not any(e.get("tag") == "input" and "value" in e for e in d["elements"]), "no input value is dumped")
+        btn = next(e for e in d["elements"] if e.get("automation_id") == "stateDropdown")
+        check(btn["chooser"] is True and btn["text"] == "" and "aria-label" not in btn["aria"] and '"ZQ"' not in text,
+              f"a dropdown button's two-letter shown value is nowhere ({btn})")
+        rows = [e for e in d["elements"] if e.get("role") == "option"]
+        check(len(rows) == 2 and all(r["text"] == "" for r in rows), f"the listbox option rows stay, as structure ({rows})")
+        check(all("ab" not in str(v) for v in []) and any(e.get("id") == "nm" for e in d["elements"]), "a two-character extra strips nothing (the floor is three)")
+    check.done()
+
+
 if __name__ == "__main__":
     run_as_script(globals())

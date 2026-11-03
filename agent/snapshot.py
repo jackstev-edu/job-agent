@@ -197,13 +197,18 @@ NAVIGATING = "navigating"            # the page moved under the read, twice
 _DESTROYED = "Execution context was destroyed"
 
 
-def dump(page: "Page", profile_data: Any) -> dict:
+def dump(page: "Page", profile_data: Any, extra_values: Any = ()) -> dict:
     """
-    The structure of the page the tab shows, stripped of profile values.
-    A read that lands on a navigation ("Execution context was destroyed")
-    is tried once more after a short wait; a second one, or any other
-    failure, gives {"error": <a fixed category>} with no elements, never
-    an exception and never the message text (Jack, 2026-11-02, item 4).
+    The structure of the page the tab shows, stripped of profile values
+    and of `extra_values` (Jack, 2026-11-03: the learned answers and the
+    current fill's typed values, read back or planned, 3+ characters, the
+    same way as a profile value; the wizard gathers them). A dropdown
+    button's shown value is never dumped by the page script, whatever its
+    length. A read that lands on a navigation ("Execution context was
+    destroyed") is tried once more after a short wait; a second one, or
+    any other failure, gives {"error": <a fixed category>} with no
+    elements, never an exception and never the message text (Jack,
+    2026-11-02, item 4).
     """
     got = None
     for attempt in (1, 2):
@@ -231,7 +236,7 @@ def dump(page: "Page", profile_data: Any) -> dict:
         "shadow_hosts": got.get("shadow_hosts", 0),   # open roots not dumped either
         "elements": got.get("elements") or [],
     }
-    texts, digits = profile_values(profile_data)
+    texts, digits = profile_values([profile_data, list(extra_values or [])])
     out = strip_values(out, texts, digits)
     out["taken"] = datetime.now().isoformat(timespec="seconds")   # after the strip: a year is often a profile value
     return out
