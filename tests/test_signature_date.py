@@ -118,8 +118,8 @@ def test_the_signature_blocks_selects_take_todays_date_and_the_date_of_birth_box
             d = fill.plan.get(by[name]["ref"])
             check(d and d["source"] == "clock" and d["value"] == want and d["fit"] == "exact",
                   f"{name}: planned from the clock as {want!r} ({d})")
-        check(_values(page) == {"nm": "", "mo": "11", "dy": "2", "yr": "2026", "dob": ""},
-              f"the selects hold today's parts; Name and Date of birth are empty ({_values(page)})")
+        check(_values(page) == {"nm": "Test Person", "mo": "11", "dy": "2", "yr": "2026", "dob": ""},
+              f"the selects hold today's parts; the Name box holds the profile's name; Date of birth is empty ({_values(page)})")
         check(by["dob"]["ref"] not in fill.plan or fill.plan[by["dob"]["ref"]].get("source") != "clock",
               "the Date of birth box outside the block is never dated by the clock")
         check(not any(signdate.date_part(l) for l in seen), f"no date-part box reached the model ({seen})")
@@ -136,20 +136,20 @@ def test_text_boxes_take_the_date_only_where_the_widget_states_its_format():
     prof = _prof()
     with mock_page(_page("texts", TEXTS)) as page:
         fill = _fill(page, prof, [])
-        check(_values(page) == {"nm": "", "mo": "11", "dy": "02", "yr": "2026", "dob": ""},
+        check(_values(page) == {"nm": "Test Person", "mo": "11", "dy": "02", "yr": "2026", "dob": ""},
               f"MM / DD / YYYY placeholders: 2 / 2 / 4 digits ({_values(page)})")
     with mock_page(_page("numeric", NUMERIC)) as page:
         fill = _fill(page, prof, [])
-        check(_values(page) == {"nm": "", "mo": "11", "dy": "02", "yr": "2026", "dob": ""},
+        check(_values(page) == {"nm": "Test Person", "mo": "11", "dy": "02", "yr": "2026", "dob": ""},
               f"inputmode=numeric: 2 / 2 / 4 digits ({_values(page)})")
     with mock_page(_page("one", ONE_DATE)) as page:
         fill = _fill(page, prof, [])
-        check(_values(page) == {"nm": "", "dt": "11/02/2026", "dob": ""}, f"one Date box in its placeholder's format ({_values(page)})")
+        check(_values(page) == {"nm": "Test Person", "dt": "11/02/2026", "dob": ""}, f"one Date box in its placeholder's format ({_values(page)})")
     with mock_page(_page("bare", BARE_DATE)) as page:
         fill = _fill(page, prof, [])
         by = {f["name"]: f for f in fill.fields}
         flag = next((fl for fl in fill.flags if fl.get("ref") == by["sig_date"]["ref"]), None)
-        check(_values(page) == {"nm": "", "dt": "", "dob": ""} and flag and flag.get("source") == "human",
+        check(_values(page) == {"nm": "Test Person", "dt": "", "dob": ""} and flag and flag.get("source") == "human",
               f"a Date box stating no format: left for Jack ({_values(page)}, {flag and flag.get('reason')})")
     with mock_page(_page("no-eeo", SELECTS, eeo="<label for=\"x\">Nickname</label><input id=\"x\" name=\"nick\">")) as page:
         fill = _fill(page, prof, [])
@@ -246,6 +246,89 @@ def test_a_date_box_whose_own_text_reads_as_a_legal_question_is_jacks_and_its_na
     with mock_page(_page("named", NAMED_DATE)) as page:
         fill = _fill(page, prof, [])
         check(_values(page).get("dt") == "11/02/2026", f"a plain Date box on the self-identification form still fills ({_values(page)})")
+    check.done()
+
+
+def _name_page(name, label, dates=SELECTS, eeo=DISABILITY):
+    p = TEST_HOME / f"signname-{name}.html"
+    p.write_text(PAGE.replace("EEO", eeo).replace("DATES", dates).replace("Your Name", label), encoding="utf-8")
+    return p
+
+
+def test_the_signature_name_box_takes_the_profiles_name_lines_and_any_box_that_signs_is_jacks():
+    # Jack, 2026-11-03: the Name box of the signature block, on a
+    # self-identification form, from the profile's name lines only; any
+    # other signature box is his. Fails on 9e3d5fb (the Name box went to
+    # the mapper and stayed empty; a "Signature" box went to the mapper).
+    check = Checks()
+    prof, seen = _prof(), []
+    with mock_page(_page("name", SELECTS)) as page:
+        fill = _fill(page, prof, seen)
+        by = {f["name"]: f for f in fill.fields}
+        d = fill.plan.get(by["sig_name"]["ref"])
+        check(by["sig_name"].get("signature_name") is True and not by["dob"].get("signature_name"),
+              "the scan marks the block's Name box, not a box in another fieldset")
+        check(d and d["source"] == signdate.NAME_SOURCE and d["value"] == "Test Person" and d["fit"] == "verbatim",
+              f"planned from the profile's name lines ({d})")
+        check(_values(page)["nm"] == "Test Person", f"typed ({_values(page)})")
+        check("Your Name" not in seen, f"the Name box never reached the model ({seen})")
+        result = _gate(page, fill, prof)
+        check(not any("Your Name" in r for r in result["content_reasons"])
+              and any(t.get("source") == signdate.NAME_SOURCE for t in result["trace"]),
+              f"the gate recomputes the name and traces it ({result['content_reasons']})")
+    for label in ("Signature", "Electronic signature", "Signature of applicant", "Initials", "Sign here"):
+        seen = []
+        with mock_page(_name_page(label.replace(" ", "-").lower(), label)) as page:
+            fill = _fill(page, prof, seen)
+            by = {f["name"]: f for f in fill.fields}
+            flag = next((fl for fl in fill.flags if fl.get("ref") == by["sig_name"]["ref"]), None)
+            check(by["sig_name"]["ref"] not in fill.plan and flag and flag.get("source") == "human"
+                  and "signature box" in (flag.get("reason") or "") and label not in seen and _values(page)["nm"] == "",
+                  f"{label!r}: Jack's, never the model, left empty ({flag and flag.get('reason')}, {seen})")
+    seen = []
+    with mock_page(_page("name-no-eeo", SELECTS, eeo="<label for=\"x\">Nickname</label><input id=\"x\" name=\"nick\">")) as page:
+        fill = _fill(page, prof, seen)
+        by = {f["name"]: f for f in fill.fields}
+        check(fill.plan.get(by["sig_name"]["ref"], {}).get("source") != signdate.NAME_SOURCE and _values(page)["nm"] == "",
+              "a page with no EEO question: the Name box is not this route's")
+    with mock_page(_page("name-nodate", "<label for=\"c\">City</label><input id=\"c\" name=\"city\">")) as page:
+        fill = _fill(page, prof, [])
+        by = {f["name"]: f for f in fill.fields}
+        check(not by["sig_name"].get("signature_name") and fill.plan.get(by["sig_name"]["ref"], {}).get("source") != signdate.NAME_SOURCE,
+              "a Name box with no date-part box beside it is not marked and not this route's")
+    check(signdate.name_value(Profile({"personal": {"first_name": "Test"}}, TEST_HOME / "x.yaml")) is None
+          and signdate.name_value(Profile({}, TEST_HOME / "x.yaml")) is None,
+          "a profile missing a name line gives no value")
+    check(not signdate.is_signature_box({"type": "text", "label": "Design experience"})
+          and not signdate.is_signature_box({"type": "text", "label": "Assignment"})
+          and signdate.is_signature_box({"type": "text", "label": "Signed"})
+          and signdate.is_signature_box({"type": "textarea", "label": "E-signature"}),
+          "sign / signature / initials as words, not inside Design or Assignment")
+    # The gate's recomputation.
+    from test_gate import profile as gate_profile
+    named_prof = gate_profile(personal={"first_name": "Test", "last_name": "Person"})
+    box_ = {"ref": "n1", "type": "text", "label": "Your Name", "signature_name": True, "required": True}
+    eeo = {"ref": "e1", "type": "select", "label": "Are you a protected veteran?", "options": ["Yes", "No"]}
+
+    def record(field=box_, value="Test Person"):
+        r = base()
+        r["fields"] += [dict(field), eeo]
+        r["categories"].update({"n1": "personal_fact", "e1": "eeo"})
+        r["plan"]["e1"] = {"value": "No", "source": "profile", "profile_path": "eeo.veteran_status", "fit": "bool"}
+        r["results"]["e1"] = {"filled": True, "unconfirmed": False}
+        r["snapshot"]["e1"] = "No"
+        r["plan"]["n1"] = {"value": value, "source": signdate.NAME_SOURCE, "fit": "verbatim", "profile_path": "personal.first_name"}
+        r["results"]["n1"] = {"filled": True, "unconfirmed": False}
+        r["snapshot"]["n1"] = value
+        return r
+
+    v = gate_run(record(), named_prof)
+    check(v["content_verdict"] == gate.WOULD_SUBMIT, f"the profile's name in the block's Name box: passes ({v['content_reasons']})")
+    v = gate_run(record(value="Someone Else"), named_prof)
+    check(v["content_verdict"] == gate.WOULD_STOP and any("name lines" in x for x in v["content_reasons"]), "another value: stops")
+    check(gate_run(record(field=dict(box_, signature_name=False)), named_prof)["content_verdict"] == gate.WOULD_STOP, "not the block's Name box: stops")
+    check(gate_run(record(field=dict(box_, label="Signature")), named_prof)["content_verdict"] == gate.WOULD_STOP, "a Signature label: stops")
+    check(gate_run(record(), gate_profile())["content_verdict"] == gate.WOULD_STOP, "a profile with no name lines: stops")
     check.done()
 
 

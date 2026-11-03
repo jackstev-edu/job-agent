@@ -109,6 +109,17 @@ def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str]
         if dated is not None:
             plan[field["ref"]] = dated
             continue
+        # The signature Name box of that form (Jack, 2026-11-03): the
+        # profile's name lines, never the model; any box that signs is his.
+        if signdate.is_signature_box(field):
+            flags.append({"ref": field["ref"], "label": field.get("label"), "options": field.get("options"),
+                          "action": "human", "value": None, "source": "human", "category": category,
+                          "reason": "A signature box is yours: nothing signs for you."})
+            continue
+        named = signdate.name_plan_for(field, fields, prof, category=category)
+        if named is not None:
+            plan[field["ref"]] = named
+            continue
         # Decision C (Jack, 2026-11-02): "have you worked for <company>" from
         # his work_history.past_employers list, against the company the job's
         # own address names; any match or doubt is his. Never the model.

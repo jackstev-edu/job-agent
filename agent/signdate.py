@@ -168,3 +168,77 @@ def verify(field: dict, decision: dict | None, fields: list[dict], today: dateti
         return False
     plan = plan_for(field, fields, today, category)
     return plan is not None and str(plan["value"]) == str(decision.get("value"))
+
+
+# --- the signature Name box (Jack, 2026-11-03) ------------------------------
+# The Name box of the block decision B recognises, on a self-identification
+# form, is filled from the profile's name lines (first and last), never
+# the model; the gate recomputes the value and stops on a mismatch. Any
+# other signature box, or a label with sign / signature wording, is Jack's.
+NAME_SOURCE = "profile_name"
+NAME_LINES = ("personal.first_name", "personal.last_name")
+_NAME_LABEL = re.compile(r"^(?:your |full |applicant'?s? |candidate'?s? |printed |legal )?name(?: \(.*\))?\s*:?\s*\*?$")
+# A box that signs: never filled by any route (the filler paragraph's
+# "signs anything" line in CLAUDE.md).
+_SIGN_WORDS = re.compile(r"\bsign(?:ature|atures|ed|ing|s)?\b|\be-?sign\w*|\binitials?\b", re.I)
+
+
+def is_signature_box(field: dict) -> bool:
+    """Does the box's own label read as a signature / initials box on any reading? Such a box is Jack's."""
+    if (field.get("type") or "").lower() not in ("text", "textarea", ""):
+        return False
+    return any(_SIGN_WORDS.search(v) for v in sensitive.text_variants(str(field.get("label") or "")))
+
+
+def _name_label(label: Any) -> bool:
+    """Every reading of the label is a bare name label ("Name", "Your Name", "Full name *"), with no sign wording on any."""
+    variants = sensitive.text_variants(str(label or ""))
+    if not variants or any(_SIGN_WORDS.search(v) for v in variants):
+        return False
+    return all(_NAME_LABEL.fullmatch(_norm(v).replace("’", "'")) for v in variants)
+
+
+def name_value(prof) -> str | None:
+    """First and last name from the profile's own lines, both present, joined by one space; else None."""
+    try:
+        first, last = (" ".join(str(prof.get(k) or "").split()) for k in NAME_LINES)
+    except Exception:
+        return None
+    if not first or not last:
+        return None
+    return f"{first} {last}"
+
+
+def name_plan_for(field: dict, fields: list[dict], prof, category: str | None = None) -> dict | None:
+    """
+    The plan for the signature Name box, or None (the ordinary routes):
+    the scan marked it (`signature_name`: a name label in a block that
+    also holds a date-part box), the label is a bare name with no sign
+    wording, nothing about the box reads as a stop or a legal question,
+    the page holds an EEO-guarded question, and the profile holds both
+    name lines. Never the model; never a secret box.
+    """
+    if (not field.get("signature_name") or field.get("secret") or field.get("options")
+            or (field.get("type") or "").lower() not in ("text", "")):
+        return None
+    if sensitive.stop_reason(sensitive._question_text(field)) is not None or field.get("raw_stop") or field.get("raw_legal"):
+        return None
+    if not _name_label(field.get("label")):
+        return None
+    if reads_legal(field) or sensitive.legal_guard_kinds(field) or category in NEVER_CATEGORIES:
+        return None
+    if not self_identification_page(fields):
+        return None
+    value = name_value(prof)
+    if value is None:
+        return None
+    return {"label": field.get("label"), "options": None, "action": "fill", "value": value,
+            "source": NAME_SOURCE, "fit": "verbatim", "profile_path": NAME_LINES[0]}
+
+
+def verify_name(field: dict, decision: dict | None, fields: list[dict], prof, category: str | None = None) -> bool:
+    """The gate's recomputation: the same name from the record's own field and the profile, equal to the fill."""
+    if not decision or decision.get("source") != NAME_SOURCE:
+        return False
+    plan = name_plan_for(field, fields, prof, category)
+    return plan is not None and str(plan["value"]) == str(decision.get("value"))

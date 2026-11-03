@@ -360,21 +360,32 @@ _SCAN_JS = safe(r"""
   const NAME_RX = /^(your\s+|full\s+|applicant'?s?\s+|candidate'?s?\s+|printed\s+|legal\s+)?(name|signature|e-?signature|electronic\s+signature)(\s*\(.*\))?\s*:?\s*\*?$/i;
   const plainBox = b => ['INPUT', 'TEXTAREA'].includes(__ja.tag(b)) && isVisible(b)
       && !['hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'password'].includes((__ja.type(b) || '').toLowerCase());
-  const signatureBlock = el => {
+  const blockWith = (el, rx, withSelects) => {
     let p = __ja.parent(el);
     for (let i = 0; i < 6 && p && p !== document.body; i++, p = __ja.parent(p)) {
       const tag = __ja.tag(p);
       if (tag === 'FORM') return false;             // the whole form is no block
       const boxes = [...p.querySelectorAll('input, textarea')].filter(plainBox);
+      const selects = [...p.querySelectorAll('select')];
       // Twelve controls at most, dropdowns counted (fold of d9461c9's finding 3).
-      if (boxes.length + p.querySelectorAll('select').length > 12) return false;
-      if (boxes.some(b => b !== el && NAME_RX.test(labelFor(b).trim()))) return true;
+      if (boxes.length + selects.length > 12) return false;
+      const others = withSelects ? [...boxes, ...selects] : boxes;
+      if (others.some(b => b !== el && rx.test(labelFor(b).trim()))) return true;
       // A fieldset, group or section without a name box is the box's own
       // block: a name box in a sibling block says nothing about this one.
       if (tag === 'FIELDSET' || tag === 'SECTION' || ['group', 'region'].includes(__ja.attr(p, 'role') || '')) return false;
     }
     return false;
   };
+  const signatureBlock = el => blockWith(el, NAME_RX, false);
+  // The Name box of that block (Jack, 2026-11-03): its own label is a
+  // name with no sign / signature wording, and the same walk finds a
+  // date-part box (a text box or a dropdown) beside it. Structure only;
+  // signdate.py decides whether the page is a self-identification form
+  // and fills it from the profile's name lines, never the model.
+  const DATE_RX = /^(signature\s+|today'?s\s+|current\s+|the\s+)?(date|month|day|year)(\s+(signed|of\s+signature))?(\s*\(.*\))?\s*:?\s*\*?$/i;
+  const NAME_ONLY_RX = /^(your\s+|full\s+|applicant'?s?\s+|candidate'?s?\s+|printed\s+|legal\s+)?name(\s*\(.*\))?\s*:?\s*\*?$/i;
+  const signatureName = el => NAME_ONLY_RX.test(labelFor(el).trim()) && blockWith(el, DATE_RX, true);
 
   // Each stamped element's tag, type and name, as the scan saw it. A read
   // refuses an element that no longer matches (a reused or swapped node).
@@ -546,6 +557,7 @@ _SCAN_JS = safe(r"""
       help_text: helpFor(el),
       section: sectionOf(el),
       signature_block: signatureBlock(el),
+      signature_name: signatureName(el),
       inputmode: __ja.attr(el, 'inputmode') || '',
       maxlength: el.maxLength > 0 ? el.maxLength : null,
       tag, dom_name: __ja.name(el) || '', dom_id: __ja.id(el) || '',

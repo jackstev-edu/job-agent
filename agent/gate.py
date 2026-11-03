@@ -743,6 +743,15 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         if (decision or {}).get("source") == signdate.SOURCE and not signdate.verify(f, decision, fields, category=category):
             content.append(f"{name}: signature date not recomputed from the clock (left for you)")
             continue
+        # The signature Name box (Jack, 2026-11-03): a plan with source
+        # "profile_name" is trusted only when the gate recomputes the same
+        # name from the record's own field and the profile's name lines.
+        if (decision or {}).get("source") == signdate.NAME_SOURCE:
+            if not signdate.verify_name(f, decision, fields, profile, category):
+                content.append(f"{name}: signature name not recomputed from your profile's name lines (left for you)")
+                continue
+            trace.append({"ref": ref, "label": label[:120], "category": category,
+                          "profile_path": signdate.NAME_LINES[0], "source": signdate.NAME_SOURCE, "fit": "verbatim"})
 
         # An allowlisted consent checkbox: your exact entry in consent_allowlist
         # answers it, the way a profile line answers an eligibility question.
