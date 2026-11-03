@@ -83,8 +83,9 @@ option text can carry prefilled values), as the push rule says.
    Workday's Review-page Submit shares the id); what is missing: the Review
    page handed to submit.py, with Workday's Submit id and text verified
    from the snapshot, through the gate on the full record.
-8. **Past employers** (Workday tenants only; elsewhere the company is a
-   path slug, not the host, so the question stays Jack's) — template line
+8. **Past employers** (every portal, with the 2026-11-02 tenant
+   definition: Jack, 2026-11-03, superseding "Workday tenants only"; a
+   shared ATS host naming no company is doubt) — template line
    `work_history.past_employers`; a guard kind of exact label phrases
    ("worked for / been employed by <company>", label only; contractor,
    consultant and supplier wordings stay Jack's, since a list of employers

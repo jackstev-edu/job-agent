@@ -633,6 +633,54 @@ tenant (host plus first path segment on job-boards.greenhouse.io,
 boards.greenhouse.io, jobs.lever.co and jobs.ashbyhq.com; the subdomain
 on *.myworkdayjobs.com and *.avature.net; the host otherwise).
 
+Added by Jack on 2026-11-03 (his decisions on the report of the
+2026-11-02 round, stopped on the 40-minute rule with four open BLOCKs),
+in plain words; these supersede older lines where they conflict and
+leave his 2026-11-02 decision text as written:
+
+- D, the attestation class: the subject of a truth-and-completeness
+  sentence comes from a closed list naming Jack's own answers (the
+  information / answers / statements / responses he provided, gave,
+  submitted or entered in this application; my answers; my responses;
+  my application). A subject that points at text on the page ("set
+  forth", "herein", "below", "the facts", "the following") is his. Each
+  sentence kind is a fixed pattern, linear-time, with the length checked
+  before the pattern (over 600 characters is his). This is the last of
+  the three attempts on D's BLOCK: a fourth BLOCK switches the
+  attestation route off (the check returns False), keeps E and Always
+  tick, and is logged in TODO.
+- "Always tick this exact wording" refuses an authorize, release,
+  background / reference / drug / credit check, arbitration, at-will,
+  e-signature / signing, contact / SMS / marketing / newsletter or
+  non-compete wording, in the server route itself, not only the button.
+- E's waiver is per element only: one touched box never waives another
+  box, in a group or out of one. A required checkbox group Jack ticks
+  one box of resolves and the job moves on, with no sibling waived.
+- B: a date box whose own label, help text or placeholder hits any
+  LEGAL_GUARD kind is his (the box's own text, not the surrounding
+  form's). A plain Date box on a disability self-identification form
+  still fills.
+- The signature Name box of a self-identification form (only in a block
+  decision B recognises, only a box labelled as a name) is filled from
+  the profile's name lines only, never the model; the gate recomputes
+  the value and stops on a mismatch. Any other signature box, or a label
+  with sign / signature wording, is his.
+- C covers every portal, with the 2026-11-02 tenant definition,
+  superseding "Workday tenants only" in docs/PLAN-workday.md item 8. A
+  shared ATS host with no company in it is doubt. A non-plain
+  past_employers entry (anything but a bare name) makes the whole list
+  doubt, said so in the job log. Doubt words in the help text or the
+  options, a second company after a comma or "(formerly ...)", and any
+  wording outside the decided phrases ("worked with ...") are his.
+- A past-employer-worded question whose only legal kinds are DoD or
+  clearance stays learnable under decision 1 of the fold round
+  (abb7fd0).
+- Snapshots also strip learned answers and the current fill's typed
+  values (3 or more characters); listbox option rows stay; a dropdown
+  button's shown value is blanked whatever its length.
+- Kept as built: the shared Workday / Avature "acme" scope, and the
+  "Yes, I ... / No, I ..." strict fits for a checkbox statement.
+
 ## Design rules — do not relax these
 
 - The model never answers legal questions. Eligibility, EEO and
@@ -702,8 +750,10 @@ on *.myworkdayjobs.com and *.avature.net; the host otherwise).
   required box only, on one of three routes: the consent policy in the
   plan (terms / privacy wording, never marketing, never a
   certification); decision D's attestation class (Jack, 2026-11-02:
-  every sentence of the label from the bounded vocabulary of a
-  truth-and-completeness attestation or a consequence-of-
+  every sentence of the label one of two fixed patterns, a
+  truth-and-completeness attestation whose subject is from the closed
+  list naming Jack's own answers (2026-11-03; a page-text subject is
+  his) or a consequence-of-
   misrepresentation statement, no forbidden clause, no LEGAL_GUARD,
   PROFILE_PATHS or marketing match, no stop kind other than the
   certify / attest / acknowledge one, which is read past only inside
@@ -812,7 +862,11 @@ How the code keeps them, and rules of its own:
   Playwright message is read only to pick the category and is not kept.
   The gate repeats the category in its reason only when it has that fixed
   shape. It has no code path that clicks Submit, accepts
-  terms or signs anything. It must stay that way.
+  terms or signs anything (the one carve-out, Jack, 2026-11-03: the
+  signature Name box of a self-identification form takes the profile's
+  name lines as an ordinary text fill, planned by `agent/signdate.py`
+  and recomputed by the gate; a box with sign / signature wording is
+  never filled). It must stay that way.
 - The submit gate: a pure function of the record and the profile. It never
   clicks, ticks or submits itself; `submit.py` (milestone 5) acts on its
   verdict, nothing else does. Filling is routed exactly as before
@@ -997,4 +1051,6 @@ terminal's moved pause, four folds) are recorded in the owner decisions
 above, as are the 2026-11-01 evening round (item 1 built) and the
 2026-11-02 round (decisions A-E; items 1-13 of Jack's brief, recorded
 in TODO's "Round of 2026-11-02"; Waymo and the Workday widgets are the
-round after it). A new session resumes from those files.
+round after it) and Jack's 2026-11-03 decisions on its report (the
+fixes of the four open BLOCKs, item 9, the TODO log; items 10-13 are
+the next round). A new session resumes from those files.
