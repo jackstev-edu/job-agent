@@ -24,19 +24,27 @@ from _fill_run import _headless, classify_by_label, map_from_profile
 from _harness import Checks, run_as_script
 from agent import ledger, wizard
 from test_pick_up import _gui
-from test_wizard import HOST, _routes
+from test_wizard import CLICKS_JS, HOST, _routes
 
-EMPTY = """<!doctype html><html><head><title>Apply - Example Co</title></head><body>
-<h1>Your application</h1><p>We are getting your application ready.</p></body></html>"""
-SUCCESS_SEARCH = """<!doctype html><html><head><title>Example Co</title></head><body>
+# Every fixture records clicks and key presses into window.__clicks, so
+# "nothing pressed" is a real assertion (b499329's review, finding 4).
+KEYS_JS = """<script>document.addEventListener('keydown', e => { window.__clicks = window.__clicks || []; window.__clicks.push('key:' + e.key); }, true);</script>"""
+EMPTY = f"""<!doctype html><html><head><title>Apply - Example Co</title></head><body>
+<h1>Your application</h1><p>We are getting your application ready.</p>{CLICKS_JS}{KEYS_JS}</body></html>"""
+SUCCESS_SEARCH = f"""<!doctype html><html><head><title>Example Co</title></head><body>
 <header><input type="search" name="q" aria-label="Search jobs"></header>
-<h1>Thank you for applying!</h1><p>We will be in touch.</p></body></html>"""
-THANKS_FEEDBACK = """<!doctype html><html><head><title>Example Co</title></head><body>
+<h1>Thank you for applying!</h1><p>We will be in touch.</p>{CLICKS_JS}{KEYS_JS}</body></html>"""
+THANKS_FEEDBACK = f"""<!doctype html><html><head><title>Example Co</title></head><body>
 <h1>Thank you for applying</h1><form><label for="fb">How was your experience?</label>
-<input id="fb" name="feedback"></form></body></html>"""
-ORDINARY = """<!doctype html><html><head><title>Example Co</title></head><body>
+<input id="fb" name="feedback"></form>{CLICKS_JS}{KEYS_JS}</body></html>"""
+ORDINARY = f"""<!doctype html><html><head><title>Example Co</title></head><body>
 <h1>Thank you for applying so far</h1><p>One more step.</p><form><label for="ref">Reference name</label>
-<input id="ref" name="reference_name" required><button type="button">Next</button></form></body></html>"""
+<input id="ref" name="reference_name" required><button type="button">Next</button></form>{CLICKS_JS}{KEYS_JS}</body></html>"""
+# The form inside a <footer> on an ordinary address (b499329's review, the
+# BLOCK): the fillable-control probe must still count it.
+FOOTER_FORM = f"""<!doctype html><html><head><title>Example Co</title></head><body>
+<h1>Thank you for applying so far</h1><footer><form><label for="ref">Reference name</label>
+<input id="ref" name="reference_name" required><button type="button">Next</button></form></footer>{CLICKS_JS}{KEYS_JS}</body></html>"""
 
 
 def _park_then(target_path, target_html):
@@ -66,12 +74,12 @@ def test_a_park_with_no_fill_continued_on_a_success_page_is_marked_submitted_by_
     check(parked, f"the empty page parks with no fill in hand ({first.status}: {first.reason})")
     check(out.status == "submitted" and out.submitted_by == "jack",
           f"Continue on the /Success page: submitted by Jack ({out.status}, {out.submitted_by}, {out.reason})")
-    check(out.evidence.get("generic_text") and out.evidence.get("no_form_outside_chrome") is True
-          and out.evidence.get("success_address") is True,
-          f"the sentence, no fillable control outside the header, and the address ({out.evidence})")
+    check(out.evidence.get("generic_text") and out.evidence.get("no_form") is False
+          and out.evidence.get("success_address") is True and out.evidence.get("shape_changed") is True,
+          f"the sentence, the header's search box still a fillable control, and the address on a page with no paused shape ({out.evidence})")
     check(any(e.get("kind") == "confirmation" and e.get("handled") == "jack" for e in out.events),
           "the confirmation event is Jack's")
-    check(after == before, "nothing pressed: read-only")
+    check(after == before == 0, "nothing pressed, nothing typed: read-only (the fixture records clicks and keys)")
     check.done()
 
 
@@ -81,7 +89,7 @@ def test_the_address_rule_alone_confirms_beside_a_feedback_box():
     first, parked, out, before, after = _park_then("/careers/thanks", THANKS_FEEDBACK)
     check(parked, "the empty page parks with no fill in hand")
     check(out.status == "submitted" and out.submitted_by == "jack"
-          and out.evidence.get("no_form_outside_chrome") is False and out.evidence.get("success_address") is True,
+          and out.evidence.get("no_form") is False and out.evidence.get("success_address") is True,
           f"a feedback box in the body, a /thanks segment: submitted by Jack ({out.status}, {out.evidence})")
     check.done()
 
@@ -95,6 +103,27 @@ def test_the_generic_sentence_beside_a_box_on_an_ordinary_address_is_never_marke
     check(parked, "the empty page parks with no fill in hand")
     check(out.status != "submitted" and out.submitted_by is None,
           f"the sentence beside a box on /apply/step4: never marked submitted ({out.status}, {out.reason})")
+    check.done()
+
+
+def test_a_form_inside_a_footer_still_counts_and_an_unchanged_form_at_a_confirmation_address_is_not_confirmed():
+    # Fix of b499329's BLOCK and its finding 2. On b499329 the footer form
+    # was read as "no fillable control" and the page marked submitted; a
+    # gate pause on the unchanged form at a /confirmation address was
+    # confirmed by the address rule alone.
+    from test_pick_up import REFERENCE, _page, _run
+    check = Checks()
+    first, parked, out, before, after = _park_then("/apply/step4", FOOTER_FORM)
+    check(parked, "the empty page parks with no fill in hand")
+    check(out.status != "submitted" and out.submitted_by is None and (out.evidence or {}).get("no_form") is not True,
+          f"the sentence with the form inside a <footer>: never marked submitted ({out.status}, {out.reason})")
+    prose = "<p>Thank you for applying. Please review your answers before submitting.</p>"
+    with _run(_page(city=REFERENCE, prose=prose), start="/apply/confirmation", auto_submit=lambda: True) as (page, w):
+        out = w.run()
+        check(out.status == wizard.WAITING and w.pending["kind"] == "gate", f"the gate pause on the reference box ({out.status}: {out.reason})")
+        out = w.continue_from({})
+        check(out.status != "submitted" and out.submitted_by is None,
+              f"Continue on the unchanged form at /apply/confirmation: not confirmed by the address alone ({out.status}: {out.reason})")
     check.done()
 
 
