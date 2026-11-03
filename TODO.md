@@ -3636,9 +3636,9 @@ four holes; snapshot stripping; item 9 committed; this log).
   smallest fix (drop the bare-place alternative from the the/this
   branch) is recorded in reviews.md of this round's scratchpad.
 
-Reviewer FLAGs of the round, one line each (unedited outputs in the
-session scratchpad's reviews.md; none folded unless named as a fold
-commit above or below):
+Reviewer FLAGs of the round, one line each (the unedited outputs are in
+the round's report to Jack, which quotes every review in full; none
+folded unless named as a fold or fix commit):
 - fb2e3b9 (a): the 2026-11-03 block is a paraphrase, not Jack's words;
   Jack confirms it as written or his verbatim answers are added here.
 - fb2e3b9 (a): the Design-rules per-company bullet names one exception
@@ -3692,8 +3692,11 @@ commit above or below):
   2026-11-02 with a different log line); it needs a real wait on the
   moved page, not a race with the form render.
 - d9c5b10 (c, first fix): the at-will term was quietly bounded (folding a
-  logged FLAG); reverted in 7d34acc. The test file now holds guard rows
-  for the alternatives the pattern kept, so a dropped alternative fails.
+  logged FLAG); reverted in 7d34acc, re-anchored again in df987d9 (open,
+  see item c's stop below: an embedded "employment_at_will" passes at
+  HEAD, and approve.py's comment "keeps its old unanchored shape" is
+  stale). The test file holds guard rows for the alternatives the pattern
+  kept, so a dropped alternative fails.
 - b499329 / ba21953 (i, item 9): _HAS_FIELDS_JS is still not wrapped in
   extract.safe (fails safe: an unreadable probe never confirms); it
   belongs with item 12's four unwrapped scripts. The address rule now
@@ -3749,9 +3752,10 @@ commit above or below):
   help text makes the question his), which is stricter than his wording.
 - f8fa10c (h fold): a typed or learned value echoed into a later select's
   options (a references page listing employers typed earlier) is no longer
-  stripped there (a value leak, local and gitignored; the position leak
-  was the worse one). Only the learned.yaml-unreadable route to "no file"
-  is tested; a failing step or fill part is not.
+  stripped there: less stripping than 99c5a77 for that case (the reviewer's
+  words; the main session chose the position leak as the one to close).
+  Only the learned.yaml-unreadable route to "no file" is tested; a failing
+  step or fill part is not.
 - ba21953 (i fix): "no shape counts as changed" is now limited to the
   no-fields park (7ef5c9b); Jack confirms that reading of his address rule
   for a cap, CAPTCHA or account pause whose page still shows the form.
@@ -3821,10 +3825,24 @@ commit above or below):
   the first read after Continue, so the pick-up half is untested; the
   docstrings of _confirmed_strict and _pick_up still describe the earlier
   rules.
-- 44892f3 (h fold): a heading, <th> or <summary> that is itself an
+- c6cfa8f (h fold): a heading, <th> or <summary> that is itself an
   option's title (card-style tiles, a Likert matrix) is still stripped
-  against the learned answers and can mark the chosen tile; accepted by
-  design, for Jack's note.
+  against the learned answers and can mark the chosen tile; for Jack to
+  accept or reject.
+- 98febb9 (f): DECISION: the gate's "a box that signs was filled" stop
+  skips a clock-dated box (source clock, recomputed by signdate.verify),
+  so a "Signature date" box, or a Date box whose help text calls the date
+  your electronic signature, is filled and passes, against CLAUDE.md's "a
+  box with sign / signature wording is never filled" and the 2026-11-03
+  line "a label with sign / signature wording is his". Jack confirms that
+  a clock-dated date box is outside that wording, or the skip is removed
+  (decision B then leaves a "Signature date" box to him).
+- ca612ec (i fix): no cap-park case through _resume_fill in the tests; the
+  test comment named 7ef5c9b where the commit message named f00dbfa
+  (corrected in 2119361's test comment).
+- 398e6c5 (d): the wizard test's comment contradicted its commit message
+  about the commit it fails on (reworded in d37a30b); group_ref was not
+  asserted to equal the first box's ref (added in d37a30b).
 - 24e483f (h, fourth fold): two privacy shapes left open after four
   folds (each pass found a rarer markup; the files are local and
   gitignored): a remove chip or a value display inside a wrapping label
