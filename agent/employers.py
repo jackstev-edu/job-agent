@@ -67,7 +67,7 @@ _CO = r"(?P<company>[a-z0-9][a-z0-9'’.\-]*(?: [a-z0-9][a-z0-9'’.\-]*){0,3}?)
 # 0698a98's review, BLOCK 3).
 _YESNO = re.compile(
     r"^(?:have you (?:ever |previously |formerly |at any time )?(?:worked (?:for|at)|been employed (?:by|at)|been an employee of)"
-    r"|were you (?:ever |previously |formerly |at any time )?(?:employed (?:by|at)|an employee of|working (?:for|at))) "
+    r"|were you (?:ever |previously |formerly |at any time )?(?:employed (?:by|at)|an employee of)) "
     r"(?:the )?" + _CO + r"(?: before| previously| in the past| at any time)?\s*\??$")
 _DETAILS = re.compile(
     r"^if (?:you were|you have been|you've been|you’ve been|yes,?) (?:ever |formerly |previously )?employed (?:at|by) (?:the )?"
@@ -85,14 +85,23 @@ _DOUBT = re.compile(
 _CO_DOUBT = re.compile(r"^(?:a|an|any|our|this|that|these|those|all)\b|\band\b|\b(?:store|stores|company|companies|entity|"
                        r"location|locations|site|sites|office|offices|facility|facilities|plant|plants|dealership|"
                        r"franchise|affiliate|subsidiary|division|unit|group|brand|team|teams|department)$", re.I)
-# Doubt in the help text, placeholder or an option (the label's grammar
-# covers the label): another company named beside the first, in any
-# shape (fix of 0698a98's review, BLOCK 2).
-_BESIDE_DOUBT = re.compile(r"formerly|previously|\bfka\b|f/k/a|[(),;/&]|\band\b", re.I)
-# A hyphenated subdomain's leading role word: careers-ibm.icims.com names
-# "ibm", three characters, which is doubt (fix of 0698a98's review, BLOCK 4).
-_SUBDOMAIN_PREFIX = re.compile(r"^(?:us|uk|global)?(?:careers?|jobs?|apply|recruiting|recruitment|talent|hiring|external|"
-                               r"internal|candidates?|employment)[-_]+", re.I)
+# Beside the label (help text, placeholder, options), only a closed
+# allowlist passes (fix of b4623af's review, BLOCK 2: a second company in
+# plain prose, "Answer Yes if you have worked at Contoso", escaped every
+# blacklist): the help text and placeholder empty or a fixed placeholder,
+# every option "Yes", "No" or a placeholder row. Anything else is doubt.
+_PLACEHOLDERS = frozenset({"", "select", "select one", "select an option", "please select", "choose", "choose one",
+                           "please choose", "select...", "choose...", "-", "--", "---", "none selected", "not selected"})
+_PLAIN_OPTIONS = frozenset({"yes", "no"})
+# A role word anywhere in a host's company token (careers-ibm, ibm-careers,
+# careersibm, jobs-ups) or a second token beside the company (careers-ibm-us)
+# means the address names no company word on its own: doubt (fix of
+# b4623af's review, BLOCK 4).
+_ROLE_WORD = re.compile(r"careers?|jobs?|apply|recruit\w*|talent|hiring|external|internal|candidates?|employment|"
+                        r"workwithus|joinus|opportunit\w*", re.I)
+# The section over the box (a legend, a heading): any shape a second
+# company could take there is doubt ("Northwind, a Contoso company").
+_SECTION_DOUBT = re.compile(r"[(),;/&]|\band\b|formerly|previously|\bfka\b|f/k/a|compan|corporation|\binc\b|\bltd\b|\bllc\b", re.I)
 _SUFFIXES = frozenset({"inc", "incorporated", "llc", "llp", "lp", "corp", "corporation", "co", "company", "ltd",
                        "limited", "plc", "gmbh", "ag", "sa", "nv", "bv", "pty", "the"})
 _ALNUM = re.compile(r"[^0-9a-z]+")
@@ -107,7 +116,9 @@ def _spaceless(text: Any) -> str:
 
 
 def _initials(text: Any) -> str:
-    return "".join(w[0] for w in _norm(text).split())
+    """The initials of a name's words, corporate suffixes dropped ("United Parcel Service Inc" -> "ups")."""
+    words = [w for w in _norm(text).split() if w not in _SUFFIXES] or _norm(text).split()
+    return "".join(w[0] for w in words)
 
 
 def company_from_url(url: str) -> str:
@@ -133,15 +144,26 @@ def company_from_url(url: str) -> str:
     family = pages.host_family(f"https://{host}/")
     if family in ATS_DOMAINS or (family == host and host.count(".") == 0):
         return ""
-    return _spaceless(family.split(".")[0])
+    return _subdomain_company(family.split(".")[0])
 
 
-def _subdomain_company(sub: str) -> str:
-    """The company word of a portal subdomain: a role word ("careers-", "jobs-") stripped first; a bare role word names none."""
-    sub = _SUBDOMAIN_PREFIX.sub("", sub.lower())
-    if not sub or sub in ("www", "careers", "career", "jobs", "job", "apply", "recruiting", "talent"):
+def _subdomain_company(token: str) -> str:
+    """
+    The company word of a host's token (a portal subdomain, a plain host's
+    registrable label), or '' (doubt): a role word anywhere in it
+    (careers-ibm, ibm-careers, careersibm, jobs-ups), or more than one
+    word (careers-ibm-us, acme-us), names no company on its own.
+    """
+    token = str(token or "").lower().strip()
+    if not token or token == "www" or _ROLE_WORD.search(token):
         return ""
-    return _spaceless(sub)
+    # A hyphenated company name ("northwind-traders") is one word; a part
+    # of three letters or fewer beside another ("acme-us", "careers-ibm-us")
+    # is a region or role token, so the address names no company on its own.
+    parts = [p for p in re.split(r"[-_]+", token) if p]
+    if len(parts) > 1 and any(len(p) <= 3 for p in parts):
+        return ""
+    return _spaceless(token)
 
 
 def _readings(text: Any) -> list[str]:
@@ -151,16 +173,26 @@ def _readings(text: Any) -> list[str]:
 
 def has_doubt(field: dict) -> bool:
     """
-    A doubt word on any reading of the label, help text, placeholder or an
-    option; beside the label (whose grammar admits one plain company), any
-    shape a second company could take: "formerly", "previously", "fka", a
-    parenthesis, a comma, a slash, an ampersand, "and".
+    A doubt word on any reading of the label, help text, placeholder,
+    section (the legend or heading over the box) or an option; and beside
+    the label (whose grammar admits one plain company) anything outside
+    the closed allowlist: a help text or placeholder that is not empty or
+    a fixed placeholder, an option that is not "Yes", "No" or a
+    placeholder row. A second company in any shape fails that.
     """
-    texts = [field.get("label"), field.get("help_text"), field.get("placeholder"), *(field.get("options") or [])]
+    texts = [field.get("label"), field.get("help_text"), field.get("placeholder"), field.get("section"),
+             *(field.get("options") or [])]
     if any(_DOUBT.search(v) for t in texts for v in sensitive.text_variants(str(t or ""))):
         return True
-    beside = [field.get("help_text"), field.get("placeholder"), *(field.get("options") or [])]
-    return any(_BESIDE_DOUBT.search(v) for t in beside for v in sensitive.text_variants(str(t or "")))
+    if any(_SECTION_DOUBT.search(v) for v in sensitive.text_variants(str(field.get("section") or ""))):
+        return True
+    for t in (field.get("help_text"), field.get("placeholder")):
+        if any(_norm(v) not in _PLACEHOLDERS for v in sensitive.text_variants(str(t or ""))):
+            return True
+    for o in field.get("options") or []:
+        if any(_norm(v) not in _PLAIN_OPTIONS | _PLACEHOLDERS for v in sensitive.text_variants(str(o or ""))):
+            return True
+    return False
 
 
 def parse_label(label: Any) -> tuple[str, str] | None:
@@ -240,13 +272,23 @@ def entry_matches(entry: Any, tenant: str, named: Any) -> bool:
     if not e_sl:
         return False
     named_sl = _spaceless(named)
+    t_sl = _spaceless(tenant)
+    named_initials = _initials(named)
     if not any(len(w) >= 3 for w in e_words):
         # Its letters inside the tenant count too ("GM" in "gmfinancial":
         # the safe direction, 0698a98's review).
-        return (e_sl == _spaceless(tenant) or (len(e_sl) >= 2 and e_sl in _spaceless(tenant))
-                or (len(e_sl) >= 2 and e_sl == _initials(named)) or e_sl in _norm(named).split())
+        return (e_sl == t_sl or (len(e_sl) >= 2 and e_sl in t_sl)
+                or (len(e_sl) >= 2 and e_sl == named_initials) or e_sl in _norm(named).split())
+    # A short word inside a longer entry ("GE Healthcare" against "General
+    # Electric", "GM Financial" against "General Motors") counts when it
+    # is the named company's initials, a prefix of them, or the tenant's
+    # leading letters (b4623af's review: the safe direction).
+    short_words = [w for w in e_words if len(w) < 3 and w not in _SUFFIXES]
+    if any(len(w) >= 2 and (w == named_initials or (named_initials.startswith(w) and len(named_initials) >= 2)
+                             or t_sl.startswith(w)) for w in short_words):
+        return True
     return (loose_match(entry, tenant) or loose_match(entry, named_sl) or loose_match(named, e_sl)
-            or (len(e_sl) >= 2 and e_sl == _initials(named)) or (len(named_sl) >= 2 and named_sl == _initials(entry)))
+            or (len(e_sl) >= 2 and e_sl == named_initials) or (len(named_sl) >= 2 and named_sl == _initials(entry)))
 
 
 def kind_of(field: dict) -> str | None:

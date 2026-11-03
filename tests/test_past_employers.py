@@ -178,6 +178,27 @@ def test_any_match_or_any_doubt_goes_to_jack():
          "https://careers-ibm.icims.com/jobs/1/job", "per_company"),
         ("a short entry inside the tenant", [dict(YESNO, label="Have you worked for Financial before?")], _prof("gm2", ["GM"]),
          "https://gmfinancial.wd5.myworkdayjobs.com/careers/job/1/apply", "per_company"),
+        # Second fix, from b4623af's review (each gave No on b4623af).
+        ("a second company in plain prose in the help text", [dict(YESNO, help_text="Answer Yes if you have worked at Contoso.")], _prof("prose", ["Contoso"]), WORKDAY, "per_company"),
+        ("an acquisition in the help text", [dict(YESNO, help_text="Northwind was acquired by Contoso in 2020.")], _prof("acq", ["Contoso"]), WORKDAY, "per_company"),
+        ("'a Contoso company' in the help text", [dict(YESNO, help_text="Northwind is a Contoso company.")], _prof("acc", ["Contoso"]), WORKDAY, "per_company"),
+        ("an option 'Yes - Contoso'", [dict(YESNO, options=["Yes", "No", "Yes - Contoso"])], _prof("opt3", ["Contoso"]), WORKDAY, "per_company"),
+        ("an option 'Yes at Contoso'", [dict(YESNO, options=["Yes at Contoso", "No"])], _prof("opt4", ["Contoso"]), WORKDAY, "per_company"),
+        ("any help text beside the label", [dict(YESNO, help_text="Please answer truthfully")], beta, WORKDAY, "per_company"),
+        ("a second company in the section", [dict(YESNO, section="Northwind, a Contoso company")], _prof("sec", ["Contoso"]), WORKDAY, "per_company"),
+        ("a plain host with a role word (jobs-ups.com)", [dict(YESNO, label="Have you worked for UPS before?")], _prof("ups", ["United Parcel Service Inc"]),
+         "https://www.jobs-ups.com/job/1/apply", "per_company"),
+        ("a trailing role word (ibm-careers.icims.com)", [dict(YESNO, label="Have you worked for IBM before?")], _prof("ibm2", ["International Business Machines Corporation"]),
+         "https://ibm-careers.icims.com/jobs/1/job", "per_company"),
+        ("a hyphen-less role word (careersibm.icims.com)", [dict(YESNO, label="Have you worked for IBM before?")], beta,
+         "https://careersibm.icims.com/jobs/1/job", "per_company"),
+        ("a region token after the company (careers-ibm-us)", [dict(YESNO, label="Have you worked for IBM before?")], beta,
+         "https://careers-ibm-us.icims.com/jobs/1/job", "per_company"),
+        ("'were you working for' with a former-employee help text", [dict(YESNO, label="Were you working for Northwind before?", help_text="Former employees")], beta, WORKDAY, "per_company"),
+        ("a short word inside a longer entry (GE Healthcare / General Electric)", [dict(YESNO, label="Have you worked for General Electric before?")],
+         _prof("geh", ["GE Healthcare"]), "https://generalelectric.wd5.myworkdayjobs.com/careers/job/1/apply", "per_company"),
+        ("GM Financial on the list, General Motors asked", [dict(YESNO, label="Have you worked for General Motors before?")],
+         _prof("gmf", ["GM Financial"]), "https://generalmotors.wd5.myworkdayjobs.com/careers/job/1/apply", "per_company"),
     ]
     for what, fields, prof, url, category in cases:
         plan, flags, for_model = _route(fields, prof, url, category)
@@ -187,10 +208,19 @@ def test_any_match_or_any_doubt_goes_to_jack():
     check(_prof("mapping2", None, raw="    - Beta Corp\n    - Contoso: 2019-2021\n").past_employers() is None
           and _prof("list-ok", ["Beta Corp"]).past_employers() == ["Beta Corp"],
           "a non-plain entry makes past_employers None; a plain list reads")
-    check(employers.company_from_url("https://careers-ibm.icims.com/jobs/1/job") == "ibm"
-          and employers.company_from_url("https://careers-northwind.icims.com/jobs/1/job") == "northwind"
+    check(employers.company_from_url("https://careers-ibm.icims.com/jobs/1/job") == ""
+          and employers.company_from_url("https://careers-northwind.icims.com/jobs/1/job") == ""
+          and employers.company_from_url("https://northwind.icims.com/jobs/1/job") == "northwind"
+          and employers.company_from_url("https://www.jobs-ups.com/job/1") == ""
+          and employers.company_from_url("https://acme-us.wd5.myworkdayjobs.com/careers/job/1") == ""
           and employers.company_from_url("https://careers.icims.com/jobs/1/job") == "",
-          "an iCIMS careers- subdomain names the company after the role word; a bare role word names none")
+          "a host token holding a role word or a second token names no company; a bare subdomain does")
+    check(employers.has_doubt(dict(YESNO, options=["Select", "Yes", "No"])) is False
+          and employers.has_doubt(dict(YESNO, placeholder="Select one")) is False
+          and employers.has_doubt(dict(YESNO, help_text="Required")) is True,
+          "beside the label only placeholders pass: 'Select' rows and a 'Select one' placeholder, not a help text")
+    check(employers._initials("United Parcel Service Inc") == "ups" and employers._initials("Procter & Gamble") == "pg",
+          "initials drop corporate suffixes")
     check(employers.label_company("Were you formerly employed at Northwind?") == "northwind"
           and employers.label_company("Are you employed by Northwind?") is None,
           "the past tense is a decided phrase; the present tense is not")
