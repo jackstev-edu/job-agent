@@ -139,6 +139,24 @@ def test_a_moved_pause_on_the_unchanged_form_at_a_confirmation_address_is_not_co
     check.done()
 
 
+def test_a_pause_whose_shape_could_not_be_read_is_not_confirmed_by_the_address_rule_on_the_pick_up_path():
+    # Fix of 7ef5c9b's BLOCK: an unreadable shape at pause time made
+    # _changed_since say "changed", and _pick_up then ran the check with
+    # changed=True, so the address rule confirmed the unchanged form. On
+    # 7ef5c9b this run ends "submitted".
+    from test_pick_up import REFERENCE, _page, _run
+    check = Checks()
+    prose = "<p>Thank you for applying. Please review your answers before submitting.</p>"
+    with _run(_page(city=REFERENCE + prose), start="/apply/confirmation", auto_submit=lambda: True) as (page, w):
+        out = w.run()
+        check(out.status == wizard.WAITING and w.pending["kind"] == "gate", f"the gate pause on the reference box ({out.status})")
+        w.pending["shape"] = None                       # the read failed at pause time
+        out = w.continue_from({})
+        check(out.status != "submitted" and out.submitted_by is None,
+              f"an unreadable pause shape on the unchanged form at /apply/confirmation: not confirmed on any path ({out.status}: {out.reason})")
+    check.done()
+
+
 def test_a_form_inside_a_footer_still_counts_and_an_unchanged_form_at_a_confirmation_address_is_not_confirmed():
     # Fix of b499329's BLOCK and its finding 2. On b499329 the footer form
     # was read as "no fillable control" and the page marked submitted; a

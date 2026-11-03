@@ -1204,7 +1204,11 @@ class Wizard:
         info.pop("approved", None)
         self.out.log.append(f"the page changed since the {what}: picked up from the page shown")
         refs = [r for f in (fill.fields if fill is not None else []) for r in (f.get("option_refs") or [f.get("ref")]) if r]
-        confirmed, evidence = self._confirmed_strict(pending.get("shape"), refs, changed=True)
+        # Every caller found the page moved when the shape was readable; a
+        # shape that could not be read at pause time says nothing about the
+        # page, so the address rule does not count then (fix of 7ef5c9b's
+        # BLOCK: `_changed_since` reads an unreadable shape as changed).
+        confirmed, evidence = self._confirmed_strict(pending.get("shape"), refs, changed=pending.get("shape") is not None)
         if confirmed:
             self._finish_confirmed(evidence, what)
         self._protect_held = True
