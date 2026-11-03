@@ -163,6 +163,13 @@ class Profile:
             return None
         return raw
 
+    def past_employers(self) -> list[str]:
+        """work_history.past_employers as a list of names (decision C, 2026-11-02); [] when unset or not a list."""
+        raw = (self.data.get("work_history") or {}).get("past_employers") if isinstance(self.data.get("work_history"), dict) else None
+        if not isinstance(raw, list):
+            return []
+        return [str(e).strip() for e in raw if isinstance(e, (str, int)) and str(e).strip()]
+
     def consent_allowlist(self) -> list[str]:
         raw = self.data.get("consent_allowlist")
         if not isinstance(raw, list):

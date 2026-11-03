@@ -20,7 +20,7 @@ from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import (adapters, browser as browser_mod, classify, extract, filler, mapper, memory,
+from . import (adapters, browser as browser_mod, classify, employers, extract, filler, mapper, memory,
                outcome, sensitive, shadow, signdate)
 
 if TYPE_CHECKING:
@@ -61,7 +61,7 @@ def resume_box(fields: list[dict]) -> dict | None:
 
 def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str],
           held_reason: str = HELD_AFTER_UPLOAD, *, learned=None, host: str = "",
-          shared: set[str] | None = None) -> tuple[dict, list[dict], list[dict]]:
+          shared: set[str] | None = None, url: str = "") -> tuple[dict, list[dict], list[dict]]:
     """
     The policy for one page's fields: (plan from the profile, flags for you,
     fields for the mapper). Sensitive fields never reach the mapper. Shared
@@ -108,6 +108,13 @@ def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str]
         dated = signdate.plan_for(field, fields)
         if dated is not None:
             plan[field["ref"]] = dated
+            continue
+        # Decision C (Jack, 2026-11-02): "have you worked for <company>" from
+        # his work_history.past_employers list, against the company the job's
+        # own address names; any match or doubt is his. Never the model.
+        worked = employers.plan_for(field, url, prof.past_employers() if hasattr(prof, "past_employers") else [])
+        if worked is not None:
+            plan[field["ref"]] = worked
             continue
         verdict = sensitive.decide(
             field, categories.get(field["ref"], "unknown"), prof)
@@ -377,7 +384,7 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
         lines.append(f"learned memory: removed on load, against the learning rules: {line}")
     plan, flags, for_model = route([f for f in fields if f["ref"] not in marked], categories, prof,
                                    new_after_upload, learned=store, host=memory.tenant_of(page.url),
-                                   shared=memory.shared_keys(fields))
+                                   shared=memory.shared_keys(fields), url=str(page.url or ""))
     held: list[str] = []
     for f in fields:
         if f["ref"] in marked:

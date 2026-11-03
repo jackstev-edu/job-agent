@@ -20,7 +20,7 @@ import re
 import unicodedata
 from typing import Any
 
-from . import sensitive, signdate
+from . import employers, sensitive, signdate
 
 # 2: census checkboxes need a <label> or aria-label; a hidden ticked box stops.
 # 3: an unread tick counts as ticked; a button pair's hidden box is exempt only
@@ -639,9 +639,31 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
                               "profile_path": None, "source": "human", "fit": None})
             continue
 
-        # 5. per-company questions are never answered from the profile yet.
-        # An optional one nobody answered is listed, not stopped on (8).
-        if category == "per_company" or "per_company" in kinds:
+        # 5. per-company questions are never answered from the profile, with
+        # decision C's one exception (Jack, 2026-11-02): a past-employer
+        # question the gate itself recomputes from the record's field, the
+        # job's address and work_history.past_employers, equal to the fill.
+        # The per-company rule as before; decision C's plan joins it by its
+        # source only, so a Department of Defense question ("Have you worked
+        # for the Department of Defense?") stays the legal question it is
+        # (fold round, decision 1).
+        if (category == "per_company" or "per_company" in kinds
+                or (decision or {}).get("source") == employers.SOURCE):
+            if decision and decision.get("source") == employers.SOURCE:
+                if employers.verify(f, decision, record.get("final_url") or record.get("url") or "",
+                                    profile.past_employers() if hasattr(profile, "past_employers") else []):
+                    trace.append({"ref": ref, "label": label[:120], "category": category,
+                                  "profile_path": "work_history.past_employers", "source": employers.SOURCE,
+                                  "fit": "exact"})
+                    if results is not None:
+                        res = results.get(ref)
+                        if not res or not res.get("filled"):
+                            content.append(f"{name}: filling it failed")
+                        elif res.get("unconfirmed", True):
+                            content.append(f"{name}: the page couldn't confirm the choice (unconfirmed)")
+                    continue
+                content.append(f"{name}: past-employer answer not recomputed from your list and the job's address")
+                continue
             reason = f"{name}: {PER_COMPANY_REASON}"
             # Not a checkbox: unticked, one asserts "No" to the question.
             if (optional_empty and not is_box

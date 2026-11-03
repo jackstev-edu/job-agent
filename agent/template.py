@@ -175,6 +175,20 @@ experience:
       -
 
 # -----------------------------------------------------------------------------
+#  PAST EMPLOYERS  -  for "have you worked for <company>?" questions.
+#
+#  Every employer you have ever worked for, one per line (decision C,
+#  2026-11-02). A question about the company the job's own address names is
+#  answered "No" (a yes / no) or "N/A" (a required details box) only when
+#  no entry here loosely matches that company; any match, any doubt in the
+#  wording (subsidiaries, affiliates, "or", contractors), or an empty list
+#  hands the question to you. Nothing here is ever learned or guessed.
+# -----------------------------------------------------------------------------
+work_history:
+  past_employers: []           # e.g.  - Example Co
+                               #       - General Widgets
+
+# -----------------------------------------------------------------------------
 #  SKILLS & CREDENTIALS
 # -----------------------------------------------------------------------------
 skills:
