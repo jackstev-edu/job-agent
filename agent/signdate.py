@@ -109,8 +109,10 @@ def value_for(field: dict, today: datetime.date | None = None) -> str | None:
 
 # Classifier categories the clock never fills past (fold of 2c24303's
 # finding 3): sensitive.decide hands these to Jack, and the clock ran
-# before it.
-NEVER_CATEGORIES = frozenset({"credential", "consent", "per_company"})
+# before it. A classifier reading of work authorization or pay on a date
+# box is not overridden either (fold of 9e3d5fb's finding 3); an eeo
+# reading is the expected one on a self-identification form and stays.
+NEVER_CATEGORIES = frozenset({"credential", "consent", "per_company", "work_authorization", "compensation"})
 
 
 def _own_text(field: dict) -> dict:

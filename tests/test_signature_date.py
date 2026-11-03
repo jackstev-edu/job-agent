@@ -205,7 +205,19 @@ def test_a_date_box_whose_own_text_reads_as_a_legal_question_is_jacks_and_its_na
         ("a credential category", dict(month), "credential"),
         ("a consent category", dict(month), "consent"),
         ("a per-company category", dict(month), "per_company"),
+        # Fold of 9e3d5fb's review, finding 3: the two categories it named.
+        ("a work_authorization category", dict(month), "work_authorization"),
+        ("a compensation category", dict(month), "compensation"),
     ]
+    # Fold of 9e3d5fb's review, finding 1: a PROFILE_PATHS line with no
+    # LEGAL_GUARD kind in the help text refuses the clock. (sensitive.decide
+    # itself routes such a personal_fact box on as before; only the clock
+    # fill is refused here.)
+    export = dict(year, help_text="Year your export control status was confirmed")
+    with mock.patch.object(signdate, "_today", return_value=TODAY):
+        check(signdate.plan_for(export, [export, eeo]) is None, "a profile line with no guard kind in the help text: no clock plan")
+        plan, flags, for_model = pipeline.route([export, eeo], {"y1": "personal_fact", "e1": "eeo"}, prof, set())
+        check(plan.get("y1", {}).get("source") != "clock", "routed: not the clock's")
     with mock.patch.object(signdate, "_today", return_value=TODAY):
         for what, box_, category in cases:
             check(signdate.plan_for(box_, [box_, eeo], category=category) is None, f"{what}: no clock plan")
@@ -236,9 +248,15 @@ def test_a_date_box_whose_own_text_reads_as_a_legal_question_is_jacks_and_its_na
         check(v["content_verdict"] == gate.WOULD_STOP and any("not recomputed from the clock" in x for x in v["content_reasons"]),
               f"the gate: a visa year dated from the clock stops ({v['content_reasons']})")
         v = gate_run(record(dict(month, raw_legal=True)))
-        check(v["content_verdict"] == gate.WOULD_STOP, "the gate: the raw legal flag stops a clock fill")
-        v = gate_run(record(dict(month), category="credential"))
-        check(v["content_verdict"] == gate.WOULD_STOP, "the gate: a credential category stops a clock fill")
+        check(v["content_verdict"] == gate.WOULD_STOP and any("not recomputed from the clock" in x for x in v["content_reasons"]),
+              f"the gate: the raw legal flag stops a clock fill, in the clock branch ({v['content_reasons']})")
+        for category in ("credential", "consent", "work_authorization", "compensation"):
+            v = gate_run(record(dict(month), category=category))
+            check(v["content_verdict"] == gate.WOULD_STOP and any("not recomputed from the clock" in x for x in v["content_reasons"]),
+                  f"the gate: a {category} category stops a clock fill, in the clock branch ({v['content_reasons']})")
+        v = gate_run(record(dict(year, help_text="Year your export control status was confirmed")))
+        check(v["content_verdict"] == gate.WOULD_STOP and any("not recomputed from the clock" in x for x in v["content_reasons"]),
+              f"the gate: a profile line with no guard kind in the help text stops a clock fill ({v['content_reasons']})")
         v = gate_run(record(dict(month, name="disability_signature_month")))
         check(v["content_verdict"] == gate.WOULD_SUBMIT, f"the gate: a name holding 'disability' is not the box's own text ({v['content_reasons']})")
     # The positive Jack asked for: a plain Date box on the disability
