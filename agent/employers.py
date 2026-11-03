@@ -61,9 +61,13 @@ NEVER_CATEGORIES = frozenset({"work_authorization", "eeo", "compensation", "lega
 # ampersand, a parenthesis or "and" / "or" inside it fails the grammar.
 # Lazy, so a tail word ("before") is read as the tail, not as part of the name.
 _CO = r"(?P<company>[a-z0-9][a-z0-9'’.\-]*(?: [a-z0-9][a-z0-9'’.\-]*){0,3}?)"
+# Past employment only: "have you worked for / been employed by / been an
+# employee of", "were you (formerly) employed at / an employee of". The
+# present tense ("are you employed by") asks something else (fix of
+# 0698a98's review, BLOCK 3).
 _YESNO = re.compile(
-    r"^(?:have|were|are) you (?:ever |previously |formerly |at any time )?"
-    r"(?:worked (?:for|at)|been employed (?:by|at)|employed (?:by|at)|been an employee of|an employee of) "
+    r"^(?:have you (?:ever |previously |formerly |at any time )?(?:worked (?:for|at)|been employed (?:by|at)|been an employee of)"
+    r"|were you (?:ever |previously |formerly |at any time )?(?:employed (?:by|at)|an employee of|working (?:for|at))) "
     r"(?:the )?" + _CO + r"(?: before| previously| in the past| at any time)?\s*\??$")
 _DETAILS = re.compile(
     r"^if (?:you were|you have been|you've been|you’ve been|yes,?) (?:ever |formerly |previously )?employed (?:at|by) (?:the )?"
@@ -76,10 +80,19 @@ _DOUBT = re.compile(
     r"\btemp\b|temporary|\binterns?\b|internship|partner|parent\s+compan|group\s+compan|includ|\balso\b|"
     r"\bother\b|another|formerly\s+(known|called|named)|known\s+as|\bnow\b|entit(y|ies)|brands?\b|division|franchise|dealer|"
     r"capacity|products?\b|services?\b|customers?\b|clients?\b|recruit|\bwith\b|\bof\s+any\b|\bany\s+of\b", re.I)
-# A company slot that names a kind of place or a group, not one company.
-_CO_DOUBT = re.compile(r"^(?:a|an|any|our|this|that|these|those|all)\b|\b(?:store|stores|company|companies|entity|"
+# A company slot that names a kind of place or a group, not one company,
+# or two companies joined by "and" (fix of 0698a98's review, BLOCK 1).
+_CO_DOUBT = re.compile(r"^(?:a|an|any|our|this|that|these|those|all)\b|\band\b|\b(?:store|stores|company|companies|entity|"
                        r"location|locations|site|sites|office|offices|facility|facilities|plant|plants|dealership|"
                        r"franchise|affiliate|subsidiary|division|unit|group|brand|team|teams|department)$", re.I)
+# Doubt in the help text, placeholder or an option (the label's grammar
+# covers the label): another company named beside the first, in any
+# shape (fix of 0698a98's review, BLOCK 2).
+_BESIDE_DOUBT = re.compile(r"formerly|previously|\bfka\b|f/k/a|[(),;/&]|\band\b", re.I)
+# A hyphenated subdomain's leading role word: careers-ibm.icims.com names
+# "ibm", three characters, which is doubt (fix of 0698a98's review, BLOCK 4).
+_SUBDOMAIN_PREFIX = re.compile(r"^(?:us|uk|global)?(?:careers?|jobs?|apply|recruiting|recruitment|talent|hiring|external|"
+                               r"internal|candidates?|employment)[-_]+", re.I)
 _SUFFIXES = frozenset({"inc", "incorporated", "llc", "llp", "lp", "corp", "corporation", "co", "company", "ltd",
                        "limited", "plc", "gmbh", "ag", "sa", "nv", "bv", "pty", "the"})
 _ALNUM = re.compile(r"[^0-9a-z]+")
@@ -114,14 +127,21 @@ def company_from_url(url: str) -> str:
         return _spaceless(tenant.split("/", 1)[1])
     host = (urlsplit(f"https://{tenant}/").hostname or "").lower() if "." in tenant else ""
     if not host:                                                # a bare Workday / Avature subdomain
-        return "" if tenant in ("www", "careers", "jobs", "apply") else _spaceless(tenant)
+        return _subdomain_company(tenant)
     if host.endswith(SUBDOMAIN_HOSTS):
-        sub = host.split(".")[0]
-        return "" if sub in ("www", "careers", "jobs", "apply") else _spaceless(sub)
+        return _subdomain_company(host.split(".")[0])
     family = pages.host_family(f"https://{host}/")
     if family in ATS_DOMAINS or (family == host and host.count(".") == 0):
         return ""
     return _spaceless(family.split(".")[0])
+
+
+def _subdomain_company(sub: str) -> str:
+    """The company word of a portal subdomain: a role word ("careers-", "jobs-") stripped first; a bare role word names none."""
+    sub = _SUBDOMAIN_PREFIX.sub("", sub.lower())
+    if not sub or sub in ("www", "careers", "career", "jobs", "job", "apply", "recruiting", "talent"):
+        return ""
+    return _spaceless(sub)
 
 
 def _readings(text: Any) -> list[str]:
@@ -130,9 +150,17 @@ def _readings(text: Any) -> list[str]:
 
 
 def has_doubt(field: dict) -> bool:
-    """A doubt word on any reading of the label, help text, placeholder or an option."""
+    """
+    A doubt word on any reading of the label, help text, placeholder or an
+    option; beside the label (whose grammar admits one plain company), any
+    shape a second company could take: "formerly", "previously", "fka", a
+    parenthesis, a comma, a slash, an ampersand, "and".
+    """
     texts = [field.get("label"), field.get("help_text"), field.get("placeholder"), *(field.get("options") or [])]
-    return any(_DOUBT.search(v) for t in texts for v in sensitive.text_variants(str(t or "")))
+    if any(_DOUBT.search(v) for t in texts for v in sensitive.text_variants(str(t or ""))):
+        return True
+    beside = [field.get("help_text"), field.get("placeholder"), *(field.get("options") or [])]
+    return any(_BESIDE_DOUBT.search(v) for t in beside for v in sensitive.text_variants(str(t or "")))
 
 
 def parse_label(label: Any) -> tuple[str, str] | None:
@@ -213,7 +241,10 @@ def entry_matches(entry: Any, tenant: str, named: Any) -> bool:
         return False
     named_sl = _spaceless(named)
     if not any(len(w) >= 3 for w in e_words):
-        return e_sl == _spaceless(tenant) or (len(e_sl) >= 2 and e_sl == _initials(named)) or e_sl in _norm(named).split()
+        # Its letters inside the tenant count too ("GM" in "gmfinancial":
+        # the safe direction, 0698a98's review).
+        return (e_sl == _spaceless(tenant) or (len(e_sl) >= 2 and e_sl in _spaceless(tenant))
+                or (len(e_sl) >= 2 and e_sl == _initials(named)) or e_sl in _norm(named).split())
     return (loose_match(entry, tenant) or loose_match(entry, named_sl) or loose_match(named, e_sl)
             or (len(e_sl) >= 2 and e_sl == _initials(named)) or (len(named_sl) >= 2 and named_sl == _initials(entry)))
 

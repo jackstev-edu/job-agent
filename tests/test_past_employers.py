@@ -160,17 +160,40 @@ def test_any_match_or_any_doubt_goes_to_jack():
         ("a legal_declaration category (hole)", [YESNO], beta, WORKDAY, "legal_declaration"),
         ("a credential category (hole)", [YESNO], beta, WORKDAY, "credential"),
         ("a yes / no question rendered as a text box (hole)", [dict(YESNO, type="text", options=None, option_refs=None)], beta, WORKDAY, "per_company"),
-        ("a `Name: dates` entry: the whole list is doubt (hole)", [YESNO, DETAILS], _prof("mapping", None, raw="    - Beta Corp\n    - Northwind: 2019-2021\n"), WORKDAY, "per_company"),
+        ("a `Name: dates` entry: the whole list is doubt (hole)", [YESNO, DETAILS], _prof("mapping", None, raw="    - Beta Corp\n    - Contoso: 2019-2021\n"), WORKDAY, "per_company"),
         ("a blank entry: the whole list is doubt (hole)", [YESNO], _prof("blank", None, raw="    - Beta Corp\n    - ''\n"), WORKDAY, "per_company"),
+        # Fix of 0698a98's review (each gave No on 0698a98).
+        ("'and' in the company slot", [dict(YESNO, label="Have you worked for Sandia and SA?")], beta,
+         "https://sandia.wd5.myworkdayjobs.com/careers/job/1/apply", "per_company"),
+        ("'P and G' with the list's Procter & Gamble", [dict(YESNO, label="Have you worked for P and G?")], _prof("pg", ["Procter & Gamble"]),
+         "https://pandg.wd5.myworkdayjobs.com/careers/job/1/apply", "per_company"),
+        ("'(formerly ...)' in the help text", [dict(YESNO, help_text="Northwind (formerly Contoso Ltd.)")], _prof("fk", ["Contoso"]), WORKDAY, "per_company"),
+        ("a comma in the help text", [dict(YESNO, help_text="Northwind, Contoso Ltd.")], _prof("comma2", ["Contoso"]), WORKDAY, "per_company"),
+        ("'and' in the help text", [dict(YESNO, help_text="Northwind and Contoso")], _prof("and2", ["Contoso"]), WORKDAY, "per_company"),
+        ("'fka' in the placeholder", [dict(YESNO, placeholder="Northwind fka Contoso")], _prof("fka", ["Contoso"]), WORKDAY, "per_company"),
+        ("a second company in an option", [dict(YESNO, options=["Yes", "No", "Yes, at Contoso"])], _prof("opt2", ["Contoso"]), WORKDAY, "per_company"),
+        ("the present tense 'are you employed by'", [dict(YESNO, label="Are you employed by Northwind?")], beta, WORKDAY, "per_company"),
+        ("the present tense 'are you an employee of'", [dict(YESNO, label="Are you an employee of Northwind?")], beta, WORKDAY, "per_company"),
+        ("an iCIMS careers- host naming a three-letter company", [dict(YESNO, label="Have you worked for IBM before?")], beta,
+         "https://careers-ibm.icims.com/jobs/1/job", "per_company"),
+        ("a short entry inside the tenant", [dict(YESNO, label="Have you worked for Financial before?")], _prof("gm2", ["GM"]),
+         "https://gmfinancial.wd5.myworkdayjobs.com/careers/job/1/apply", "per_company"),
     ]
     for what, fields, prof, url, category in cases:
         plan, flags, for_model = _route(fields, prof, url, category)
         refs = {f["ref"] for f in fields}
         check(not (refs & set(plan)) and not for_model and {fl["ref"] for fl in flags} == refs,
               f"{what}: Jack's, never the model ({plan}, {[fl.get('reason') for fl in flags]})")
-    check(_prof("mapping2", None, raw="    - Beta Corp\n    - Northwind: 2019-2021\n").past_employers() is None
+    check(_prof("mapping2", None, raw="    - Beta Corp\n    - Contoso: 2019-2021\n").past_employers() is None
           and _prof("list-ok", ["Beta Corp"]).past_employers() == ["Beta Corp"],
           "a non-plain entry makes past_employers None; a plain list reads")
+    check(employers.company_from_url("https://careers-ibm.icims.com/jobs/1/job") == "ibm"
+          and employers.company_from_url("https://careers-northwind.icims.com/jobs/1/job") == "northwind"
+          and employers.company_from_url("https://careers.icims.com/jobs/1/job") == "",
+          "an iCIMS careers- subdomain names the company after the role word; a bare role word names none")
+    check(employers.label_company("Were you formerly employed at Northwind?") == "northwind"
+          and employers.label_company("Are you employed by Northwind?") is None,
+          "the past tense is a decided phrase; the present tense is not")
     check(employers.loose_match("General Motors", "gm") and employers.loose_match("Northwind Traders", "northwind")
           and employers.loose_match("Beta Corp", "betacorp") and not employers.loose_match("Beta Corp", "northwind")
           and not employers.loose_match("Co", "northwind"),
@@ -203,7 +226,7 @@ def test_a_non_plain_list_entry_is_said_in_the_job_log_and_the_question_stays_ja
     check = Checks()
     p = TEST_HOME / "employers-page.html"
     p.write_text(PAGE, encoding="utf-8")
-    prof = _prof("mapping-page", None, raw="    - Beta Corp\n    - Northwind: 2019-2021\n")
+    prof = _prof("mapping-page", None, raw="    - Beta Corp\n    - Contoso: 2019-2021\n")
     with mock_page(p) as page:
         # The address is the mock file's: with the list doubt the plan is
         # refused before the tenant is read, which is the point.
