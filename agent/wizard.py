@@ -383,7 +383,14 @@ class Wizard:
             kind = self.page.evaluate(pages._KIND_JS)
             if not isinstance(kind, dict) or not isinstance(kind.get("pw"), int) or kind["pw"] > 0:
                 return
-            snap = snapshot_mod.dump(self.page, getattr(self.prof, "data", None) or {}, self._strip_values())
+            extra, complete = self._strip_values()
+            if not complete:
+                # A part of what must be stripped could not be read (learned
+                # memory unreadable, a step unreadable): no file, one line
+                # (fold of 99c5a77's review).
+                self.out.log.append("snapshot not written (the values to strip could not all be read)")
+                return
+            snap = snapshot_mod.dump(self.page, getattr(self.prof, "data", None) or {}, extra)
             if snap.get("error"):
                 self.out.log.append(f"snapshot not written ({_clean(str(snap['error']))})")
                 return
@@ -394,30 +401,42 @@ class Wizard:
         except Exception as e:
             self.out.log.append(f"snapshot not written ({type(e).__name__})")
 
-    def _strip_values(self) -> list:
+    def _strip_values(self) -> tuple[list, bool]:
         """
         What a snapshot must also strip (Jack, 2026-11-03): every learned
         answer, and this job's typed values so far (every page's read-back
         and every planned value, the fill in hand included). None of these
-        is ever a password (no plan or read-back holds one). A part that
-        can't be read contributes nothing; the strip is never skipped.
+        is ever a password (no plan or read-back holds one). Returns the
+        values and whether every part was read: a part that can't be read
+        (learned.yaml that didn't parse, an unreadable step) makes the
+        snapshot not worth writing (fold of 99c5a77's review), and the
+        caller writes none. Each part has its own try.
         """
         out: list = []
+        complete = True
+        parts = (
+            lambda: list(self.snapshots.values()),
+            lambda: [d.get("value") for step in self.out.steps for d in (step.get("plan") or {}).values() if isinstance(d, dict)],
+            lambda: [d.get("value") for d in (getattr((self.pending or {}).get("fill"), "plan", None) or {}).values() if isinstance(d, dict)],
+            lambda: list((getattr((self.pending or {}).get("fill"), "snapshot", None) or {}).values()),
+        )
+        for part in parts:
+            try:
+                out.extend(part())
+            except Exception:
+                complete = False
         try:
-            out.extend(self.snapshots.values())
-            for step in self.out.steps:
-                out.extend(d.get("value") for d in (step.get("plan") or {}).values() if isinstance(d, dict))
-            held = (self.pending or {}).get("fill")
-            if held is not None:
-                out.extend(d.get("value") for d in (getattr(held, "plan", None) or {}).values() if isinstance(d, dict))
-                out.extend((getattr(held, "snapshot", None) or {}).values())
+            store = memory.Learned.load()
+            if getattr(store, "unreadable", None):
+                complete = False
+            out.extend(e.get("answer") for e in store.entries if isinstance(e, dict))
+            # A load-time removal belongs in the job log too (file, log,
+            # Memory page), as pipeline.fill_page reports it.
+            for line in (getattr(store, "just_removed", None) or []):
+                self.out.log.append(f"learned memory: removed on load, against the learning rules: {line}")
         except Exception:
-            pass
-        try:
-            out.extend(e.get("answer") for e in memory.Learned.load().entries if isinstance(e, dict))
-        except Exception:
-            pass
-        return out
+            complete = False
+        return out, complete
 
     def _parked(self, reason: str) -> Outcome:
         # The terminal's park; a GUI park logs the same line in

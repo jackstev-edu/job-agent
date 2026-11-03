@@ -170,26 +170,48 @@ def profile_values(data: Any) -> tuple[set[str], set[str]]:
     return texts, digits
 
 
-def strip_values(obj: Any, texts: set[str], digits: set[str]) -> Any:
+def _strip_text(obj: str, texts: set[str], digits: set[str]) -> str:
+    s = _norm(obj)
+    if any(v in s for v in texts):
+        return REDACTED
+    d = re.sub(r"\D", "", s)
+    # A profile number inside the string's digits, or the string's own
+    # digits (7+) inside a profile number: "824-9000" is part of the phone.
+    if d and any(n in d or (len(d) >= MIN_VALUE_DIGITS and d in n) for n in digits):
+        return REDACTED
+    return obj
+
+
+def strip_values(obj: Any, texts: set[str], digits: set[str],
+                 option_texts: set[str] | None = None, option_digits: set[str] | None = None) -> Any:
     """
-    The dump with every string that contains a profile value (or whose
-    digits contain a profile number) replaced whole by REDACTED. Keys are
-    structure and are not stripped; a value in a key would be a bug upstream.
+    The dump with every string that contains a stripped value (or whose
+    digits contain a stripped number) replaced whole by REDACTED. Keys are
+    structure and are not stripped; a value in a key would be a bug
+    upstream. An option entry (a select's `options` list, an <option>
+    element's text, a radio box's label: the form's own vocabulary, where
+    a redaction marks the chosen answer by its position) is stripped
+    against `option_texts` / `option_digits` only, the profile's values
+    as before (fold of 99c5a77's review: a learned EEO answer must not
+    show by position); None means the same sets.
     """
+    o_texts = texts if option_texts is None else option_texts
+    o_digits = digits if option_digits is None else option_digits
     if isinstance(obj, str):
-        s = _norm(obj)
-        if any(v in s for v in texts):
-            return REDACTED
-        d = re.sub(r"\D", "", s)
-        # A profile number inside the string's digits, or the string's own
-        # digits (7+) inside a profile number: "824-9000" is part of the phone.
-        if d and any(n in d or (len(d) >= MIN_VALUE_DIGITS and d in n) for n in digits):
-            return REDACTED
-        return obj
+        return _strip_text(obj, texts, digits)
     if isinstance(obj, list):
-        return [strip_values(v, texts, digits) for v in obj]
+        return [strip_values(v, texts, digits, o_texts, o_digits) for v in obj]
     if isinstance(obj, dict):
-        return {k: strip_values(v, texts, digits) for k, v in obj.items()}
+        option_row = obj.get("tag") == "option" or (obj.get("tag") == "input" and str(obj.get("type") or "").lower() == "radio")
+        out = {}
+        for k, v in obj.items():
+            if k == "options" and isinstance(v, list):
+                out[k] = [_strip_text(x, o_texts, o_digits) if isinstance(x, str) else x for x in v]
+            elif option_row and k in ("text", "label") and isinstance(v, str):
+                out[k] = _strip_text(v, o_texts, o_digits)
+            else:
+                out[k] = strip_values(v, texts, digits, o_texts, o_digits)
+        return out
     return obj
 
 
@@ -236,8 +258,12 @@ def dump(page: "Page", profile_data: Any, extra_values: Any = ()) -> dict:
         "shadow_hosts": got.get("shadow_hosts", 0),   # open roots not dumped either
         "elements": got.get("elements") or [],
     }
+    # Option entries are stripped against the profile's values only: a
+    # learned or planned answer redacted inside an option list would mark
+    # the chosen answer by its position.
+    p_texts, p_digits = profile_values(profile_data)
     texts, digits = profile_values([profile_data, list(extra_values or [])])
-    out = strip_values(out, texts, digits)
+    out = strip_values(out, texts, digits, p_texts, p_digits)
     out["taken"] = datetime.now().isoformat(timespec="seconds")   # after the strip: a year is often a profile value
     return out
 

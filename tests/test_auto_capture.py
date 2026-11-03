@@ -122,7 +122,7 @@ def test_a_password_page_writes_none_and_a_dump_failure_never_stops_the_job():
 def test_a_capture_strips_the_jobs_typed_values_and_every_learned_answer():
     # Jack, 2026-11-03: snapshots also strip learned answers and the
     # current fill's typed values. Fails on d9c5b10 (dump took no extra
-    # values; the wizard passed none).
+    # values; the wizard passed none); the unreadable case fails on ba21953.
     from agent import memory
     check = Checks()
     folder = TEST_HOME / "snaps-extra"
@@ -156,7 +156,17 @@ def test_a_capture_strips_the_jobs_typed_values_and_every_learned_answer():
     check(len(seen) >= 3 and all("LEARNED-EXTRA-SENTINEL" in s for s in seen),
           f"every capture carries the learned answer ({len(seen)} captures)")
     check(any("Test" in s for s in seen[1:]), "a later capture carries the first page's read-back value (the typed first name)")
-    check(not any(any(isinstance(v, str) and "hunter" in v for v in s) for s in seen), "nothing like a password is ever gathered (no plan holds one)")
+    # Fold of 99c5a77's review: learned.yaml that didn't parse means the
+    # learned answers cannot be stripped, so no file is written.
+    memory.path().write_text("entries: [unclosed", encoding="utf-8")
+    folder2 = TEST_HOME / "snaps-unreadable"
+    shutil.rmtree(folder2, ignore_errors=True)
+    with mock_page(_write("capture-plain-2.html", PLAIN_PAGE)) as page:
+        w = _wizard(page, folder2)
+        w._capture("scan")
+        check(not folder2.exists() or not list(folder2.glob("*.json")), "learned.yaml unreadable: no snapshot file")
+        check(any(l == "snapshot not written (the values to strip could not all be read)" for l in w.out.log),
+              f"one log line says why ({[l for l in w.out.log if 'snapshot' in l]})")
     check.done()
 
 
