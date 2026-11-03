@@ -42,18 +42,43 @@ REFUSED = [
     ("newsletter", "Sign me up for the newsletter"),
     ("non-compete", "I accept the non-compete clause"),
 ]
+# Plain forms of the same wordings that 5da85c0's patterns missed (its
+# review's BLOCK), each refused by ALLOWLIST_FORBIDDEN itself.
+VARIANTS = [
+    ("'non compete' with a space", "I accept the non compete clause"),
+    ("'non‑compete' with a Unicode hyphen", "I accept the non‑compete clause"),
+    ("'at‐will' with a Unicode hyphen", "I understand that my employment is at‐will"),
+    ("'at will' with a space", "I understand that my employment is at will"),
+    ("a word between drug and testing", "I agree to submit to drug and alcohol testing"),
+    ("a credit report", "I consent to Example Co obtaining my credit report"),
+    ("a consumer report", "I consent to a consumer report being obtained"),
+    ("a credit history", "I consent to a review of my credit history"),
+    ("references checked, passive", "I understand that my references may be checked"),
+    ("references verified", "Example Co may verify my references"),
+    ("background alone", "I agree to a background investigation"),
+    ("signatures", "Our signatures below confirm the above"),
+    ("undersigned", "I, the undersigned, accept the above"),
+    ("an invisible character inside authorize", "I auth­orize Example Co to verify my details"),
+]
+FORBIDDEN_REASON = "an authorize / release / check / arbitration / at-will / signing / contact / marketing / non-compete wording"
 ALLOWED = "I accept the employee handbook"
 
 
 def test_each_named_wording_is_refused_with_its_reason_and_a_plain_acceptance_is_not():
-    # Fails on 5ba4a07 for authorize, release, the checks, arbitration,
-    # at-will, e-signature, signing and non-compete: allowlist_refusal
-    # returned None (marketing, SMS, newsletter and "contact me" were
-    # already refused by the consent policy's marketing patterns).
+    # On 16b6ac3 (before 5da85c0) allowlist_refusal returned None for
+    # authorize, release, reference check, credit check, arbitration,
+    # at-will, e-signature, signing and "You may contact"; background
+    # check and drug screen were already refused as criminal-record stops,
+    # non-compete as a per-company stop, SMS / marketing / newsletter as
+    # marketing. The VARIANTS each returned None on 5da85c0 (its review's
+    # BLOCK) and are refused by ALLOWLIST_FORBIDDEN's own reason.
     check = Checks()
     for what, label in REFUSED:
         why = approve.allowlist_refusal(label)
         check(why is not None, f"{what}: refused ({why})")
+    for what, label in VARIANTS:
+        why = approve.allowlist_refusal(label)
+        check(why == FORBIDDEN_REASON, f"{what}: refused by the forbidden-wording check ({why})")
     check(approve.allowlist_refusal(ALLOWED) is None, "a plain handbook acceptance is still allowed")
     check(approve.allowlist_refusal("I agree to the Terms of Service and Privacy Policy") is None,
           "a terms / privacy wording is still allowed (the policy ticks it anyway)")
@@ -84,19 +109,19 @@ def test_the_server_route_refuses_each_wording_and_writes_nothing():
     check = Checks()
     state = _state("route")
     store = memory.Learned.load(state.memory_path)
-    ids = {what: _plant(store, label) for what, label in REFUSED}
+    ids = {what: _plant(store, label) for what, label in REFUSED + VARIANTS}
     ok_id = _plant(store, ALLOWED)
     server = gui.Server(state).start()
     try:
         origin = f"http://127.0.0.1:{server.port}"
-        for what, _label in REFUSED:
+        for what, _label in REFUSED + VARIANTS:
             status, _, body = _req(server, "POST", "/memory/always-tick", {"id": ids[what]}, origin=origin)
             check(status == 200 and body.get("ok") is False and "never allowlisted" in str(body.get("error")),
                   f"{what}: the route refuses ({body})")
         check(Profile.load(state.profile_path).consent_allowlist() == [], "nothing written to consent_allowlist")
         check(not approve.backups_of(state.profile_path), "no backup taken: the file was never touched")
         kept = {o["id"] for o in memory.Learned.load(state.memory_path).offers}
-        check(all(ids[w] in kept for w, _ in REFUSED), "a refused offer stays listed (nothing was written for it)")
+        check(all(ids[w] in kept for w, _ in REFUSED + VARIANTS), "a refused offer stays listed (nothing was written for it)")
         status, _, body = _req(server, "POST", "/memory/always-tick", {"id": ok_id}, origin=origin)
         check(status == 200 and body.get("ok") is True and Profile.load(state.profile_path).consent_allowlist() == [ALLOWED],
               f"the plain acceptance still goes through the same route ({body})")
@@ -115,7 +140,7 @@ def test_offer_ticks_never_offers_one_of_them():
         return {"field": {"ref": "x", "type": "checkbox", "label": label, "explicit_label": label},
                 "kind": "filled_blank", "agent": None, "now": True, "decision": {}, "category": "consent"}
 
-    offered = corrections.offer_ticks([change(l) for _, l in REFUSED] + [change(ALLOWED)],
+    offered = corrections.offer_ticks([change(l) for _, l in REFUSED + VARIANTS] + [change(ALLOWED)],
                                       url="https://careers.example-co.com/apply", log=[], store=store)
     check([o["label"] for o in offered] == [ALLOWED], f"only the plain acceptance is offered ({[o['label'] for o in offered]})")
     check.done()

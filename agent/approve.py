@@ -198,10 +198,17 @@ def apply_profile_line(path: Path, line: str, value: str, expected_stamp: str) -
 # Wordings "Always tick this exact wording" refuses outright (Jack,
 # 2026-11-03): an allowlist line is ticked on every portal that shows it,
 # and none of these is a consent to terms. Matched on every reading.
+# Every plain form of each (fix of 5da85c0's BLOCK): the bare nouns
+# (drug, background, references, credit report, consumer report),
+# "checked", "signatures", "undersigned", a spaced or Unicode-dashed
+# "non compete" / "at will".
+_DASH = r"[\s\-‐-―−]"
 ALLOWLIST_FORBIDDEN = re.compile(
-    r"authori[sz]|\brelease|(background|reference|drug|credit|criminal|employment|education|medical)\s+"
-    r"(check|screen|investigat|verif|test)|\bchecks?\b|\bscreening|arbitrat|at[\s-]will|e-?sign|electronic\s+signature|"
-    r"\bsign(ed|ing|ature)?\b|\bcontact|\bsms\b|text\s+messag|marketing|newsletter|non-?compete|restrictive\s+covenant",
+    r"authori[sz]|\brelease|\bbackground\b|\breferenc\w*|\bdrug\w*|\bcredit\s+(report|history|check|score)|"
+    r"\bconsumer\s+report|(criminal|employment|education|medical)\s+(check|screen|investigat|verif|test)|"
+    r"\bcheck(s|ed|ing)?\b|\bscreening|arbitrat|\bat" + _DASH + r"*will\b|e-?sign|electronic\s+signature|"
+    r"signatur|\bsign(s|ed|ing|er|ers)?\b|undersign|\bcontact|\bsms\b|text\s+messag|marketing|newsletter|"
+    r"\bnon" + _DASH + r"*compet|restrictive\s+covenant",
     re.I)
 
 
