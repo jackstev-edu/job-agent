@@ -352,6 +352,29 @@ _SCAN_JS = safe(r"""
     return last ? textOf(last, el).slice(0, 120) : '';
   };
 
+  // Decision B (Jack, 2026-11-02): is this box in a signature block, the
+  // smallest container (up to six levels, holding at most twelve boxes)
+  // that also holds a Name / signature box? Structure only; the Python
+  // side (signdate.py) decides whether the page is a self-identification
+  // form and whether the box names a date part with a stated format.
+  const NAME_RX = /^(your\s+|full\s+|applicant'?s?\s+|candidate'?s?\s+|printed\s+|legal\s+)?(name|signature|e-?signature|electronic\s+signature)(\s*\(.*\))?\s*:?\s*\*?$/i;
+  const plainBox = b => ['INPUT', 'TEXTAREA'].includes(__ja.tag(b)) && isVisible(b)
+      && !['hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'password'].includes((__ja.type(b) || '').toLowerCase());
+  const signatureBlock = el => {
+    let p = __ja.parent(el);
+    for (let i = 0; i < 6 && p && p !== document.body; i++, p = __ja.parent(p)) {
+      const tag = __ja.tag(p);
+      if (tag === 'FORM') return false;             // the whole form is no block
+      const boxes = [...p.querySelectorAll('input, textarea')].filter(plainBox);
+      if (boxes.length > 12) return false;
+      if (boxes.some(b => b !== el && NAME_RX.test(labelFor(b).trim()))) return true;
+      // A fieldset, group or section without a name box is the box's own
+      // block: a name box in a sibling block says nothing about this one.
+      if (tag === 'FIELDSET' || tag === 'SECTION' || ['group', 'region'].includes(__ja.attr(p, 'role') || '')) return false;
+    }
+    return false;
+  };
+
   // Each stamped element's tag, type and name, as the scan saw it. A read
   // refuses an element that no longer matches (a reused or swapped node).
   const sigs = {};
@@ -521,6 +544,8 @@ _SCAN_JS = safe(r"""
       required: !!el.required || __ja.attr(el, 'aria-required') === 'true',
       help_text: helpFor(el),
       section: sectionOf(el),
+      signature_block: signatureBlock(el),
+      inputmode: __ja.attr(el, 'inputmode') || '',
       maxlength: el.maxLength > 0 ? el.maxLength : null,
       tag, dom_name: __ja.name(el) || '', dom_id: __ja.id(el) || '',
       explicit_label: explicitLabel(el),

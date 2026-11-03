@@ -20,7 +20,7 @@ import re
 import unicodedata
 from typing import Any
 
-from . import sensitive
+from . import sensitive, signdate
 
 # 2: census checkboxes need a <label> or aria-label; a hidden ticked box stops.
 # 3: an unread tick counts as ticked; a button pair's hidden box is exempt only
@@ -696,7 +696,12 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
                               and isinstance(decision.get("learned_key"), str)
                               and decision.get("learned_key") == question_key(f))
             traced_to_profile = bool(decision and entry["source"] == "profile" and entry["profile_path"])
-            if not (traced_to_profile or learned_ok):
+            # Decision B (Jack, 2026-11-02): today's date in a self-
+            # identification form's signature block, recomputed here from
+            # the record's own field (the block, the page's EEO question,
+            # the part, the widget's stated format) and equal to the fill.
+            clock_ok = signdate.verify(f, decision, fields)
+            if not (traced_to_profile or learned_ok or clock_ok):
                 content.append(f"{name}: legal/eligibility/EEO/pay answer not traced to a "
                                f"profile line or to your own answer on this question (left for you)")
                 continue

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import (adapters, browser as browser_mod, classify, extract, filler, mapper, memory,
-               outcome, sensitive, shadow)
+               outcome, sensitive, shadow, signdate)
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page
@@ -100,6 +100,14 @@ def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str]
                           "options": field.get("options"), "action": "human",
                           "value": None, "source": "human", "category": category,
                           "reason": held_reason})
+            continue
+        # Decision B (Jack, 2026-11-02): a signature block's date-part box on
+        # a self-identification form takes today's date from the clock, in
+        # the widget's own stated format; never the model, never a secret
+        # box. The gate recomputes the same plan from the record.
+        dated = signdate.plan_for(field, fields)
+        if dated is not None:
+            plan[field["ref"]] = dated
             continue
         verdict = sensitive.decide(
             field, categories.get(field["ref"], "unknown"), prof)
