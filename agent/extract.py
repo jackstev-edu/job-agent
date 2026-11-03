@@ -435,7 +435,10 @@ _SCAN_JS = safe(r"""
         if (seenGroups.has(box)) return;
         const peers = [...box.querySelectorAll('input[type=checkbox]')].filter(p => isVisible(p) && !p.disabled);
         const labels = peers.map(p => labelFor(p));
-        if (peers.length >= 2 && labels.every(l => STATEMENT.test(l))) {
+        // A box whose own label hits a HARD_STOP (a terms / privacy consent
+        // beside an "I'd like job alerts" box) is never grouped: the consent
+        // policy's own path keeps it (fold of ab0a09e's finding 5).
+        if (peers.length >= 2 && labels.every(l => STATEMENT.test(l) && !anyHit(RAW_STOPS, l))) {
           seenGroups.add(box);
           const optionRefs = peers.map(p => stamp(p));
           const legend = __ja.tag(box) === 'FIELDSET' ? box.querySelector(':scope > legend') : null;

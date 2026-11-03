@@ -615,6 +615,23 @@ def decide(field: dict, category: str, profile) -> dict:
             return {**base, "action": "human", "value": None, "source": "human",
                     "reason": f"A {kind} question with a box to type in. "
                               f"Answer it yourself."}
+        if ftype == "checkbox" and is_statement_label(field.get("label")):
+            # A lone box whose label is an answer statement (item 5): a tick
+            # would assert the statement, and a true / false line can't say
+            # which statement. Jack's, with the reason said plainly (fold of
+            # ab0a09e's finding 7).
+            return {**base, "action": "human", "value": None, "source": "human",
+                    "reason": "This box's label is an answer statement, not the question; a tick "
+                              "would assert it, so it is yours."}
+        if field.get("widget") == "checkboxes":
+            # The statements must name no profile line beyond the one the
+            # question names: a fieldset mixing another question's "No, ..."
+            # box in is never answered (fold of ab0a09e's finding 3).
+            extra = all_profile_lines(" ".join(str(o) for o in field.get("options") or [])) - {path}
+            if extra:
+                return {**base, "action": "human", "value": None, "source": "human",
+                        "reason": "The boxes of this group name another profile line "
+                                  f"({', '.join(sorted(extra))}) beside `{path}`. Tick it yourself."}
         raw = profile.get(path)
         if raw is None:
             return {**base, "action": "human", "value": None, "source": "human",
@@ -633,6 +650,14 @@ def decide(field: dict, category: str, profile) -> dict:
                 "profile_path": path, "fit": fit}
 
     # -- ordinary fields -----------------------------------------------------
+    if field.get("widget") == "checkboxes":
+        # A checkbox group is answered from a profile line with a strict fit
+        # or by Jack, never by the model: a tick asserts a statement (fix of
+        # ab0a09e's BLOCK 1: a "communication preferences" group would have
+        # gone to the mapper).
+        return {**base, "action": "human", "value": None, "source": "human",
+                "reason": "A group of statement checkboxes is ticked only from a profile line "
+                          "that fits one statement exactly; none does. Tick it yourself."}
     return {**base, "action": action, "value": None, "source": "model"}
 
 

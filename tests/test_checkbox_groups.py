@@ -23,7 +23,7 @@ from unittest import mock
 
 from _fill_run import PROFILE, map_from_profile
 from _harness import REPO, TEST_HOME, Checks, mock_page, run_as_script
-from agent import extract, filler, gate, pipeline, sensitive
+from agent import extract, filler, gate, memory, pipeline, sensitive
 from agent.profile import Profile
 import yaml
 
@@ -155,8 +155,9 @@ def test_a_lone_statement_checkbox_goes_to_jack_and_a_lone_question_box_keeps_th
         by = {f["label"]: f for f in fill.fields}
         statement, question = by["I have a disability"], by["Do you have a disability?"]
         flag = next((fl for fl in fill.flags if fl.get("ref") == statement["ref"]), None)
-        check(statement["ref"] not in fill.plan and flag and flag.get("source") == "human",
-              f"the lone statement box is Jack's ({flag and flag.get('reason')})")
+        check(statement["ref"] not in fill.plan and flag and flag.get("source") == "human"
+              and "answer statement" in (flag.get("reason") or ""),
+              f"the lone statement box is Jack's, and the reason says why ({flag and flag.get('reason')})")
         q = fill.plan.get(question["ref"])
         check(q and q["fit"] == "bool" and q["value"] is True and q["source"] == "profile",
               f"the lone question box keeps today's bool fit from the line ({q})")
@@ -167,6 +168,94 @@ def test_a_lone_statement_checkbox_goes_to_jack_and_a_lone_question_box_keeps_th
               and sensitive.fit_with_kind(True, {"type": "checkbox", "label": "Do you have a disability?"}) == (True, "bool")
               and sensitive.fit_with_kind("Prefer not to say", {"type": "checkbox", "label": "Do you have a disability?"}) == (None, None),
               "fit_with_kind: a statement label fits nothing, a question label takes a real bool only")
+    check.done()
+
+
+NEUTRAL = """<!doctype html><html><body><h1>Preferences (mock)</h1><form>
+<fieldset><legend>Communication preferences</legend>
+<input type="checkbox" id="a" name="alerts_yes"><label for="a">Yes, I would like to receive job alerts by email</label>
+<input type="checkbox" id="b" name="alerts_no"><label for="b">No, I do not want job alerts</label></fieldset>
+<fieldset><legend>Before you continue</legend>
+<input type="checkbox" id="tos" name="tos" required><label for="tos">I agree to the Terms of Service and Privacy Policy</label>
+<input type="checkbox" id="news" name="news"><label for="news">I would like to be considered for other roles</label></fieldset>
+</form></body></html>"""
+
+
+def test_a_group_the_profile_does_not_answer_never_reaches_the_mapper_and_a_terms_box_is_never_grouped():
+    # Fix of ab0a09e's BLOCK 1 and finding 5: a "communication preferences"
+    # group fell through to the mapper; a terms box beside another "I ..."
+    # box was grouped away from the consent policy's path.
+    check = Checks()
+    p = TEST_HOME / "checkbox-group-neutral.html"
+    p.write_text(NEUTRAL, encoding="utf-8")
+    prof = _prof("neutral", "false")
+    with mock_page(p) as page:
+        fields = extract.extract_fields(page)
+        groups = [f for f in fields if f.get("widget") == "checkboxes"]
+        lone = {f["label"] for f in fields if f.get("type") == "checkbox"}
+        check(len(groups) == 1 and groups[0]["label"] == "Communication preferences", f"the preferences group is one field ({groups})")
+        check(lone == {"I agree to the Terms of Service and Privacy Policy", "I would like to be considered for other roles"},
+              f"the terms box and the newsletter box stay lone checkboxes: never grouped ({lone})")
+        plan, flags, for_model = pipeline.route(fields, {f["ref"]: "personal_fact" for f in fields}, prof, set())
+        g = groups[0]["ref"]
+        check(g not in plan and not any(f["ref"] == g for f in for_model) and any(fl.get("ref") == g for fl in flags),
+              "the group is Jack's: not planned, never handed to the mapper")
+        verdict = sensitive.decide(groups[0], "personal_fact", prof)
+        check(verdict["action"] == "human" and "statement checkboxes" in verdict["reason"], f"decide says why ({verdict['reason']})")
+        check(memory.never_reason(groups[0], "personal_fact") is not None, "a checkbox group is never learned (no checkbox is)")
+        fill = _fill(page, prof)
+        check(_ticks(page) == {"a": False, "b": False, "tos": False, "news": False}, f"nothing ticked ({_ticks(page)})")
+    check.done()
+
+
+def test_the_gate_trusts_a_group_only_from_a_strict_profile_fit_and_keeps_the_label_checks():
+    # Fix of ab0a09e's BLOCK 1 and BLOCK 2: a model-sourced plan vouched for
+    # a tick; the group branch skipped the label-source, hidden-text and
+    # fine-print checks.
+    from test_gate import base, box, run as gate_run
+    check = Checks()
+    yes, no = "Yes, I have a disability", "No, I do not have a disability"
+
+    def record(source="profile", fit="bool", **box_over):
+        r = base()
+        r["fields"].append({"ref": "o1", "type": "radio", "widget": "checkboxes", "label": "Do you have a disability?",
+                            "options": [yes, no], "option_refs": ["o1", "o2"], "required": True})
+        r["categories"]["o1"] = "eeo"
+        r["plan"]["o1"] = {"value": no, "source": source, "fit": fit, "profile_path": "eeo.disability_status",
+                           "confidence": "high"}
+        r["results"]["o1"] = {"filled": True, "unconfirmed": False}
+        r["snapshot"]["o1"] = no
+        r["census"] += [box(yes, ref="o1", checked=False), dict(box(no, ref="o2", checked=True), **box_over)]
+        return r
+
+    v = gate_run(record())
+    check(v["content_verdict"] == gate.WOULD_SUBMIT, f"a strict profile fit, the planned box ticked: passes ({v['content_reasons']})")
+    v = gate_run(record(source="model", fit=None))
+    check(v["content_verdict"] == gate.WOULD_STOP and any("strict fit" in x for x in v["content_reasons"]),
+          f"a model-sourced plan vouches for no tick ({v['content_reasons']})")
+    v = gate_run(record(fit="bool_prefix"))
+    check(v["content_verdict"] == gate.WOULD_STOP, "a loose fit vouches for no tick")
+    v = gate_run(record(described="see the handbook"))
+    check(any("fine print" in x for x in v["content_reasons"]), f"a grouped box with fine print still stops ({v['content_reasons']})")
+    v = gate_run(record(label_content=no + " and more"))
+    check(any("hidden text" in x for x in v["content_reasons"]), "a grouped box with hidden label text still stops")
+    v = gate_run(record(label_source="aria-labelledby"))
+    check(any("label not explicit" in x for x in v["content_reasons"]), "a grouped box labelled by aria-labelledby still stops")
+    r = record()
+    r["human_reviewed"] = ["o1"]
+    r["plan"].pop("o1")
+    check(gate_run(r)["content_verdict"] == gate.WOULD_SUBMIT, "a group Jack answered himself is his")
+    check.done()
+
+
+def test_a_group_whose_statements_name_another_profile_line_is_jacks():
+    # Fold of ab0a09e's finding 3.
+    check = Checks()
+    prof = _prof("mixed-lines", "false")
+    field = {"ref": "g", "type": "radio", "widget": "checkboxes", "label": "Do you have a disability?",
+             "options": ["Yes, I have a disability", "No, I am not a protected veteran"], "option_refs": ["g", "g2"]}
+    v = sensitive.decide(field, "eeo", prof)
+    check(v["action"] == "human" and "another profile line" in v["reason"], f"a group mixing another question's statement: Jack's ({v['reason']})")
     check.done()
 
 

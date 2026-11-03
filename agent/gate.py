@@ -804,16 +804,6 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         # he left it; the hidden-and-ticked check above still applies.
         if box.get("ref") and box.get("ref") in reviewed:
             continue
-        if box.get("ref") in grouped:
-            group, option = grouped[box["ref"]]
-            if group.get("ref") in reviewed:
-                continue                      # Jack's own answer to the group
-            planned = (plan.get(group.get("ref")) or {}).get("value")
-            if planned is None:
-                content.append(f"{name}: its checkbox group is not answered")
-            elif box.get("checked") is not (normalize_label(option) == normalize_label(planned)):
-                content.append(f"{name}: ticked differently from the group's planned answer")
-            continue
         if box.get("in_button_group"):
             group = plan.get(box.get("group_ref"))
             if not group or group.get("value") is None:
@@ -826,6 +816,22 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             content.append(f"{name}: label contains hidden text")
         elif box.get("described"):
             content.append(f"{name}: has fine print attached")
+        elif box.get("ref") in grouped:
+            # A box of a checkbox group answering one question (item 5), past
+            # the label checks above like any other box: judged against the
+            # group's planned answer, which must be a strict profile fit (fix
+            # of ab0a09e's BLOCK 1: a model-sourced plan vouches for no tick);
+            # a group Jack answered himself (human_reviewed) is his.
+            group, option = grouped[box["ref"]]
+            if group.get("ref") in reviewed:
+                continue
+            decision = plan.get(group.get("ref")) or {}
+            planned = decision.get("value")
+            trusted = decision.get("source") == "profile" and decision.get("fit") in sensitive.LEGAL_FITS
+            if planned is None or not trusted:
+                content.append(f"{name}: its checkbox group is not answered from a profile line with a strict fit")
+            elif box.get("checked") is not (normalize_label(option) == normalize_label(planned)):
+                content.append(f"{name}: ticked differently from the group's planned answer")
         elif (normalize_label(box.get("label_inner")) not in allow
               and not consent_box_ok(box) and not attestation_box_ok(box)):
             reason = f"{name}: not on consent_allowlist, and not a terms / privacy consent"

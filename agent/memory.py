@@ -156,6 +156,8 @@ def never_reason(field: dict, category: str) -> str | None:
     ftype = (field.get("type") or "").lower()
     if ftype in ("file", "password", "checkbox") or extract.is_secret(field):
         return f"a {ftype or 'secret'} box is never learned"
+    if field.get("widget") == "checkboxes":
+        return "a checkbox group is never learned"       # Jack: no checkbox is learned (fold of ab0a09e's finding 4)
     if category in NEVER_CATEGORIES:
         return f"a {category.replace('_', ' ')} field is never learned"
     text = sensitive._question_text(field)
