@@ -101,7 +101,10 @@ _DUMP_JS = extract.safe(r"""
   // <label> whose control is a radio or checkbox, or a plain button inside
   // a fieldset / group. Python strips its strings against the profile only:
   // a redaction of one choice would mark the chosen answer by its position.
-  const labelControl = el => { const f = __ja.attr(el, 'for'); return f ? byId(f) : el.querySelector('input, select, textarea, [role]'); };
+  // A wrapping label's controls: every input / select / textarea / role
+  // element inside it (an icon with a role before the radio must not hide
+  // the radio: fold of 44892f3's review).
+  const labelControls = el => { const f = __ja.attr(el, 'for'); return f ? [byId(f)].filter(Boolean) : [...el.querySelectorAll('input, select, textarea, [role]')]; };
   // A label is a choice when its control is one by this same test (a
   // role=radio <button> under a <label for>, the Radix shape), or when a
   // choice names it through aria-labelledby; role=button elements and
@@ -109,23 +112,31 @@ _DUMP_JS = extract.safe(r"""
   // c6cfa8f's review).
   const CHOICE_ROLES = ['radio', 'checkbox', 'menuitemradio', 'menuitemcheckbox', 'option', 'switch', 'treeitem', 'gridcell', 'tab'];
   const GROUPS = 'fieldset, [role=group], [role=radiogroup], ' + limits.button_group;
+  const roleTokens = e => (__ja.attr(e, 'role') || '').toLowerCase().split(/\s+/).filter(Boolean);
   const labelledBy = new Set([...document.querySelectorAll('[aria-labelledby]')]
-    .filter(e => CHOICE_ROLES.includes(__ja.attr(e, 'role') || '') || (__ja.tag(e) === 'INPUT' && ['radio', 'checkbox'].includes((__ja.attr(e, 'type') || '').toLowerCase())))
+    .filter(e => roleTokens(e).some(r => CHOICE_ROLES.includes(r)) || (__ja.tag(e) === 'INPUT' && ['radio', 'checkbox'].includes((__ja.attr(e, 'type') || '').toLowerCase())))
     .flatMap(e => (__ja.attr(e, 'aria-labelledby') || '').split(/\s+/).filter(Boolean)));
   const isChoice = (el, depth = 0) => {
     const tag = __ja.tag(el), type = (__ja.attr(el, 'type') || '').toLowerCase();
     if (tag === 'INPUT' && (type === 'radio' || type === 'checkbox')) return true;
     if (tag === 'OPTION') return true;
-    const role = __ja.attr(el, 'role') || '';
-    if (CHOICE_ROLES.includes(role)) return true;
+    const roles = roleTokens(el);
+    if (roles.some(r => CHOICE_ROLES.includes(r))) return true;
     if (tag === 'LABEL') {
       if (labelledBy.has(__ja.id(el))) return true;
-      const c = labelControl(el);
-      return !!c && depth < 2 && isChoice(c, depth + 1);
+      return depth < 2 && labelControls(el).some(c => isChoice(c, depth + 1));
     }
+    // An icon with a role inside a choice's label (its `label` is that
+    // label's text) is part of the choice too.
+    const lab = __ja.closest(el, 'label');
+    if (lab && lab !== el && depth < 2 && isChoice(lab, depth + 1)) return true;
     if (__ja.id(el) && labelledBy.has(__ja.id(el))) return true;
-    const buttonLike = plainButton(el) || role === 'button' || tag === 'A';
-    return buttonLike && !!__ja.closest(el, GROUPS);
+    // A real <button> answers inside a fieldset / group; a role=button
+    // element or a link does so only inside extract's own button-group
+    // container (a react-select remove chip in a fieldset names a value,
+    // and its aria-label must keep the full strip: fold of 44892f3's review).
+    if (plainButton(el) && __ja.closest(el, GROUPS)) return true;
+    return (roles.includes('button') || tag === 'A') && !!__ja.closest(el, limits.button_group);
   };
   const sel = 'input, select, textarea, button, [role], [data-automation-id], label, legend, fieldset, a[href],'
             + ' [aria-haspopup], [contenteditable], h1, h2, h3, h4';

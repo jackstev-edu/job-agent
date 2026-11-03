@@ -128,6 +128,20 @@ def test_a_capture_strips_the_jobs_typed_values_and_every_learned_answer():
     folder = TEST_HOME / "snaps-extra"
     shutil.rmtree(folder, ignore_errors=True)
     prior = memory.path().read_bytes() if memory.path().exists() else None     # put back whatever the shared home held
+    try:
+        _run_capture_strip_case(check, folder)
+    finally:
+        # The shared test home goes back to what it held: never an unreadable
+        # store, never the planted entry.
+        if prior is None:
+            memory.path().unlink(missing_ok=True)
+        else:
+            memory.path().write_bytes(prior)
+    check.done()
+
+
+def _run_capture_strip_case(check, folder):
+    from agent import memory
     store = memory.Learned.load()
     # A label of four words: a shorter one is removed on load (item 2's rule).
     store.entries.append({"id": "t-extra", "kind": "answer", "key": "[\"what is your favourite paint colour\", \"text\", []]",
@@ -159,24 +173,15 @@ def test_a_capture_strips_the_jobs_typed_values_and_every_learned_answer():
     check(any("Test" in s for s in seen[1:]), "a later capture carries the first page's read-back value (the typed first name)")
     # Fold of 99c5a77's review: learned.yaml that didn't parse means the
     # learned answers cannot be stripped, so no file is written.
-    try:
-        memory.path().write_text("entries: [unclosed", encoding="utf-8")
-        folder2 = TEST_HOME / "snaps-unreadable"
-        shutil.rmtree(folder2, ignore_errors=True)
-        with mock_page(_write("capture-plain-2.html", PLAIN_PAGE)) as page:
-            w = _wizard(page, folder2)
-            w._capture("scan")
-            check(not folder2.exists() or not list(folder2.glob("*.json")), "learned.yaml unreadable: no snapshot file")
-            check(any(l == "snapshot not written (the values to strip could not all be read)" for l in w.out.log),
-                  f"one log line says why ({[l for l in w.out.log if 'snapshot' in l]})")
-    finally:
-        # The shared test home goes back to what it held: never an unreadable
-        # store, never the planted entry.
-        if prior is None:
-            memory.path().unlink(missing_ok=True)
-        else:
-            memory.path().write_bytes(prior)
-    check.done()
+    memory.path().write_text("entries: [unclosed", encoding="utf-8")
+    folder2 = TEST_HOME / "snaps-unreadable"
+    shutil.rmtree(folder2, ignore_errors=True)
+    with mock_page(_write("capture-plain-2.html", PLAIN_PAGE)) as page:
+        w = _wizard(page, folder2)
+        w._capture("scan")
+        check(not folder2.exists() or not list(folder2.glob("*.json")), "learned.yaml unreadable: no snapshot file")
+        check(any(l == "snapshot not written (the values to strip could not all be read)" for l in w.out.log),
+              f"one log line says why ({[l for l in w.out.log if 'snapshot' in l]})")
 
 
 class _FakePage:

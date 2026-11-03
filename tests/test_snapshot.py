@@ -157,15 +157,16 @@ ECHO_PAGE.write_text("""<!doctype html><html><head><meta charset="utf-8"><title>
 <label for="st">State</label><button id="st" aria-haspopup="listbox" data-automation-id="stateDropdown" aria-label="State ZQ">ZQ</button>
 <ul role="listbox"><li role="option">Alabama</li><li role="option">ZQ</li></ul>
 <label for="eth">Ethnicity</label><select id="eth" name="ethnicity"><option>Select</option><option>LEARNED-ECHO-SENTINEL</option><option>Other</option></select>
-<fieldset id="vet"><legend>Veteran</legend><label><input type="radio" name="vet" value="a"> LEARNED-ECHO-SENTINEL</label><label><input type="radio" name="vet" value="b"> Not a veteran</label></fieldset>
+<fieldset id="vet"><legend>Veteran</legend><label><span role="presentation"></span><input type="radio" name="vet" value="a"> LEARNED-ECHO-SENTINEL</label><label><svg role="img"></svg><input type="radio" name="vet" value="b"> Not a veteran</label>
+<div role="button" aria-label="Remove LEARNED-ECHO-SENTINEL" id="chip"></div></fieldset>
 <fieldset id="dis"><legend>Disability</legend><input type="checkbox" id="d1" name="d_yes"><label for="d1">LEARNED-ECHO-SENTINEL</label>
 <input type="checkbox" id="d2" name="d_no"><label for="d2">No, I do not have a disability</label></fieldset>
 <fieldset id="btns" role="group"><legend>Gender</legend><button type="button">LEARNED-ECHO-SENTINEL</button><button type="button">Other</button></fieldset>
 <div role="radiogroup" id="custom"><div role="radio" aria-label="LEARNED-ECHO-SENTINEL" tabindex="0"></div><div role="radio" aria-label="Prefer not to say" tabindex="-1"></div></div>
 <div role="radiogroup" id="radix"><button type="button" role="radio" id="r1" aria-checked="false"></button><label for="r1">LEARNED-ECHO-SENTINEL</label>
 <button type="button" role="radio" id="r2" aria-checked="false"></button><label for="r2">Decline</label>
-<span id="r3lbl">LEARNED-ECHO-SENTINEL</span><div role="radio" aria-labelledby="r3lbl" tabindex="-1"></div></div>
-<div class="ashby-application-form-input-yesno" id="ashby"><a href="#" role="button">LEARNED-ECHO-SENTINEL</a><div role="button" tabindex="0">Other</div></div>
+<label id="r3lbl">LEARNED-ECHO-SENTINEL</label><div role="Radio menuitemradio" aria-labelledby="r3lbl" tabindex="-1"></div></div>
+<div class="ashby-application-form-input-yesno" id="ashby"><button type="button">LEARNED-ECHO-SENTINEL</button><a href="#">LEARNED-ECHO-SENTINEL</a><div role="button" tabindex="0">Other</div></div>
 <label for="nm">Nickname</label><input id="nm" value="TYPED-ECHO-SENTINEL">
 </main></body></html>""", encoding="utf-8")
 
@@ -198,8 +199,9 @@ def test_a_dump_also_strips_learned_answers_and_typed_values_and_never_a_dropdow
         check(sel["options"] == ["Select", "LEARNED-ECHO-SENTINEL", "Other"] and any(r["label"] == "LEARNED-ECHO-SENTINEL" for r in radios),
               f"an option entry is never redacted against a learned answer: that would mark the chosen one by position ({sel['options']}, {[r['label'] for r in radios]})")
         # Fold of f8fa10c's review: every choice entry, its <label> included.
-        def strings_in(container):
-            return [v for e in d["elements"] if any(c.startswith(container) for c in e["chain"]) or e.get("id") == container.split("#")[-1]
+        def strings_in(container, skip_ids=("chip",)):
+            return [v for e in d["elements"] if (any(c.startswith(container) for c in e["chain"]) or e.get("id") == container.split("#")[-1])
+                    and e.get("id") not in skip_ids
                     for v in [e.get("text"), e.get("label"), e.get("id"), e.get("name"), *e["aria"].values(), *e["classes"], *e["chain"]]
                     if isinstance(v, str)]
         GROUPS = (("fieldset#vet", "the radio group and its labels"), ("fieldset#dis", "the checkbox group and its labels"),
@@ -211,6 +213,15 @@ def test_a_dump_also_strips_learned_answers_and_typed_values_and_never_a_dropdow
             check(strs and "LEARNED-ECHO-SENTINEL" in strs and not any(v == snapshot.REDACTED for v in strs),
                   f"no string of {what} is redacted against the learned answer, and the answer is there ({strs[:6]})")
         check(any(e.get("choice") for e in d["elements"] if e.get("tag") == "label"), "a radio's <label> entry carries the choice mark")
+        chip = next(e for e in d["elements"] if e.get("id") == "chip")
+        check(chip["aria"].get("aria-label") == snapshot.REDACTED and not chip.get("choice"),
+              f"a react-select remove chip (role=button in a fieldset) is no choice: its aria-label naming the learned answer is redacted ({chip['aria']})")
+        r3 = next(e for e in d["elements"] if e.get("id") == "r3lbl")
+        check(r3.get("choice") is True and r3["text"] == "LEARNED-ECHO-SENTINEL", f"a label a choice names through aria-labelledby is a choice ({r3})")
+        ashby_a = next(e for e in d["elements"] if e.get("tag") == "a" and "ashby" in " ".join(e["chain"]))
+        ashby_b = next(e for e in d["elements"] if e.get("tag") == "button" and "ashby" in " ".join(e["chain"]))
+        check(ashby_a.get("choice") is True and ashby_b.get("choice") is True and ashby_a["text"] == ashby_b["text"] == "LEARNED-ECHO-SENTINEL",
+              "a real <button> and a plain link inside extract's button-group container are both choices")
         # A PROFILE value in a choice entry is still redacted (the mutation guard for the profile-only sets).
         dp = snapshot.dump(page, {"eeo": {"race": "LEARNED-ECHO-SENTINEL"}})
         d_saved, d = d, dp
