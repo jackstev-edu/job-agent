@@ -711,8 +711,16 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         if (category == "per_company" or "per_company" in kinds
                 or (decision or {}).get("source") == employers.SOURCE):
             if decision and decision.get("source") == employers.SOURCE:
+                # The route reads past the per-company stop kind only: a
+                # field the gate calls legal / sensitive (a category, a
+                # profile line, a legal stop kind, a guard, a raw flag) is
+                # never answered from the list (5ba4a07's review, BLOCK 3).
+                if sensitive_field:
+                    content.append(f"{name}: past-employer answer on a question that reads as legal or sensitive")
+                    continue
                 if employers.verify(f, decision, record.get("final_url") or record.get("url") or "",
-                                    profile.past_employers() if hasattr(profile, "past_employers") else []):
+                                    profile.past_employers() if hasattr(profile, "past_employers") else [],
+                                    category):
                     trace.append({"ref": ref, "label": label[:120], "category": category,
                                   "profile_path": "work_history.past_employers", "source": employers.SOURCE,
                                   "fit": "exact"})

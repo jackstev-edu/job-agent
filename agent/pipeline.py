@@ -123,7 +123,8 @@ def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str]
         # Decision C (Jack, 2026-11-02): "have you worked for <company>" from
         # his work_history.past_employers list, against the company the job's
         # own address names; any match or doubt is his. Never the model.
-        worked = employers.plan_for(field, url, prof.past_employers() if hasattr(prof, "past_employers") else [])
+        worked = employers.plan_for(field, url, prof.past_employers() if hasattr(prof, "past_employers") else [],
+                                    category=category)
         if worked is not None:
             plan[field["ref"]] = worked
             continue
@@ -393,6 +394,10 @@ def fill_page(page: "Page", prof, *, guard: extract.ReadGuard, resume: Path | No
     store = _learned_store()
     for line in (getattr(store, "just_removed", None) or []):
         lines.append(f"learned memory: removed on load, against the learning rules: {line}")
+    if hasattr(prof, "past_employers") and prof.past_employers() is None:
+        # Decision C's list holds something that is not a bare name: the
+        # whole list is doubt, said so here (Jack, 2026-11-03).
+        lines.append(employers.LIST_DOUBT)
     plan, flags, for_model = route([f for f in fields if f["ref"] not in marked], categories, prof,
                                    new_after_upload, learned=store, host=memory.tenant_of(page.url),
                                    shared=memory.shared_keys(fields), url=str(page.url or ""))

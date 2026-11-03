@@ -163,12 +163,26 @@ class Profile:
             return None
         return raw
 
-    def past_employers(self) -> list[str]:
-        """work_history.past_employers as a list of names (decision C, 2026-11-02); [] when unset or not a list."""
-        raw = (self.data.get("work_history") or {}).get("past_employers") if isinstance(self.data.get("work_history"), dict) else None
-        if not isinstance(raw, list):
+    def past_employers(self) -> list[str] | None:
+        """
+        work_history.past_employers as a list of names (decision C,
+        2026-11-02); [] when unset. None (the whole list is doubt: Jack,
+        2026-11-03) when it is not a list or any entry is not a bare
+        non-empty name (a mapping such as `Northwind: 2019-2021`, a list,
+        a blank, a boolean), so a dropped entry can never turn into a "No".
+        """
+        work = self.data.get("work_history")
+        raw = work.get("past_employers") if isinstance(work, dict) else None
+        if raw is None:
             return []
-        return [str(e).strip() for e in raw if isinstance(e, (str, int)) and str(e).strip()]
+        if not isinstance(raw, list):
+            return None
+        out: list[str] = []
+        for e in raw:
+            if isinstance(e, bool) or not isinstance(e, (str, int)) or not str(e).strip():
+                return None
+            out.append(str(e).strip())
+        return out
 
     def consent_allowlist(self) -> list[str]:
         raw = self.data.get("consent_allowlist")
