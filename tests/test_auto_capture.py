@@ -161,12 +161,15 @@ def test_a_capture_strips_the_jobs_typed_values_and_every_learned_answer():
     memory.path().write_text("entries: [unclosed", encoding="utf-8")
     folder2 = TEST_HOME / "snaps-unreadable"
     shutil.rmtree(folder2, ignore_errors=True)
-    with mock_page(_write("capture-plain-2.html", PLAIN_PAGE)) as page:
-        w = _wizard(page, folder2)
-        w._capture("scan")
-        check(not folder2.exists() or not list(folder2.glob("*.json")), "learned.yaml unreadable: no snapshot file")
-        check(any(l == "snapshot not written (the values to strip could not all be read)" for l in w.out.log),
-              f"one log line says why ({[l for l in w.out.log if 'snapshot' in l]})")
+    try:
+        with mock_page(_write("capture-plain-2.html", PLAIN_PAGE)) as page:
+            w = _wizard(page, folder2)
+            w._capture("scan")
+            check(not folder2.exists() or not list(folder2.glob("*.json")), "learned.yaml unreadable: no snapshot file")
+            check(any(l == "snapshot not written (the values to strip could not all be read)" for l in w.out.log),
+                  f"one log line says why ({[l for l in w.out.log if 'snapshot' in l]})")
+    finally:
+        memory.path().unlink(missing_ok=True)         # never leave the shared test home with an unreadable store
     check.done()
 
 

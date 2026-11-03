@@ -96,6 +96,20 @@ _DUMP_JS = extract.safe(r"""
   const isChooser = el => __ja.has(el, 'aria-haspopup') || ['combobox', 'listbox', 'option', 'textbox'].includes(__ja.attr(el, 'role') || '')
                       || (__ja.tag(el) === 'BUTTON' && !!__ja.closest(el, '[data-automation-id^="formField"]'));
   const plainButton = el => __ja.tag(el) === 'BUTTON' && !isChooser(el);
+  // A choice entry (fold of f8fa10c's review): a radio or checkbox, an
+  // <option>, a role=radio / checkbox / menuitemradio / option element, a
+  // <label> whose control is a radio or checkbox, or a plain button inside
+  // a fieldset / group. Python strips its strings against the profile only:
+  // a redaction of one choice would mark the chosen answer by its position.
+  const labelControl = el => { const f = __ja.attr(el, 'for'); return f ? byId(f) : el.querySelector('input, select, textarea'); };
+  const isChoice = el => {
+    const tag = __ja.tag(el), type = (__ja.attr(el, 'type') || '').toLowerCase();
+    if (tag === 'INPUT' && (type === 'radio' || type === 'checkbox')) return true;
+    if (tag === 'OPTION') return true;
+    if (['radio', 'checkbox', 'menuitemradio', 'option'].includes(__ja.attr(el, 'role') || '')) return true;
+    if (tag === 'LABEL') { const c = labelControl(el); return !!c && __ja.tag(c) === 'INPUT' && ['radio', 'checkbox'].includes((__ja.attr(c, 'type') || '').toLowerCase()); }
+    return plainButton(el) && !!__ja.closest(el, 'fieldset, [role=group], [role=radiogroup]');
+  };
   const sel = 'input, select, textarea, button, [role], [data-automation-id], label, legend, fieldset, a[href],'
             + ' [aria-haspopup], [contenteditable], h1, h2, h3, h4';
   const out = [];
@@ -118,7 +132,7 @@ _DUMP_JS = extract.safe(r"""
       name: __ja.attr(el, 'name') || null, id: __ja.id(el) || null,
       label: ['input', 'select', 'textarea'].includes(tag) || __ja.attr(el, 'role') || chooser || __ja.has(el, 'contenteditable') ? labelOf(el) : '',
       text: (TEXTUAL.has(tag) && !chooser && !holdsValue(el)) ? cleanText(el) : plainButton(el) ? cleanText(el, true) : '',
-      chooser,
+      chooser, choice: isChoice(el),
       required: el.required === true || __ja.attr(el, 'aria-required') === 'true' || __ja.has(el, 'required'),
       disabled: el.disabled === true || __ja.attr(el, 'aria-disabled') === 'true',
       readonly: el.readOnly === true || __ja.attr(el, 'readonly') !== null,
@@ -188,12 +202,16 @@ def strip_values(obj: Any, texts: set[str], digits: set[str],
     The dump with every string that contains a stripped value (or whose
     digits contain a stripped number) replaced whole by REDACTED. Keys are
     structure and are not stripped; a value in a key would be a bug
-    upstream. An option entry (a select's `options` list, an <option>
-    element's text, a radio box's label: the form's own vocabulary, where
-    a redaction marks the chosen answer by its position) is stripped
+    upstream. A choice entry (the page script's `choice` mark: a radio or
+    checkbox, an <option>, a role=radio / checkbox / option element, a
+    label of a radio or checkbox, a button in a group) and a select's
+    `options` list are the form's own vocabulary, where a redaction marks
+    the chosen answer by its position: every string of such an entry (its
+    text, label, aria values, id, name, classes, chain) is stripped
     against `option_texts` / `option_digits` only, the profile's values
-    as before (fold of 99c5a77's review: a learned EEO answer must not
-    show by position); None means the same sets.
+    as before (fold of 99c5a77's and f8fa10c's reviews: a learned or
+    planned EEO answer must not show by position); None means the same
+    sets.
     """
     o_texts = texts if option_texts is None else option_texts
     o_digits = digits if option_digits is None else option_digits
@@ -202,15 +220,15 @@ def strip_values(obj: Any, texts: set[str], digits: set[str],
     if isinstance(obj, list):
         return [strip_values(v, texts, digits, o_texts, o_digits) for v in obj]
     if isinstance(obj, dict):
-        option_row = obj.get("tag") == "option" or (obj.get("tag") == "input" and str(obj.get("type") or "").lower() == "radio")
+        choice = (bool(obj.get("choice")) or obj.get("tag") == "option"
+                  or (obj.get("tag") == "input" and str(obj.get("type") or "").lower() in ("radio", "checkbox")))
+        t, d = (o_texts, o_digits) if choice else (texts, digits)
         out = {}
         for k, v in obj.items():
             if k == "options" and isinstance(v, list):
                 out[k] = [_strip_text(x, o_texts, o_digits) if isinstance(x, str) else x for x in v]
-            elif option_row and k in ("text", "label") and isinstance(v, str):
-                out[k] = _strip_text(v, o_texts, o_digits)
             else:
-                out[k] = strip_values(v, texts, digits, o_texts, o_digits)
+                out[k] = strip_values(v, t, d, o_texts, o_digits)
         return out
     return obj
 

@@ -157,7 +157,11 @@ ECHO_PAGE.write_text("""<!doctype html><html><head><meta charset="utf-8"><title>
 <label for="st">State</label><button id="st" aria-haspopup="listbox" data-automation-id="stateDropdown" aria-label="State ZQ">ZQ</button>
 <ul role="listbox"><li role="option">Alabama</li><li role="option">ZQ</li></ul>
 <label for="eth">Ethnicity</label><select id="eth" name="ethnicity"><option>Select</option><option>LEARNED-ECHO-SENTINEL</option><option>Other</option></select>
-<fieldset><legend>Veteran</legend><label><input type="radio" name="vet" value="a"> LEARNED-ECHO-SENTINEL</label><label><input type="radio" name="vet" value="b"> Not a veteran</label></fieldset>
+<fieldset id="vet"><legend>Veteran</legend><label><input type="radio" name="vet" value="a"> LEARNED-ECHO-SENTINEL</label><label><input type="radio" name="vet" value="b"> Not a veteran</label></fieldset>
+<fieldset id="dis"><legend>Disability</legend><input type="checkbox" id="d1" name="d_yes"><label for="d1">LEARNED-ECHO-SENTINEL</label>
+<input type="checkbox" id="d2" name="d_no"><label for="d2">No, I do not have a disability</label></fieldset>
+<fieldset id="btns" role="group"><legend>Gender</legend><button type="button">LEARNED-ECHO-SENTINEL</button><button type="button">Other</button></fieldset>
+<div role="radiogroup" id="custom"><div role="radio" aria-label="LEARNED-ECHO-SENTINEL" tabindex="0"></div><div role="radio" aria-label="Prefer not to say" tabindex="-1"></div></div>
 <label for="nm">Nickname</label><input id="nm" value="TYPED-ECHO-SENTINEL">
 </main></body></html>""", encoding="utf-8")
 
@@ -189,6 +193,16 @@ def test_a_dump_also_strips_learned_answers_and_typed_values_and_never_a_dropdow
         radios = [e for e in d["elements"] if e.get("tag") == "input" and e.get("type") == "radio"]
         check(sel["options"] == ["Select", "LEARNED-ECHO-SENTINEL", "Other"] and any(r["label"] == "LEARNED-ECHO-SENTINEL" for r in radios),
               f"an option entry is never redacted against a learned answer: that would mark the chosen one by position ({sel['options']}, {[r['label'] for r in radios]})")
+        # Fold of f8fa10c's review: every choice entry, its <label> included.
+        def strings_in(container):
+            return [v for e in d["elements"] if any(c.startswith(container) for c in e["chain"]) or e.get("id") == container.split("#")[-1]
+                    for v in [e.get("text"), e.get("label"), e.get("id"), e.get("name"), *e["aria"].values(), *e["classes"], *e["chain"]]
+                    if isinstance(v, str)]
+        for container, what in (("fieldset#vet", "the radio group and its labels"), ("fieldset#dis", "the checkbox group and its labels"),
+                                ("fieldset#btns", "the button group"), ("div#custom", "the custom radio group's aria-labels")):
+            strs = strings_in(container)
+            check(strs and not any(v == snapshot.REDACTED for v in strs), f"no string of {what} is redacted against the learned answer ({strs[:6]})")
+        check(any(e.get("choice") for e in d["elements"] if e.get("tag") == "label"), "a radio's <label> entry carries the choice mark")
         prof_sel = snapshot.dump(page, {"eeo": {"race": "LEARNED-ECHO-SENTINEL"}})
         check(next(e for e in prof_sel["elements"] if e.get("name") == "ethnicity")["options"][1] == snapshot.REDACTED,
               "...while a profile value in an option is still redacted, as before")
