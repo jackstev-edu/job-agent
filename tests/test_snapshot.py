@@ -162,6 +162,10 @@ ECHO_PAGE.write_text("""<!doctype html><html><head><meta charset="utf-8"><title>
 <input type="checkbox" id="d2" name="d_no"><label for="d2">No, I do not have a disability</label></fieldset>
 <fieldset id="btns" role="group"><legend>Gender</legend><button type="button">LEARNED-ECHO-SENTINEL</button><button type="button">Other</button></fieldset>
 <div role="radiogroup" id="custom"><div role="radio" aria-label="LEARNED-ECHO-SENTINEL" tabindex="0"></div><div role="radio" aria-label="Prefer not to say" tabindex="-1"></div></div>
+<div role="radiogroup" id="radix"><button type="button" role="radio" id="r1" aria-checked="false"></button><label for="r1">LEARNED-ECHO-SENTINEL</label>
+<button type="button" role="radio" id="r2" aria-checked="false"></button><label for="r2">Decline</label>
+<span id="r3lbl">LEARNED-ECHO-SENTINEL</span><div role="radio" aria-labelledby="r3lbl" tabindex="-1"></div></div>
+<div class="ashby-application-form-input-yesno" id="ashby"><a href="#" role="button">LEARNED-ECHO-SENTINEL</a><div role="button" tabindex="0">Other</div></div>
 <label for="nm">Nickname</label><input id="nm" value="TYPED-ECHO-SENTINEL">
 </main></body></html>""", encoding="utf-8")
 
@@ -198,11 +202,22 @@ def test_a_dump_also_strips_learned_answers_and_typed_values_and_never_a_dropdow
             return [v for e in d["elements"] if any(c.startswith(container) for c in e["chain"]) or e.get("id") == container.split("#")[-1]
                     for v in [e.get("text"), e.get("label"), e.get("id"), e.get("name"), *e["aria"].values(), *e["classes"], *e["chain"]]
                     if isinstance(v, str)]
-        for container, what in (("fieldset#vet", "the radio group and its labels"), ("fieldset#dis", "the checkbox group and its labels"),
-                                ("fieldset#btns", "the button group"), ("div#custom", "the custom radio group's aria-labels")):
+        GROUPS = (("fieldset#vet", "the radio group and its labels"), ("fieldset#dis", "the checkbox group and its labels"),
+                  ("fieldset#btns", "the button group"), ("div#custom", "the custom radio group's aria-labels"),
+                  ("div#radix", "a Radix-shaped group (role=radio buttons under <label for>, an aria-labelledby span)"),
+                  ("div#ashby", "Ashby's button-group container with role=button elements"))
+        for container, what in GROUPS:
             strs = strings_in(container)
-            check(strs and not any(v == snapshot.REDACTED for v in strs), f"no string of {what} is redacted against the learned answer ({strs[:6]})")
+            check(strs and "LEARNED-ECHO-SENTINEL" in strs and not any(v == snapshot.REDACTED for v in strs),
+                  f"no string of {what} is redacted against the learned answer, and the answer is there ({strs[:6]})")
         check(any(e.get("choice") for e in d["elements"] if e.get("tag") == "label"), "a radio's <label> entry carries the choice mark")
+        # A PROFILE value in a choice entry is still redacted (the mutation guard for the profile-only sets).
+        dp = snapshot.dump(page, {"eeo": {"race": "LEARNED-ECHO-SENTINEL"}})
+        d_saved, d = d, dp
+        for container, what in GROUPS:
+            strs = strings_in(container)
+            check(snapshot.REDACTED in strs and "LEARNED-ECHO-SENTINEL" not in strs, f"a profile value in {what} is still redacted ({strs[:6]})")
+        d = d_saved
         prof_sel = snapshot.dump(page, {"eeo": {"race": "LEARNED-ECHO-SENTINEL"}})
         check(next(e for e in prof_sel["elements"] if e.get("name") == "ethnicity")["options"][1] == snapshot.REDACTED,
               "...while a profile value in an option is still redacted, as before")

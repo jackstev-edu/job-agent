@@ -101,14 +101,31 @@ _DUMP_JS = extract.safe(r"""
   // <label> whose control is a radio or checkbox, or a plain button inside
   // a fieldset / group. Python strips its strings against the profile only:
   // a redaction of one choice would mark the chosen answer by its position.
-  const labelControl = el => { const f = __ja.attr(el, 'for'); return f ? byId(f) : el.querySelector('input, select, textarea'); };
-  const isChoice = el => {
+  const labelControl = el => { const f = __ja.attr(el, 'for'); return f ? byId(f) : el.querySelector('input, select, textarea, [role]'); };
+  // A label is a choice when its control is one by this same test (a
+  // role=radio <button> under a <label for>, the Radix shape), or when a
+  // choice names it through aria-labelledby; role=button elements and
+  // extract's own button-group container count as group buttons (fold of
+  // c6cfa8f's review).
+  const CHOICE_ROLES = ['radio', 'checkbox', 'menuitemradio', 'menuitemcheckbox', 'option', 'switch', 'treeitem', 'gridcell', 'tab'];
+  const GROUPS = 'fieldset, [role=group], [role=radiogroup], ' + limits.button_group;
+  const labelledBy = new Set([...document.querySelectorAll('[aria-labelledby]')]
+    .filter(e => CHOICE_ROLES.includes(__ja.attr(e, 'role') || '') || (__ja.tag(e) === 'INPUT' && ['radio', 'checkbox'].includes((__ja.attr(e, 'type') || '').toLowerCase())))
+    .flatMap(e => (__ja.attr(e, 'aria-labelledby') || '').split(/\s+/).filter(Boolean)));
+  const isChoice = (el, depth = 0) => {
     const tag = __ja.tag(el), type = (__ja.attr(el, 'type') || '').toLowerCase();
     if (tag === 'INPUT' && (type === 'radio' || type === 'checkbox')) return true;
     if (tag === 'OPTION') return true;
-    if (['radio', 'checkbox', 'menuitemradio', 'option'].includes(__ja.attr(el, 'role') || '')) return true;
-    if (tag === 'LABEL') { const c = labelControl(el); return !!c && __ja.tag(c) === 'INPUT' && ['radio', 'checkbox'].includes((__ja.attr(c, 'type') || '').toLowerCase()); }
-    return plainButton(el) && !!__ja.closest(el, 'fieldset, [role=group], [role=radiogroup]');
+    const role = __ja.attr(el, 'role') || '';
+    if (CHOICE_ROLES.includes(role)) return true;
+    if (tag === 'LABEL') {
+      if (labelledBy.has(__ja.id(el))) return true;
+      const c = labelControl(el);
+      return !!c && depth < 2 && isChoice(c, depth + 1);
+    }
+    if (__ja.id(el) && labelledBy.has(__ja.id(el))) return true;
+    const buttonLike = plainButton(el) || role === 'button' || tag === 'A';
+    return buttonLike && !!__ja.closest(el, GROUPS);
   };
   const sel = 'input, select, textarea, button, [role], [data-automation-id], label, legend, fieldset, a[href],'
             + ' [aria-haspopup], [contenteditable], h1, h2, h3, h4';
@@ -149,7 +166,8 @@ _DUMP_JS = extract.safe(r"""
 }
 """)
 
-LIMITS = {"text": 200, "chain": 12, "elements": 1500, "options": 60}
+LIMITS = {"text": 200, "chain": 12, "elements": 1500, "options": 60,
+          "button_group": extract.BUTTON_GROUP}   # extract's own button-group container counts as a group
 
 
 def _norm(s: str) -> str:

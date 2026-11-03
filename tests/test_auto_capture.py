@@ -127,6 +127,7 @@ def test_a_capture_strips_the_jobs_typed_values_and_every_learned_answer():
     check = Checks()
     folder = TEST_HOME / "snaps-extra"
     shutil.rmtree(folder, ignore_errors=True)
+    prior = memory.path().read_bytes() if memory.path().exists() else None     # put back whatever the shared home held
     store = memory.Learned.load()
     # A label of four words: a shorter one is removed on load (item 2's rule).
     store.entries.append({"id": "t-extra", "kind": "answer", "key": "[\"what is your favourite paint colour\", \"text\", []]",
@@ -158,10 +159,10 @@ def test_a_capture_strips_the_jobs_typed_values_and_every_learned_answer():
     check(any("Test" in s for s in seen[1:]), "a later capture carries the first page's read-back value (the typed first name)")
     # Fold of 99c5a77's review: learned.yaml that didn't parse means the
     # learned answers cannot be stripped, so no file is written.
-    memory.path().write_text("entries: [unclosed", encoding="utf-8")
-    folder2 = TEST_HOME / "snaps-unreadable"
-    shutil.rmtree(folder2, ignore_errors=True)
     try:
+        memory.path().write_text("entries: [unclosed", encoding="utf-8")
+        folder2 = TEST_HOME / "snaps-unreadable"
+        shutil.rmtree(folder2, ignore_errors=True)
         with mock_page(_write("capture-plain-2.html", PLAIN_PAGE)) as page:
             w = _wizard(page, folder2)
             w._capture("scan")
@@ -169,7 +170,12 @@ def test_a_capture_strips_the_jobs_typed_values_and_every_learned_answer():
             check(any(l == "snapshot not written (the values to strip could not all be read)" for l in w.out.log),
                   f"one log line says why ({[l for l in w.out.log if 'snapshot' in l]})")
     finally:
-        memory.path().unlink(missing_ok=True)         # never leave the shared test home with an unreadable store
+        # The shared test home goes back to what it held: never an unreadable
+        # store, never the planted entry.
+        if prior is None:
+            memory.path().unlink(missing_ok=True)
+        else:
+            memory.path().write_bytes(prior)
     check.done()
 
 
