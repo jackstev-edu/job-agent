@@ -202,13 +202,23 @@ def apply_profile_line(path: Path, line: str, value: str, expected_stamp: str) -
 # (drug, background, references, credit report, consumer report),
 # "checked", "signatures", "undersigned", a spaced or Unicode-dashed
 # "non compete" / "at will".
+# Second fix (d9c5b10's review): the credit group keeps every alternative
+# the first pattern had (screen, investigation, verification, test) and
+# gains inquiry / record / information; "not to compete" and "covenant not
+# to"; "call or text me", "texts", "texting"; "referees"; "permit" /
+# "permission"; "verify my employment / education / identity / history /
+# records" in either order. The at-will term keeps its old unanchored
+# shape (bounding it was a logged FLAG, not a fold).
 _DASH = r"[\s\-‐-―−]"
 ALLOWLIST_FORBIDDEN = re.compile(
-    r"authori[sz]|\brelease|\bbackground\b|\breferenc\w*|\bdrug\w*|\bcredit\s+(report|history|check|score)|"
-    r"\bconsumer\s+report|(criminal|employment|education|medical)\s+(check|screen|investigat|verif|test)|"
-    r"\bcheck(s|ed|ing)?\b|\bscreening|arbitrat|\bat" + _DASH + r"*will\b|e-?sign|electronic\s+signature|"
-    r"signatur|\bsign(s|ed|ing|er|ers)?\b|undersign|\bcontact|\bsms\b|text\s+messag|marketing|newsletter|"
-    r"\bnon" + _DASH + r"*compet|restrictive\s+covenant",
+    r"authori[sz]|\bpermi(t|ts|tted|tting|ssion)\b|\brelease|\bbackground\b|\breferenc\w*|\breferees?\b|\bdrug\w*|"
+    r"\bcredit\s+(report|history|check|score|screen|investigat|verif|test|inquir|enquir|record|information)|"
+    r"\bconsumer\s+report|(criminal|employment|education|medical|identity)\s+(check|screen|investigat|verif|test)|"
+    r"verif\w*\s+(my\s+|your\s+|the\s+)?(employment|education|identity|history|records?|credentials?)|"
+    r"\bcheck(s|ed|ing)?\b|\bscreening|arbitrat|at" + _DASH + r"*will|e-?sign|electronic\s+signature|"
+    r"signatur|\bsign(s|ed|ing|er|ers)?\b|undersign|\bcontact|\bsms\b|text\s+messag|\btexts?\s+me\b|\btexts\b|"
+    r"\btexting\b|\bcall\s+(or\s+\w+\s+)?me\b|marketing|newsletter|"
+    r"\bnon" + _DASH + r"*compet|not\s+to\s+compet|covenant\s+not|restrictive\s+covenant",
     re.I)
 
 

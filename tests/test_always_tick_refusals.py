@@ -59,6 +59,25 @@ VARIANTS = [
     ("signatures", "Our signatures below confirm the above"),
     ("undersigned", "I, the undersigned, accept the above"),
     ("an invisible character inside authorize", "I auth­orize Example Co to verify my details"),
+    # Second fix (d9c5b10's review): forms the first fix missed, and the
+    # three credit alternatives it dropped (restored: refused on 0698a98,
+    # not on d9c5b10 / b4623af); the employment / education / medical rows
+    # are guards (refused throughout).
+    ("a credit investigation (restored)", "I consent to a credit investigation"),
+    ("a credit verification (restored)", "I consent to credit verification"),
+    ("a credit screen (restored)", "I consent to a credit screen"),
+    ("an employment verification (guard)", "I consent to employment verification"),
+    ("an education verification (guard)", "I consent to education verification"),
+    ("a medical test (guard)", "I agree to a medical test"),
+    ("a credit inquiry", "I consent to a credit inquiry"),
+    ("'not to compete'", "I agree not to compete with Example Co"),
+    ("'a covenant not to compete'", "I accept a covenant not to compete"),
+    ("'call or text me'", "Example Co may call or text me"),
+    ("'receive texts'", "I agree to receive texts"),
+    ("referees", "Example Co may approach my referees"),
+    ("permission to obtain records", "I give Example Co permission to obtain my records"),
+    ("permit to verify employment history", "I permit Example Co to verify my employment history"),
+    ("verify my identity", "Example Co may verify my identity"),
 ]
 FORBIDDEN_REASON = "an authorize / release / check / arbitration / at-will / signing / contact / marketing / non-compete wording"
 ALLOWED = "I accept the employee handbook"
