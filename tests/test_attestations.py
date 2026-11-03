@@ -95,6 +95,21 @@ LEGAL = [
     ("a digit token, no I am", "I certify that the information provided is true and complete and 18+."),
     ("another script", "I certify that the information is true and complete. Я согласен."),
     ("a non-Latin letter inside a word", "I certify that the informatiοn is true and complete."),   # Greek omicron
+    # Second fix of c8a18cf's BLOCK (b9376b3's review): other connectives,
+    # declarations from attestation words, a symbol. Each passes on b9376b3.
+    ("an at-will clause after 'and' with no new subject",
+     "I understand that any misrepresentation may result in dismissal and employment may be terminated at any time."),
+    ("an at-will clause first", "I understand that my employment may be terminated at any time and any false statement "
+     "will result in dismissal."),
+    ("an at-will clause after ', as'", "I understand that any false statement may result in dismissal, as my employment "
+     "may be terminated at any time."),
+    ("an at-will clause with no join", "I understand that my employment may be terminated at any time regardless of any omission."),
+    ("a resume declaration", "I confirm that I have attached my complete resume with all my information."),
+    ("a knowledge declaration", "I have complete knowledge of the whole application process including the information I state herein."),
+    ("a 'but' clause", "I certify that the information is true and complete but I have nothing to declare."),
+    ("an attachment clause", "I certify that the information is true and complete and have attached my resume and cv."),
+    ("an employment declaration", "I state that I have been in employment during this process with accurate information."),
+    ("a symbol", "I certify that the information is true and complete \U0001F6AB"),
 ]
 MIXED = "I agree to the terms and certify that my answers are true"
 

@@ -296,77 +296,75 @@ def consent_ok(label: Any) -> bool:
 # attest / acknowledge entry (read past ONLY inside this check, for that
 # one tick: Jack's answer on the plan), and the criminal-record pattern.
 # Never an optional box. Page text can only fail this check.
-ATTEST_VERBS = frozenset({"certify", "attest", "acknowledge", "affirm", "declare", "confirm", "understand",
-                          "state", "swear", "represent", "verify"})
-ATTEST_INFO = frozenset({"information", "statements", "statement", "answers", "answer", "responses", "response",
-                         "details", "facts", "data", "representations"})
-ATTEST_TRUTH = frozenset({"true", "accurate", "correct", "complete", "truthful", "factual", "honest"})
-ATTEST_VOCAB = ATTEST_VERBS | ATTEST_INFO | ATTEST_TRUTH | frozenset({
-    "i", "hereby", "that", "all", "of", "the", "provided", "given", "made", "supplied", "submitted", "entered",
-    "contained", "furnished", "set", "forth", "in", "on", "this", "my", "application", "form", "employment", "is",
-    "are", "and", "to", "best", "knowledge", "belief", "by", "me", "have", "has", "herein", "above", "as", "part",
-    "during", "process", "throughout", "checking", "ticking", "selecting", "box", "below", "here", "each", "every",
-    "being", "been", "completely", "fully", "with", "without", "any", "omission", "omissions", "material", "fact",
-    "whole", "nothing", "but", "truth", "understood", "entirely", "also", "both", "it", "its", "herewith",
-    "including", "resume", "cv", "attached", "documents", "document", "accompanying"})
-FALSE_WORDS = frozenset({"false", "untrue", "inaccurate", "incorrect", "incomplete", "misleading", "fraudulent",
-                         "misrepresentation", "misrepresentations", "omission", "omissions", "falsification",
-                         "falsifications", "misstatement", "misstatements", "dishonest"})
-CONSEQUENCE_WORDS = frozenset({"rejection", "rejected", "refusal", "refused", "denial", "denied", "disqualification",
-                               "disqualified", "disqualify", "withdrawal", "withdrawn", "withdraw", "rescission",
-                               "rescinded", "rescind", "revocation", "revoked", "revoke", "dismissal", "dismissed",
-                               "dismiss", "discharge", "discharged", "termination", "terminated", "terminate",
-                               "cancellation", "cancelled", "canceled", "elimination", "eliminated"})
-CONSEQ_VOCAB = FALSE_WORDS | CONSEQUENCE_WORDS | frozenset({
-    "i", "understand", "acknowledge", "aware", "that", "any", "a", "an", "statement", "statements", "of", "fact",
-    "facts", "information", "material", "in", "on", "this", "my", "the", "application", "form", "process", "may",
-    "will", "can", "could", "shall", "would", "be", "is", "are", "result", "results", "resulting", "lead", "leads",
-    "grounds", "basis", "sufficient", "for", "to", "from", "consideration", "candidacy", "further", "offer",
-    "employment", "job", "position", "immediate", "immediately", "if", "when", "whenever", "discovered", "found",
-    "at", "time", "after", "hired", "hiring", "hire", "and", "or", "regardless", "made", "subsequent", "subsequently",
-    "later", "also", "considered", "by", "me", "herein", "here", "provided", "given", "supplied", "submitted",
-    "entered", "contained", "as", "including", "it", "its", "such", "serve", "serves", "within"})
-# The words only the consequence class holds: a clause using one must also
-# name a falsity (fix of c8a18cf's BLOCK 1: "my employment may be
-# terminated at any time" is no consequence of misrepresentation).
-_CONSEQ_ONLY = CONSEQ_VOCAB - ATTEST_VOCAB
+# Each of Jack's two sentence classes is a fixed grammar: the slots are
+# bounded word lists in a fixed order, so "similar wording" (another verb,
+# another truth word, a lead-in, "to the best of my knowledge") passes and
+# a clause that is no attestation and no consequence of misrepresentation
+# (an at-will clause, a declaration about Jack, an agreement) does not,
+# whatever connective joins it (second fix of c8a18cf's BLOCK: a word-bag
+# check let vocabulary words build other clauses).
+_LEAD = r"(?:by (?:checking|ticking|selecting|clicking) (?:this|the) box(?: below)? )?"
+_INFO = r"(?:information|statements?|answers?|responses?|details|facts|data|representations?)"
+_SOURCE = (r"(?: (?:i have |i've |that i have )?(?:provided|given|made|supplied|submitted|entered|contained|furnished"
+           r"|set forth|stated)(?: by me)?(?: (?:herein|above|below))?)?")
+_WHERE = (r"(?: (?:in|on|within|as part of|throughout) (?:this|my|the)(?: employment| job)?"
+          r" (?:application(?: form| process)?|form|process))?")
+_TRUTH = r"(?:true|accurate|correct|complete|truthful|factual|honest)"
+_TRUTHS = (r"(?: (?:completely|fully|entirely))? " + _TRUTH
+           + r"(?:(?: and| or)?(?: (?:completely|fully|entirely))? " + _TRUTH + r")*")
+_BEST = r"(?: (?:to|according to) the best of my (?:knowledge(?: and belief)?|belief))?"
+ATTEST_CLASS = re.compile(
+    "^" + _LEAD + r"i (?:hereby )?(?:also )?(?:certify|attest|acknowledge|affirm|declare|confirm|state|swear"
+    r"|represent|verify|understand)(?: that)?(?: (?:all|each|every|any))?(?: of)?(?: (?:the|my|this))? "
+    + _INFO + _SOURCE + _WHERE + r" (?:is|are|has been|have been|was|were)(?: (?:all|both))?" + _TRUTHS + _BEST + "$")
+_FALSE_NP = (r"(?:(?:any|a|the|such) )?(?:(?:material )?(?:misrepresentations?|omissions?(?: of (?:a )?material facts?)?"
+             r"|falsifications?|misstatements?)|(?:false|untrue|inaccurate|incorrect|incomplete|misleading|fraudulent"
+             r"|dishonest) (?:statements?|information|answers?|representations?|responses?))")
+_CONSEQ_NP = (r"(?:(?:the|my|an|a|immediate) )*(?:rejection|refusal|denial|disqualification|withdrawal|rescission"
+              r"|revocation|dismissal|discharge|termination|cancellation)(?: of (?:my |the |an |any |this )?"
+              r"(?:application|candidacy|offer(?: of employment)?|employment|consideration|job offer))?"
+              r"(?: from (?:further )?consideration)?")
+CONSEQ_CLASS = re.compile(
+    r"^(?:i (?:also )?(?:understand|acknowledge)(?: that)? )?" + _FALSE_NP + r"(?:(?: or| and)? " + _FALSE_NP + r")*"
+    r"(?: (?:made )?(?:in|on) (?:this|my|the)(?: employment| job)? (?:application|form))?"
+    r" (?:may|will|can|could|shall|would) (?:result in|lead to|be (?:grounds|cause|sufficient cause|a basis) for"
+    r"|constitute grounds for|cause) " + _CONSEQ_NP + r"(?:(?: or| and)? " + _CONSEQ_NP + r")*"
+    r"(?: (?:even )?if (?:discovered|found)(?: after (?:hire|hiring|employment))?)?$")
 ATTEST_FORBIDDEN = re.compile(
     r"authori[sz]|consent\s+to|agree\s+to|agreement|(background|reference|drug|credit|criminal|employment|"
     r"education|security|medical)\s+(check|screen|investigat|verif|test)|\bchecks?\b|\bscreen|release|arbitrat|"
     r"at[\s-]will|with\s+or\s+without|without\s+(cause|notice)|for\s+any\s+reason|\bam\s+not\b|\bi\s+am\b|"
+    r"(terminat|dismiss|discharg)\w*\s+(of\s+\w+\s+)?at\s+any\s+time|at\s+any\s+time\s+(by|regardless)|"
     r"electronic|signature|\bsign(ed|ing|s)?\b|e-?sign|\bcontact|\bsms\b|text\s+messag|marketing|"
     r"newsletter|non-?compete|waive|indemnif|investigat|\bpolicy|\bterms\b|privacy|conditions|employee\s+handbook|"
     r"\bage\b|\byears\s+old|eligib|legally|\bvisa|sponsor", re.I)
 ATTEST_MAX_CHARS = 600
 _SENTENCE_SPLIT = re.compile(r"[.!?;]+")
 # A sentence's clauses: cut at an "and" / "or" (a comma before it or not)
-# that is followed by "I", "that" or "my" (a new statement), so each is
-# judged on its own; a lead-in before a comma ("By checking this box, I
-# attest...") stays with its statement.
+# that opens a new statement with "I", "that" or "my"; each clause must be
+# one of the two grammars on its own.
 _CLAUSE_SPLIT = re.compile(r"(?:,\s*)?\b(?:and|or)\s+(?=(?:i|that|my)\b)", re.I)
-# Every token of letters or digits, any script: a token holding a digit or
-# a non-Latin letter is a word the vocabularies don't hold, so it refuses
-# (fix of c8a18cf's BLOCK 2).
-_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)?", re.UNICODE)
+# Characters a label of the class may hold: letters (any script: a non-Latin
+# letter then fails the grammar), digits (likewise), spaces and plain
+# punctuation. An emoji, a symbol or an invisible character refuses.
+_ALLOWED_CHARS = re.compile(r"^[^\W_\s]*(?:[\s.,;:!?'\"()\u2019\u2018\u201c\u201d-]+[^\W_\s]*)*$", re.UNICODE)
 
 
 def _attestation_clause_ok(clause: str) -> bool:
-    """One clause: every word in the vocabularies, the class's required words present, a consequence word only beside a falsity."""
-    words = _WORD.findall(clause.casefold())
-    if not words:
-        return not clause.strip()         # an empty piece says nothing; a piece with no word at all is unknown
-    has = set(words)
-    if not has <= (ATTEST_VOCAB | CONSEQ_VOCAB):
+    """One clause, normalised (casefold, commas and quotes out, spaces collapsed, a leading "that" off): one of the two grammars, whole."""
+    text = clause.casefold().replace("\u2019", "'").replace("\u2018", "'")
+    text = re.sub(r"[,\"()\u201c\u201d:]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip(" -'")
+    text = re.sub(r"^that ", "", text)
+    if not text:
         return False
-    attests = bool(has & ATTEST_VERBS) and bool(has & ATTEST_INFO) and bool(has & ATTEST_TRUTH)
-    warns = bool(has & FALSE_WORDS) and bool(has & CONSEQUENCE_WORDS)
-    if has & _CONSEQ_ONLY and not warns:
-        return False
-    return attests or warns
+    return bool(ATTEST_CLASS.fullmatch(text) or CONSEQ_CLASS.fullmatch(text))
 
 
 def _attestation_sentence_ok(sentence: str) -> bool:
-    """One sentence, clause by clause (one of Jack's variants joins both classes in one sentence)."""
+    """One sentence, clause by clause (one of Jack's variants joins both classes in one sentence); an empty piece says nothing."""
+    if not sentence.strip():
+        return True
     return all(_attestation_clause_ok(c) for c in _CLAUSE_SPLIT.split(sentence))
 
 
@@ -374,7 +372,7 @@ def attestation_ok(label: Any) -> bool:
     """
     Decision D's class: does every sentence of this label read as a
     truth-and-completeness attestation or a consequence-of-
-    misrepresentation statement, from the bounded vocabularies, with no
+    misrepresentation statement, by the two fixed grammars, with no
     forbidden clause, no marketing, legal-guard or profile-line match,
     no HARD_STOPS kind but the certify / attest / acknowledge entry and
     no criminal-record match, on any reading of the text? Nothing about
@@ -395,10 +393,13 @@ def attestation_ok(label: Any) -> bool:
             or sensitive.sensitive_line(text, SENSITIVE_PREFIXES) is not None
             or sensitive.all_profile_lines(text)):
         return False
-    # Every reading must pass sentence by sentence: an invisible character
-    # inside a word makes that word unknown on the as-written reading.
+    # Every reading must pass sentence by sentence: an invisible character,
+    # an emoji or a symbol on any reading refuses, and a non-Latin letter
+    # or a digit fails the grammar.
     for v in variants:
-        if not all(_attestation_sentence_ok(s) for s in _SENTENCE_SPLIT.split(v)):
+        if not _ALLOWED_CHARS.match(v):
+            return False
+        if not all(_attestation_sentence_ok(piece) for piece in _SENTENCE_SPLIT.split(v)):
             return False
     return True
 
