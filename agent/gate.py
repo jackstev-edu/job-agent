@@ -318,42 +318,56 @@ CONSEQUENCE_WORDS = frozenset({"rejection", "rejected", "refusal", "refused", "d
                                "dismiss", "discharge", "discharged", "termination", "terminated", "terminate",
                                "cancellation", "cancelled", "canceled", "elimination", "eliminated"})
 CONSEQ_VOCAB = FALSE_WORDS | CONSEQUENCE_WORDS | frozenset({
-    "i", "understand", "acknowledge", "agree", "accept", "aware", "am", "that", "any", "a", "an", "statement",
-    "statements", "of", "fact", "facts", "information", "material", "in", "on", "this", "my", "the", "application",
-    "form", "process", "may", "will", "can", "could", "shall", "would", "be", "is", "are", "result", "results",
-    "resulting", "lead", "leads", "grounds", "cause", "basis", "sufficient", "for", "to", "from", "consideration",
-    "candidacy", "further", "offer", "employment", "job", "position", "immediate", "immediately", "if", "when",
-    "whenever", "discovered", "found", "learned", "at", "any", "time", "after", "hired", "hiring", "hire", "and",
-    "or", "regardless", "made", "subsequent", "subsequently", "later", "also", "not", "being", "considered",
-    "considerations", "by", "me", "herein", "here", "provided", "given", "supplied", "submitted", "entered",
-    "contained", "as", "well", "even", "including", "up", "with", "without", "notice", "subject", "me", "my",
-    "it", "its", "should", "such", "serve", "serves", "disciplinary", "action", "including", "within"})
+    "i", "understand", "acknowledge", "aware", "that", "any", "a", "an", "statement", "statements", "of", "fact",
+    "facts", "information", "material", "in", "on", "this", "my", "the", "application", "form", "process", "may",
+    "will", "can", "could", "shall", "would", "be", "is", "are", "result", "results", "resulting", "lead", "leads",
+    "grounds", "basis", "sufficient", "for", "to", "from", "consideration", "candidacy", "further", "offer",
+    "employment", "job", "position", "immediate", "immediately", "if", "when", "whenever", "discovered", "found",
+    "at", "time", "after", "hired", "hiring", "hire", "and", "or", "regardless", "made", "subsequent", "subsequently",
+    "later", "also", "considered", "by", "me", "herein", "here", "provided", "given", "supplied", "submitted",
+    "entered", "contained", "as", "including", "it", "its", "such", "serve", "serves", "within"})
+# The words only the consequence class holds: a clause using one must also
+# name a falsity (fix of c8a18cf's BLOCK 1: "my employment may be
+# terminated at any time" is no consequence of misrepresentation).
+_CONSEQ_ONLY = CONSEQ_VOCAB - ATTEST_VOCAB
 ATTEST_FORBIDDEN = re.compile(
     r"authori[sz]|consent\s+to|agree\s+to|agreement|(background|reference|drug|credit|criminal|employment|"
     r"education|security|medical)\s+(check|screen|investigat|verif|test)|\bchecks?\b|\bscreen|release|arbitrat|"
-    r"at[\s-]will|electronic|signature|\bsign(ed|ing|s)?\b|e-?sign|\bcontact|\bsms\b|text\s+messag|marketing|"
+    r"at[\s-]will|with\s+or\s+without|without\s+(cause|notice)|for\s+any\s+reason|\bam\s+not\b|\bi\s+am\b|"
+    r"electronic|signature|\bsign(ed|ing|s)?\b|e-?sign|\bcontact|\bsms\b|text\s+messag|marketing|"
     r"newsletter|non-?compete|waive|indemnif|investigat|\bpolicy|\bterms\b|privacy|conditions|employee\s+handbook|"
     r"\bage\b|\byears\s+old|eligib|legally|\bvisa|sponsor", re.I)
 ATTEST_MAX_CHARS = 600
 _SENTENCE_SPLIT = re.compile(r"[.!?;]+")
-_WORD = re.compile(r"[a-z]+(?:'[a-z]+)?")
+# A sentence's clauses: cut at an "and" / "or" (a comma before it or not)
+# that is followed by "I", "that" or "my" (a new statement), so each is
+# judged on its own; a lead-in before a comma ("By checking this box, I
+# attest...") stays with its statement.
+_CLAUSE_SPLIT = re.compile(r"(?:,\s*)?\b(?:and|or)\s+(?=(?:i|that|my)\b)", re.I)
+# Every token of letters or digits, any script: a token holding a digit or
+# a non-Latin letter is a word the vocabularies don't hold, so it refuses
+# (fix of c8a18cf's BLOCK 2).
+_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)?", re.UNICODE)
 
 
-def _attestation_sentence_ok(sentence: str) -> bool:
-    """One sentence, every word in one class's vocabulary with that class's required words present."""
-    words = _WORD.findall(sentence.casefold())
+def _attestation_clause_ok(clause: str) -> bool:
+    """One clause: every word in the vocabularies, the class's required words present, a consequence word only beside a falsity."""
+    words = _WORD.findall(clause.casefold())
     if not words:
-        return True                       # an empty piece between separators says nothing
+        return not clause.strip()         # an empty piece says nothing; a piece with no word at all is unknown
     has = set(words)
-    # One sentence may join both classes ("...is accurate, and I understand
-    # that misrepresentation may result in dismissal": one of Jack's
-    # positive variants), so the words come from the union of the two
-    # vocabularies and either class's required words must be there.
     if not has <= (ATTEST_VOCAB | CONSEQ_VOCAB):
         return False
     attests = bool(has & ATTEST_VERBS) and bool(has & ATTEST_INFO) and bool(has & ATTEST_TRUTH)
     warns = bool(has & FALSE_WORDS) and bool(has & CONSEQUENCE_WORDS)
+    if has & _CONSEQ_ONLY and not warns:
+        return False
     return attests or warns
+
+
+def _attestation_sentence_ok(sentence: str) -> bool:
+    """One sentence, clause by clause (one of Jack's variants joins both classes in one sentence)."""
+    return all(_attestation_clause_ok(c) for c in _CLAUSE_SPLIT.split(sentence))
 
 
 def attestation_ok(label: Any) -> bool:

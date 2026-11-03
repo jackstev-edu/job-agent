@@ -259,8 +259,11 @@ class State:
             return {"ok": False, "error": str(e)}
         except Exception as e:
             return {"ok": False, "error": f"couldn't write it ({type(e).__name__})"}
-        store.drop_offer(offer["id"])
         done = f"consent_allowlist gained one line; backup {backup.name}"
+        try:
+            store.drop_offer(offer["id"])
+        except Exception as e:                   # the line is written; only the offer stays listed
+            done += f" (the offer couldn't be dropped: {type(e).__name__})"
         with self.lock:
             self.profile_changed = True
             self.notice = done

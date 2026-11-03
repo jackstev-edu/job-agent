@@ -80,6 +80,21 @@ LEGAL = [
     ("not an attestation", "Thank you for applying!"),
     ("empty", ""),
     ("an unknown word", "I certify that the information is true and complete and vibrant"),
+    # Fix of c8a18cf's BLOCK 1: clauses built from vocabulary words that
+    # are no attestation and no consequence of misrepresentation.
+    ("an at-will clause from vocabulary words",
+     "I certify that the information provided is true and complete, and I understand that my employment may be "
+     "terminated at any time with or without cause or notice."),
+    ("a declaration about Jack from vocabulary words",
+     "I certify that the information provided in this application is true and complete and that I am not subject "
+     "to any disciplinary action."),
+    ("a consequence clause with no falsity",
+     "I certify that the information is true and complete. My employment may be terminated."),
+    # Fix of c8a18cf's BLOCK 2: a token with a digit or in another script is unknown.
+    ("a digit token", "I certify that the information provided is true and complete and that I am 18+."),
+    ("a digit token, no I am", "I certify that the information provided is true and complete and 18+."),
+    ("another script", "I certify that the information is true and complete. Я согласен."),
+    ("a non-Latin letter inside a word", "I certify that the informatiοn is true and complete."),   # Greek omicron
 ]
 MIXED = "I agree to the terms and certify that my answers are true"
 
