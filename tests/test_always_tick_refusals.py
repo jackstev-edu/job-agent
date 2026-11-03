@@ -18,6 +18,7 @@ convenience.
 Run from anywhere:  .venv/Scripts/python.exe tests/test_always_tick_refusals.py
 """
 import hashlib
+import re
 
 from _fill_run import PROFILE
 from _harness import TEST_HOME, Checks, run_as_script
@@ -78,6 +79,54 @@ VARIANTS = [
     ("permission to obtain records", "I give Example Co permission to obtain my records"),
     ("permit to verify employment history", "I permit Example Co to verify my employment history"),
     ("verify my identity", "Example Co may verify my identity"),
+    # Third fix (7d34acc's review): the standard paragraphs without the key word.
+    ("the at-will paragraph without 'at-will'",
+     "I understand that, if hired, my employment can be terminated, with or without cause and with or without notice, "
+     "at any time, at the option of either the Company or myself."),
+    ("waive and hold harmless", "I waive any claim against Example Co and hold it harmless"),
+    ("statements may be investigated", "I understand that all statements in this application may be investigated"),
+    ("verify the information", "Example Co may verify the information I provided"),
+    ("verify my work history", "Example Co may verify my work history"),
+    ("a toxicology screen", "I agree to a toxicology screen"),
+    ("alcohol testing", "I agree to alcohol testing"),
+    ("vetting", "I consent to pre-employment vetting"),
+    ("a competitor", "I will not work for a competitor of Example Co for twelve months after leaving"),
+    ("phone me", "Example Co may phone me"),
+    ("email me", "Example Co may email me about my application"),
+    ("reach me", "Example Co may reach me by phone"),
+    ("receive calls", "I agree to receive calls"),
+    ("send me a text", "Example Co may send me a text"),
+    ("allow to obtain", "I allow Example Co to obtain my transcripts"),
+    ("permissions, plural", "I grant Example Co permissions to contact my referees"),
+    ("typed name as signature", "My typed name below has the same legal effect as my handwritten one"),
+    ("a dashed credit-report", "I consent to a credit-report"),
+    ("a dashed employment-verification", "I consent to employment-verification"),
+]
+# gate.CONSENT_DECLARE: an age or eligibility statement is a declaration, never a consent line.
+DECLARATIONS = [
+    ("an age statement", "I confirm I am 18 years of age or older"),
+    ("an eligibility statement", "I am eligible for employment in the United States"),
+]
+# The patterns of 5da85c0 and d9c5b10, kept as literals so that no refusal
+# either gave can quietly turn into a pass (7d34acc's review): every sample
+# string one of them refuses, the current check must refuse too.
+OLD_5DA85C0 = re.compile(
+    r"authori[sz]|\brelease|(background|reference|drug|credit|criminal|employment|education|medical)\s+"
+    r"(check|screen|investigat|verif|test)|\bchecks?\b|\bscreening|arbitrat|at[\s-]will|e-?sign|electronic\s+signature|"
+    r"\bsign(ed|ing|ature)?\b|\bcontact|\bsms\b|text\s+messag|marketing|newsletter|non-?compete|restrictive\s+covenant", re.I)
+OLD_D9C5B10 = re.compile(
+    r"authori[sz]|\brelease|\bbackground\b|\breferenc\w*|\bdrug\w*|\bcredit\s+(report|history|check|score)|"
+    r"\bconsumer\s+report|(criminal|employment|education|medical)\s+(check|screen|investigat|verif|test)|"
+    r"\bcheck(s|ed|ing)?\b|\bscreening|arbitrat|\bat[\s\-\u2010-\u2015\u2212]*will\b|e-?sign|electronic\s+signature|"
+    r"signatur|\bsign(s|ed|ing|er|ers)?\b|undersign|\bcontact|\bsms\b|text\s+messag|marketing|newsletter|"
+    r"\bnon[\s\-\u2010-\u2015\u2212]*compet|restrictive\s+covenant", re.I)
+OLD_SAMPLES = [
+    "I consent to a credit screen", "I consent to a credit investigation", "I consent to credit verification", "I agree to a credit test",
+    "I consent to a background screen", "I agree to a reference verification", "I consent to a drug investigation",
+    "I consent to a criminal check", "I consent to an employment check", "I consent to an education test", "I consent to a medical screen",
+    "I accept the restrictive covenant", "Checks may be made", "A screening will follow", "I accept at-will employment",
+    "This is my e-signature", "My electronic signature", "Signed below", "You may contact my employer", "Send me SMS", "Text message alerts",
+    "Marketing from Example Co", "The newsletter", "The non-compete clause", "I release Example Co",
 ]
 FORBIDDEN_REASON = "an authorize / release / check / arbitration / at-will / signing / contact / marketing / non-compete wording"
 ALLOWED = "I accept the employee handbook"
@@ -98,6 +147,13 @@ def test_each_named_wording_is_refused_with_its_reason_and_a_plain_acceptance_is
     for what, label in VARIANTS:
         why = approve.allowlist_refusal(label)
         check(why == FORBIDDEN_REASON, f"{what}: refused by the forbidden-wording check ({why})")
+    for what, label in DECLARATIONS:
+        why = approve.allowlist_refusal(label)
+        check(why == "an age or eligibility declaration", f"{what}: refused as a declaration ({why})")
+    for sample in OLD_SAMPLES + [l for _, l in REFUSED + VARIANTS]:
+        if OLD_5DA85C0.search(sample) or OLD_D9C5B10.search(sample):
+            check(approve.allowlist_refusal(sample) is not None, f"a wording an earlier pattern refused is still refused: {sample!r}")
+    check(all(OLD_5DA85C0.search(x) or OLD_D9C5B10.search(x) for x in OLD_SAMPLES), "every old sample is one an earlier pattern refused")
     check(approve.allowlist_refusal(ALLOWED) is None, "a plain handbook acceptance is still allowed")
     check(approve.allowlist_refusal("I agree to the Terms of Service and Privacy Policy") is None,
           "a terms / privacy wording is still allowed (the policy ticks it anyway)")
@@ -123,24 +179,26 @@ def _plant(store, label):
 
 
 def test_the_server_route_refuses_each_wording_and_writes_nothing():
-    # Fails on 5ba4a07: the route wrote the authorize / release / ... lines
-    # (allowlist_refusal let them through).
+    # Fails on 16b6ac3 (before 5da85c0): the route wrote the authorize /
+    # release / ... lines (allowlist_refusal let them through). Each row is
+    # planted and posted on its own: the store keeps only the last fifty
+    # offers, so planting them all first would drop the earliest.
     check = Checks()
     state = _state("route")
-    store = memory.Learned.load(state.memory_path)
-    ids = {what: _plant(store, label) for what, label in REFUSED + VARIANTS}
-    ok_id = _plant(store, ALLOWED)
     server = gui.Server(state).start()
     try:
         origin = f"http://127.0.0.1:{server.port}"
-        for what, _label in REFUSED + VARIANTS:
-            status, _, body = _req(server, "POST", "/memory/always-tick", {"id": ids[what]}, origin=origin)
+        for what, label in REFUSED + VARIANTS + DECLARATIONS:
+            store = memory.Learned.load(state.memory_path)
+            oid = _plant(store, label)
+            status, _, body = _req(server, "POST", "/memory/always-tick", {"id": oid}, origin=origin)
             check(status == 200 and body.get("ok") is False and "never allowlisted" in str(body.get("error")),
                   f"{what}: the route refuses ({body})")
+            check(oid in {o["id"] for o in memory.Learned.load(state.memory_path).offers},
+                  f"{what}: the refused offer stays listed (nothing was written for it)")
         check(Profile.load(state.profile_path).consent_allowlist() == [], "nothing written to consent_allowlist")
         check(not approve.backups_of(state.profile_path), "no backup taken: the file was never touched")
-        kept = {o["id"] for o in memory.Learned.load(state.memory_path).offers}
-        check(all(ids[w] in kept for w, _ in REFUSED + VARIANTS), "a refused offer stays listed (nothing was written for it)")
+        ok_id = _plant(memory.Learned.load(state.memory_path), ALLOWED)
         status, _, body = _req(server, "POST", "/memory/always-tick", {"id": ok_id}, origin=origin)
         check(status == 200 and body.get("ok") is True and Profile.load(state.profile_path).consent_allowlist() == [ALLOWED],
               f"the plain acceptance still goes through the same route ({body})")
@@ -159,7 +217,7 @@ def test_offer_ticks_never_offers_one_of_them():
         return {"field": {"ref": "x", "type": "checkbox", "label": label, "explicit_label": label},
                 "kind": "filled_blank", "agent": None, "now": True, "decision": {}, "category": "consent"}
 
-    offered = corrections.offer_ticks([change(l) for _, l in REFUSED + VARIANTS] + [change(ALLOWED)],
+    offered = corrections.offer_ticks([change(l) for _, l in REFUSED + VARIANTS + DECLARATIONS] + [change(ALLOWED)],
                                       url="https://careers.example-co.com/apply", log=[], store=store)
     check([o["label"] for o in offered] == [ALLOWED], f"only the plain acceptance is offered ({[o['label'] for o in offered]})")
     check.done()

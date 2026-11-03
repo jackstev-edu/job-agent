@@ -210,15 +210,37 @@ def apply_profile_line(path: Path, line: str, value: str, expected_stamp: str) -
 # records" in either order. The at-will term keeps its old unanchored
 # shape (bounding it was a logged FLAG, not a fold).
 _DASH = r"[\s\-‐-―−]"
+# Third fix (7d34acc's review; the last attempt): the plain forms the
+# repo's own refusal vocabularies already know (gate.ATTEST_FORBIDDEN's
+# at-will, release and investigation words, CONSENT_CERTIFY's verify /
+# investigate / screen) join the list, every two-word join takes a dash as
+# well as a space, and the broad stems (verif, investigat, screen, compet,
+# allow, permiss) refuse more rather than less: refusing too much here
+# costs Jack a tick by hand, refusing too little ticks a box on every
+# portal. gate.CONSENT_DECLARE (an age or eligibility statement) is read
+# in allowlist_refusal as well.
+_J = _DASH + r"+"
 ALLOWLIST_FORBIDDEN = re.compile(
-    r"authori[sz]|\bpermi(t|ts|tted|tting|ssion)\b|\brelease|\bbackground\b|\breferenc\w*|\breferees?\b|\bdrug\w*|"
-    r"\bcredit\s+(report|history|check|score|screen|investigat|verif|test|inquir|enquir|record|information)|"
-    r"\bconsumer\s+report|(criminal|employment|education|medical|identity)\s+(check|screen|investigat|verif|test)|"
-    r"verif\w*\s+(my\s+|your\s+|the\s+)?(employment|education|identity|history|records?|credentials?)|"
-    r"\bcheck(s|ed|ing)?\b|\bscreening|arbitrat|at" + _DASH + r"*will|e-?sign|electronic\s+signature|"
-    r"signatur|\bsign(s|ed|ing|er|ers)?\b|undersign|\bcontact|\bsms\b|text\s+messag|\btexts?\s+me\b|\btexts\b|"
-    r"\btexting\b|\bcall\s+(or\s+\w+\s+)?me\b|marketing|newsletter|"
-    r"\bnon" + _DASH + r"*compet|not\s+to\s+compet|covenant\s+not|restrictive\s+covenant",
+    # authorize / permit / allow / grant / release / waive / indemnify / hold harmless
+    r"authori[sz]|\bpermi(t|ss)\w*|\ballow\w*|\bgrant\w*|\brelease|\bwaiv\w*|indemnif|\bharmless|\bdischarg\w*|"
+    # checks, screens, investigations, verifications, tests, vetting, in any order and any join
+    r"\bbackground\b|\breferenc\w*|\breferees?\b|\bdrug\w*|\balcohol|toxicolog|\bsubstance|"
+    r"\bcredit" + _J + r"(report|history|check|score|screen|investigat|verif|test|inquir|enquir|record|information)|"
+    r"\bconsumer" + _J + r"report|(criminal|employment|education|medical|identity)" + _J + r"(check|screen|investigat|verif|test)|"
+    r"investigat|\bverif\w*|\bscreen\w*|\bvett(ing|ed)\b|\bcheck(s|ed|ing)?\b|"
+    # arbitration, at-will in every shape
+    r"arbitrat|\bat" + _DASH + r"*will|with\s+or\s+without|without\s+(cause|notice)|for\s+any\s+reason|"
+    r"(terminat|dismiss|discharg)\w*.{0,40}at\s+any\s+time|at\s+any\s+time\s+(by|regardless)|"
+    # signing
+    r"e-?sign|electronic" + _J + r"signature|signatur|\bsign(s|ed|ing|er|ers)?\b|undersign|handwritten|"
+    r"typed" + _J + r"name|legally" + _J + r"binding|"
+    # contact, SMS, marketing
+    r"\bcontact|\bsms\b|text" + _J + r"messag|\btexts?\s+me\b|\btexts\b|\btexting\b|"
+    r"\b(call|phone|e-?mail|text|message|reach|send|notify|inform|update)\w*\s+(\w+\s+)?me\b|"
+    r"\breceive\s+(\w+\s+)?(calls?|texts?|e-?mails?|messages?|notifications?|updates?)|"
+    r"marketing|newsletter|"
+    # non-compete in every shape
+    r"\bcompet\w*|\bcovenant",
     re.I)
 
 
@@ -245,6 +267,8 @@ def allowlist_refusal(label: str) -> str | None:
     if any(ALLOWLIST_FORBIDDEN.search(v) for v in variants):
         return ("an authorize / release / check / arbitration / at-will / signing / contact / marketing / "
                 "non-compete wording")
+    if any(gate.CONSENT_DECLARE.search(v) for v in variants):
+        return "an age or eligibility declaration"
     if any(sensitive.stop_kinds(v) - {"legal"} for v in variants) or any(sensitive.record_stop(v) for v in variants):
         return "a credential, per-company or criminal-record question"
     if any(sensitive.is_past_employer_question(v) for v in variants):
