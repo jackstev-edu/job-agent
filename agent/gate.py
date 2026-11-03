@@ -656,6 +656,10 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
     # since before it; the wizard writes this list; a missing key waives
     # nothing).
     reviewed = {r for r in (record.get("human_reviewed") or []) if isinstance(r, str)}
+    # The option boxes of a checkbox group that carry his mark themselves
+    # (decision E per element, Jack, 2026-11-03; the wizard writes this
+    # list; a missing key marks nothing).
+    marked = {r for r in (record.get("human_marked") or []) if isinstance(r, str)}
     # Reasons the optional-empties decision lists instead of stopping on.
     waived: list[str] = []
 
@@ -973,7 +977,17 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             elif ticked_in_group > 1:
                 content.append(f"{name}: more than one box of its group is ticked")
             elif group.get("ref") in reviewed:
-                pass
+                # A group he answered himself: a ticked box must carry his
+                # own mark, or equal a strict-fit profile plan; a box the
+                # agent or the page ticked is not his answer (fold of
+                # 398e6c5's review, finding 1: "with no sibling waived").
+                decision = plan.get(group.get("ref")) or {}
+                trusted = decision.get("source") == "profile" and decision.get("fit") in sensitive.LEGAL_FITS
+                his_tick = box.get("ref") in marked or (
+                    trusted and normalize_label(option) == normalize_label(decision.get("value")))
+                if box.get("checked") is not False and not his_tick:
+                    content.append(f"{name}: ticked in a group you answered, but carries neither your mark "
+                                   f"nor a strict profile fit")
             else:
                 decision = plan.get(group.get("ref")) or {}
                 planned = decision.get("value")

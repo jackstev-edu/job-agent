@@ -244,11 +244,13 @@ def test_the_gate_trusts_a_group_only_from_a_strict_profile_fit_and_keeps_the_la
     check(any("label not explicit" in x for x in v["content_reasons"]), "a grouped box labelled by aria-labelledby still stops")
     r = record()
     r["human_reviewed"] = ["o1"]
+    r["human_marked"] = ["o2"]                           # his own tick on the No box
     r["plan"].pop("o1")
     check(gate_run(r)["content_verdict"] == gate.WOULD_SUBMIT, "a group Jack answered himself is his")
     # Fold of 2d0c2ee's findings 1-3 (each fails on 2d0c2ee).
     r = record()
     r["human_reviewed"] = ["o1"]
+    r["human_marked"] = ["o2"]
     r["census"][-2]["checked"] = True                   # two boxes ticked, the group reviewed
     v = gate_run(r)
     check(v["content_verdict"] == gate.WOULD_STOP and any("more than one box" in x for x in v["content_reasons"]),
@@ -302,10 +304,32 @@ def test_decision_e_waives_per_element_only_never_a_sibling_of_a_touched_box():
         r["census"] += [dict(box(first_label, ref="o1", checked=first_checked), **first_over),
                         box(no, ref="o2", checked=second_checked)]
         r["human_reviewed"] = ["o1"]                     # Jack touched o2: the wizard marks the group's ref
+        r["human_marked"] = ["o2"]                       # ...and o2's own element carries his mark
         return r
 
     v = gate_run(record())
     check(v["content_verdict"] == gate.WOULD_SUBMIT, f"the positive: he ticked one box of a required group, the group resolves ({v['content_reasons']})")
+    # Fold of 398e6c5's review, finding 1 (passes on 398e6c5): he touched
+    # o2 and left it unticked; o1, ticked by the agent or the page, is not
+    # his answer and matches no strict-fit plan.
+    v = gate_run(record(first_checked=True, second_checked=False))
+    check(v["content_verdict"] == gate.WOULD_STOP and any("neither your mark nor a strict profile fit" in x for x in v["content_reasons"]),
+          f"a sibling the page ticked, in a group he touched elsewhere, is not his tick ({v['content_reasons']})")
+    r = record(first_checked=True, second_checked=False)
+    r["plan"]["o1"] = {"value": yes, "source": "profile", "fit": "bool", "profile_path": "eeo.disability_status"}
+    r["snapshot"]["o1"] = yes
+    check(gate_run(r)["content_verdict"] == gate.WOULD_SUBMIT, "...unless a strict profile fit planned that very box")
+    r = record()
+    r["human_marked"] = []
+    check(gate_run(r)["content_verdict"] == gate.WOULD_STOP, "a record with no element marks: a ticked box of his group is not his")
+    # Out of a group (the other half of "per element"): two lone boxes, his mark on one.
+    r = base()
+    r["census"] += [box("I agree to the handbook", ref="c8", checked=True), box("I accept the code of conduct", ref="c9", checked=True)]
+    r["human_reviewed"] = ["c9"]
+    v = gate_run(r)
+    check(v["content_verdict"] == gate.WOULD_STOP and any("'I agree to the handbook'" in x for x in v["content_reasons"])
+          and not any("code of conduct" in x for x in v["content_reasons"]),
+          f"his mark on one lone box waives nothing for the other ({v['content_reasons']})")
     marketing = "Yes, I would like to hear about future opportunities"
     v = gate_run(record(first_label=marketing, first_checked=True, second_checked=False))
     check(v["content_verdict"] == gate.WOULD_STOP and any("opt-in, a certification or a stop" in x for x in v["content_reasons"]),
@@ -313,6 +337,9 @@ def test_decision_e_waives_per_element_only_never_a_sibling_of_a_touched_box():
     v = gate_run(record(first_checked=True, second_checked=True))
     check(v["content_verdict"] == gate.WOULD_STOP and any("more than one box" in x for x in v["content_reasons"]),
           "both ticked: the first box's own check stops")
+    v = gate_run(record(first_label=marketing, first_checked=True, second_checked=False))
+    check(any("opt-in, a certification or a stop" in x for x in v["content_reasons"]),
+          "the opt-in wording is still the first reason named for the page-ticked first box")
     v = gate_run(record(first_checked=True, label_source="aria-label"))
     check(any("visible <label>" in x for x in v["content_reasons"]), "the first box labelled by aria-label alone: judged, stops")
     v = gate_run(record(described="see the handbook"))
@@ -334,20 +361,27 @@ def test_jack_ticking_one_box_of_a_required_group_under_the_pause_moves_the_job_
     # The positive Jack asked for (2026-11-03): a required checkbox group
     # the profile does not answer pauses the gate; he ticks one box;
     # Continue resolves the group and the job goes on through Submit.
-    # Fails on aa46374 only in what it proves about siblings (the gate case
-    # above); here it guards that the per-element rule costs nothing.
+    # Fails on 5da85c0: step 3's page record carried step 2's ticked box
+    # with no group field, so the consent rule stopped there. Since the
+    # fold of 398e6c5's review the wizard also records which option box
+    # carries his mark (human_marked), and the gate needs it.
     from test_pick_up import _page, _run
     check = Checks()
     with _run(_page(city=SHIFT_GROUP), auto_submit=lambda: True) as (page, w):
         out = w.run()
         check(out.status == wizard.WAITING and w.pending["kind"] == "gate", f"the gate pause on step 2 ({out.status}: {out.reason})")
+        check(any("Shift preference" in r for r in (w.pending.get("result") or {}).get("content_reasons", []))
+              or any("Shift preference" in l for l in w.out.log), f"the pause is the group's ({w.out.log[-3:]})")
         check(_ticks(page) == {"am": False, "pm": False}, "the agent ticked nothing of a group the profile does not answer")
+        fields = w.pending["fill"].fields
+        group = next(f for f in fields if f.get("widget") == "checkboxes")
         page.check("#pm")                                  # Jack's own click, under the pause
         page.wait_for_timeout(300)
         out = w.continue_from({})
         check(out.status == "submitted", f"after Continue the job goes on through Submit ({out.status}: {out.reason})")
-        group_ref = next((r for r in w.human_reviewed), None)
-        check(group_ref is not None and len(w.human_reviewed) == 1, f"the group counts as his once ({w.human_reviewed})")
+        check(w.human_reviewed == [group["ref"]] and group["ref"] == group["option_refs"][0],
+              f"the group counts as his once, by its first box's ref ({w.human_reviewed})")
+        check(w.human_marked == [group["option_refs"][1]], f"his mark is on the second box's element alone ({w.human_marked})")
     check.done()
 
 

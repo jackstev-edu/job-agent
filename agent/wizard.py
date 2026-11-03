@@ -307,6 +307,11 @@ class Wizard:
         self.prefill: dict = {}                 # earlier pages' pair boxes before filling, by group
         self.results: dict = {}
         self.human_reviewed: list[str] = []
+        # The option boxes (element refs) of a touched checkbox group that
+        # carry his mark themselves: decision E per element (Jack,
+        # 2026-11-03). A box of a group he answered is his tick only when
+        # it is in here.
+        self.human_marked: list[str] = []
         self.uploaded: dict | None = {}
         self.resume_done = False
         self.pending: dict | None = None        # where a deferred pause left off
@@ -353,6 +358,7 @@ class Wizard:
             if earlier or isinstance(pre, list):
                 rec["prefill_census"] = earlier + pre_now
             rec["human_reviewed"] = list(self.human_reviewed)
+            rec["human_marked"] = list(self.human_marked)
             rec["wizard"] = wizard
         return rec
 
@@ -743,6 +749,19 @@ class Wizard:
         for ref in refs:
             if (ref in touched or ref in ticked) and ref not in self.human_reviewed:
                 self.human_reviewed.append(ref)
+        # Per element (Jack, 2026-11-03): of a touched checkbox group, which
+        # option boxes carry his mark themselves. Read now, on the group's
+        # own option elements only; a read that fails marks nothing.
+        groups = [f for f in fill.fields if f.get("widget") == "checkboxes" and f["ref"] in touched]
+        option_refs = [r for f in groups for r in (f.get("option_refs") or [])]
+        if option_refs:
+            try:
+                hit = set(self.page.evaluate(_TOUCHED_JS, [option_refs, ledger.REVIEW_ATTR]) or [])
+            except Exception:
+                hit = set()
+            for r in option_refs:
+                if r in hit and r not in self.human_marked:
+                    self.human_marked.append(r)
         if now is not None:
             fill.snapshot = now
             self.snapshots.update(now)
@@ -1077,6 +1096,7 @@ class Wizard:
         self.census = {m(k): remap_box(b) for k, b in self.census.items() if k not in unpaired}
         self.prefill = {m(g): [remap_box(b) for b in boxes] for g, boxes in self.prefill.items()}
         self.human_reviewed = [m(r) for r in self.human_reviewed if r not in unpaired]
+        self.human_marked = [m(r) for r in self.human_marked if r not in unpaired]
         if isinstance(pending.get("marked_before"), set):
             # Kept whole: a stale ref left in "before" can only shrink what
             # counts as touched since (touched = after - before).
