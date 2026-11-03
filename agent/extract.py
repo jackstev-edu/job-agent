@@ -360,32 +360,44 @@ _SCAN_JS = safe(r"""
   const NAME_RX = /^(your\s+|full\s+|applicant'?s?\s+|candidate'?s?\s+|printed\s+|legal\s+)?(name|signature|e-?signature|electronic\s+signature)(\s*\(.*\))?\s*:?\s*\*?$/i;
   const plainBox = b => ['INPUT', 'TEXTAREA'].includes(__ja.tag(b)) && isVisible(b)
       && !['hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'password'].includes((__ja.type(b) || '').toLowerCase());
+  // The block's container (or null): the smallest ancestor, as above, that
+  // holds another control whose label matches rx.
   const blockWith = (el, rx, withSelects) => {
     let p = __ja.parent(el);
     for (let i = 0; i < 6 && p && p !== document.body; i++, p = __ja.parent(p)) {
       const tag = __ja.tag(p);
-      if (tag === 'FORM') return false;             // the whole form is no block
+      if (tag === 'FORM') return null;             // the whole form is no block
       const boxes = [...p.querySelectorAll('input, textarea')].filter(plainBox);
       const selects = [...p.querySelectorAll('select')];
       // Twelve controls at most, dropdowns counted (fold of d9461c9's finding 3).
-      if (boxes.length + selects.length > 12) return false;
+      if (boxes.length + selects.length > 12) return null;
       const others = withSelects ? [...boxes, ...selects] : boxes;
-      if (others.some(b => b !== el && rx.test(labelFor(b).trim()))) return true;
+      if (others.some(b => b !== el && rx.test(labelFor(b).trim()))) return p;
       // A fieldset, group or section without a name box is the box's own
       // block: a name box in a sibling block says nothing about this one.
-      if (tag === 'FIELDSET' || tag === 'SECTION' || ['group', 'region'].includes(__ja.attr(p, 'role') || '')) return false;
+      if (tag === 'FIELDSET' || tag === 'SECTION' || ['group', 'region'].includes(__ja.attr(p, 'role') || '')) return null;
     }
-    return false;
+    return null;
   };
-  const signatureBlock = el => blockWith(el, NAME_RX, false);
-  // The Name box of that block (Jack, 2026-11-03): its own label is a
-  // name with no sign / signature wording, and the same walk finds a
-  // date-part box (a text box or a dropdown) beside it. Structure only;
-  // signdate.py decides whether the page is a self-identification form
-  // and fills it from the profile's name lines, never the model.
+  const signatureBlock = el => !!blockWith(el, NAME_RX, false);
+  // The Name box of that block (Jack, 2026-11-03): its own label holds the
+  // word "name", the same walk finds a date-part box (a text box or a
+  // dropdown) beside it, and the block holds nothing else (every other
+  // control is a date part: a Certifications or References block with a
+  // Name box beside an Issuer or Company box is no signature block; fix
+  // of 0530a70's review). Structure only; signdate.py decides whether the
+  // page is a self-identification form, whether the label is a bare name
+  // with no sign wording, and fills it from the profile's name lines,
+  // never the model; a marked box it does not fill is Jack's.
   const DATE_RX = /^(signature\s+|today'?s\s+|current\s+|the\s+)?(date|month|day|year)(\s+(signed|of\s+signature))?(\s*\(.*\))?\s*:?\s*\*?$/i;
-  const NAME_ONLY_RX = /^(your\s+|full\s+|applicant'?s?\s+|candidate'?s?\s+|printed\s+|legal\s+)?name(\s*\(.*\))?\s*:?\s*\*?$/i;
-  const signatureName = el => NAME_ONLY_RX.test(labelFor(el).trim()) && blockWith(el, DATE_RX, true);
+  const NAME_WORD_RX = /\bname\b/i;
+  const signatureName = el => {
+    if (!NAME_WORD_RX.test(labelFor(el))) return false;
+    const block = blockWith(el, DATE_RX, true);
+    if (!block) return false;
+    const controls = [...block.querySelectorAll('input, textarea')].filter(plainBox).concat([...block.querySelectorAll('select')]);
+    return controls.every(c => c === el || DATE_RX.test(labelFor(c).trim()));
+  };
 
   // Each stamped element's tag, type and name, as the scan saw it. A read
   // refuses an element that no longer matches (a reused or swapped node).

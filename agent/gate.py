@@ -762,8 +762,20 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             if not signdate.verify_name(f, decision, fields, profile, category):
                 content.append(f"{name}: signature name not recomputed from your profile's name lines (left for you)")
                 continue
-            trace.append({"ref": ref, "label": label[:120], "category": category,
-                          "profile_path": signdate.NAME_LINES[0], "source": signdate.NAME_SOURCE, "fit": "verbatim"})
+            if not sensitive_field:                  # the sensitive branch below traces it otherwise
+                trace.append({"ref": ref, "label": label[:120], "category": category,
+                              "profile_path": signdate.NAME_LINES[0], "source": signdate.NAME_SOURCE, "fit": "verbatim"})
+        elif decision and signdate.name_box_is_jacks(f, fields):
+            # The signature Name box filled from anything but the profile's
+            # name lines (fix of 0530a70's review: the model's fill passed).
+            content.append(f"{name}: the signature Name box takes your profile's name lines only")
+            continue
+        # A box that signs is never filled by any route (the filler
+        # paragraph of CLAUDE.md); a plan with a value on one stops here,
+        # whatever planned it (fix of 0530a70's review, finding 7).
+        if decision and decision.get("value") is not None and signdate.is_signature_box(f):
+            content.append(f"{name}: a box that signs was filled; nothing signs for you")
+            continue
 
         # An allowlisted consent checkbox: your exact entry in consent_allowlist
         # answers it, the way a profile line answers an eligibility question.
@@ -816,7 +828,11 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             # the record's own field (the block, the page's EEO question,
             # the part, the widget's stated format) and equal to the fill.
             clock_ok = signdate.verify(f, decision, fields, category=category)
-            if not (traced_to_profile or learned_ok or clock_ok):
+            # The signature Name box the classifier called legal (eeo on a
+            # self-identification form): the profile's own name lines,
+            # recomputed here like the clock (fix of 0530a70's review).
+            name_ok = signdate.verify_name(f, decision, fields, profile, category)
+            if not (traced_to_profile or learned_ok or clock_ok or name_ok):
                 content.append(f"{name}: legal/eligibility/EEO/pay answer not traced to a "
                                f"profile line or to your own answer on this question (left for you)")
                 continue

@@ -179,25 +179,46 @@ def verify(field: dict, decision: dict | None, fields: list[dict], today: dateti
 # other signature box, or a label with sign / signature wording, is Jack's.
 NAME_SOURCE = "profile_name"
 NAME_LINES = ("personal.first_name", "personal.last_name")
-_NAME_LABEL = re.compile(r"^(?:your |full |applicant'?s? |candidate'?s? |printed |legal )?name(?: \(.*\))?\s*:?\s*\*?$")
+# The words a name label may hold beside "name" (once): "Your Name", "Full
+# legal name", "Name of applicant", "Printed name (please print)". Never
+# first / last / middle / preferred: those are other boxes.
+_NAME_WORDS = frozenset({"your", "full", "legal", "printed", "print", "type", "typed", "please", "enter", "applicant",
+                         "applicants", "applicant's", "candidate", "candidates", "candidate's", "employee", "employees",
+                         "employee's", "of", "the", "as", "it", "appears", "clearly", "here", "below", "above"})
 # A box that signs: never filled by any route (the filler paragraph's
-# "signs anything" line in CLAUDE.md).
-_SIGN_WORDS = re.compile(r"\bsign(?:ature|atures|ed|ing|s)?\b|\be-?sign\w*|\binitials?\b", re.I)
+# "signs anything" line in CLAUDE.md). Read on every reading of the label,
+# help text, placeholder and the name attribute split into words (fix of
+# 0530a70's review: the label alone let a "Name" box with placeholder
+# "Signature" through). "initials", "initial here", never a lone "initial"
+# (a Middle initial box is no signature).
+_SIGN_WORDS = re.compile(r"\bsign(?:ature|atures|ed|ing|s|er|ers|ee|ees|atory|atories)?\b|\be-?sign\w*|\be-?sig\b"
+                         r"|\binitials\b|\binitial\s+here\b|\bautograph", re.I)
+
+
+def _own_words(field: dict) -> list[str]:
+    """Every reading of everything the box says about itself: label, help text, placeholder, the name split into words."""
+    parts = [str(field.get(k) or "") for k in ("label", "help_text", "placeholder")]
+    parts.append(sensitive._identifier_words(str(field.get("name") or "")))
+    return [v for p in parts for v in sensitive.text_variants(p)]
 
 
 def is_signature_box(field: dict) -> bool:
-    """Does the box's own label read as a signature / initials box on any reading? Such a box is Jack's."""
+    """Does anything the box says about itself read as a signature / initials box on any reading? Such a box is Jack's."""
     if (field.get("type") or "").lower() not in ("text", "textarea", ""):
         return False
-    return any(_SIGN_WORDS.search(v) for v in sensitive.text_variants(str(field.get("label") or "")))
+    return any(_SIGN_WORDS.search(v) for v in _own_words(field))
 
 
-def _name_label(label: Any) -> bool:
-    """Every reading of the label is a bare name label ("Name", "Your Name", "Full name *"), with no sign wording on any."""
-    variants = sensitive.text_variants(str(label or ""))
-    if not variants or any(_SIGN_WORDS.search(v) for v in variants):
+def _name_box(field: dict) -> bool:
+    """Every reading of the label is a name label (the word "name" once, every other word from _NAME_WORDS), with no sign wording anywhere."""
+    variants = sensitive.text_variants(str(field.get("label") or ""))
+    if not variants or is_signature_box(field):
         return False
-    return all(_NAME_LABEL.fullmatch(_norm(v).replace("’", "'")) for v in variants)
+    for v in variants:
+        words = re.findall(r"[a-z']+", _norm(v).replace("’", "'"))
+        if words.count("name") != 1 or any(w not in _NAME_WORDS for w in words if w != "name"):
+            return False
+    return True
 
 
 def name_value(prof) -> str | None:
@@ -225,8 +246,12 @@ def name_plan_for(field: dict, fields: list[dict], prof, category: str | None = 
         return None
     if sensitive.stop_reason(sensitive._question_text(field)) is not None or field.get("raw_stop") or field.get("raw_legal"):
         return None
-    if not _name_label(field.get("label")):
+    if not _name_box(field):
         return None
+    # The classifier's reading of the box (eeo, legal_declaration on a
+    # self-identification form) does not change whose fact the name is:
+    # the gate's sensitive branch recomputes it the same way. Only the
+    # categories the clock never fills past refuse here.
     if reads_legal(field) or sensitive.legal_guard_kinds(field) or category in NEVER_CATEGORIES:
         return None
     if not self_identification_page(fields):
@@ -236,6 +261,18 @@ def name_plan_for(field: dict, fields: list[dict], prof, category: str | None = 
         return None
     return {"label": field.get("label"), "options": None, "action": "fill", "value": value,
             "source": NAME_SOURCE, "fit": "verbatim", "profile_path": NAME_LINES[0]}
+
+
+def name_box_is_jacks(field: dict, fields: list[dict]) -> bool:
+    """
+    A box the scan marked as the signature Name box, on a self-
+    identification form: when the route does not fill it from the
+    profile's name lines (a line missing, a label outside the closed
+    list, a sign word anywhere), it is Jack's, never the model's (fix of
+    0530a70's review); the gate stops on any other source for it.
+    """
+    return bool(field.get("signature_name")) and (field.get("type") or "").lower() in ("text", "") \
+        and self_identification_page(fields)
 
 
 def verify_name(field: dict, decision: dict | None, fields: list[dict], prof, category: str | None = None) -> bool:

@@ -120,6 +120,14 @@ def route(fields: list[dict], categories: dict, prof, new_after_upload: set[str]
         if named is not None:
             plan[field["ref"]] = named
             continue
+        if signdate.name_box_is_jacks(field, fields):
+            # The signature Name box the route could not fill from the
+            # profile's name lines: his, never the model's.
+            flags.append({"ref": field["ref"], "label": field.get("label"), "options": field.get("options"),
+                          "action": "human", "value": None, "source": "human", "category": category,
+                          "reason": "The signature Name box takes your profile's name lines only; "
+                                    "they are missing or the label is not a plain name, so it is yours."})
+            continue
         # Decision C (Jack, 2026-11-02): "have you worked for <company>" from
         # his work_history.past_employers list, against the company the job's
         # own address names; any match or doubt is his. Never the model.
