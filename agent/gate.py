@@ -277,9 +277,137 @@ def consent_ok(label: Any) -> bool:
     return any(CONSENT_AGREE.search(v) and CONSENT_DOCUMENT.search(v) for v in variants)
 
 
+# --- the attestation class (decision D, Jack, 2026-11-02) -------------------
+# A REQUIRED checkbox may be ticked, under submit.py's tick helper as the
+# consent policy is, when EVERY sentence of its label is one of: (1) an
+# attestation that the information Jack provided in this application is
+# true / accurate / correct / complete (optionally "to the best of my
+# knowledge"); (2) a statement that a false statement, misrepresentation
+# or omission may lead to rejection, withdrawal of an offer or dismissal.
+# "This can be ticked for similar wording too. It won't always be the
+# same": each sentence is judged by a bounded vocabulary (every word of it
+# must be in the class's vocabulary, and the class's required words must
+# be there), not by a fixed phrase. Any other clause makes it Jack's
+# (ATTEST_FORBIDDEN: authorize, consent to, agree to, background /
+# reference / drug / credit check, release of information, arbitration,
+# at-will, electronic signature / signing, contact / SMS / marketing /
+# newsletter, non-compete); so does any LEGAL_GUARD, PROFILE_PATHS or
+# CONSENT_MARKETING match, any HARD_STOPS kind but the one certify /
+# attest / acknowledge entry (read past ONLY inside this check, for that
+# one tick: Jack's answer on the plan), and the criminal-record pattern.
+# Never an optional box. Page text can only fail this check.
+ATTEST_VERBS = frozenset({"certify", "attest", "acknowledge", "affirm", "declare", "confirm", "understand",
+                          "state", "swear", "represent", "verify"})
+ATTEST_INFO = frozenset({"information", "statements", "statement", "answers", "answer", "responses", "response",
+                         "details", "facts", "data", "representations"})
+ATTEST_TRUTH = frozenset({"true", "accurate", "correct", "complete", "truthful", "factual", "honest"})
+ATTEST_VOCAB = ATTEST_VERBS | ATTEST_INFO | ATTEST_TRUTH | frozenset({
+    "i", "hereby", "that", "all", "of", "the", "provided", "given", "made", "supplied", "submitted", "entered",
+    "contained", "furnished", "set", "forth", "in", "on", "this", "my", "application", "form", "employment", "is",
+    "are", "and", "to", "best", "knowledge", "belief", "by", "me", "have", "has", "herein", "above", "as", "part",
+    "during", "process", "throughout", "checking", "ticking", "selecting", "box", "below", "here", "each", "every",
+    "being", "been", "completely", "fully", "with", "without", "any", "omission", "omissions", "material", "fact",
+    "whole", "nothing", "but", "truth", "understood", "entirely", "also", "both", "it", "its", "herewith",
+    "including", "resume", "cv", "attached", "documents", "document", "accompanying"})
+FALSE_WORDS = frozenset({"false", "untrue", "inaccurate", "incorrect", "incomplete", "misleading", "fraudulent",
+                         "misrepresentation", "misrepresentations", "omission", "omissions", "falsification",
+                         "falsifications", "misstatement", "misstatements", "dishonest"})
+CONSEQUENCE_WORDS = frozenset({"rejection", "rejected", "refusal", "refused", "denial", "denied", "disqualification",
+                               "disqualified", "disqualify", "withdrawal", "withdrawn", "withdraw", "rescission",
+                               "rescinded", "rescind", "revocation", "revoked", "revoke", "dismissal", "dismissed",
+                               "dismiss", "discharge", "discharged", "termination", "terminated", "terminate",
+                               "cancellation", "cancelled", "canceled", "elimination", "eliminated"})
+CONSEQ_VOCAB = FALSE_WORDS | CONSEQUENCE_WORDS | frozenset({
+    "i", "understand", "acknowledge", "agree", "accept", "aware", "am", "that", "any", "a", "an", "statement",
+    "statements", "of", "fact", "facts", "information", "material", "in", "on", "this", "my", "the", "application",
+    "form", "process", "may", "will", "can", "could", "shall", "would", "be", "is", "are", "result", "results",
+    "resulting", "lead", "leads", "grounds", "cause", "basis", "sufficient", "for", "to", "from", "consideration",
+    "candidacy", "further", "offer", "employment", "job", "position", "immediate", "immediately", "if", "when",
+    "whenever", "discovered", "found", "learned", "at", "any", "time", "after", "hired", "hiring", "hire", "and",
+    "or", "regardless", "made", "subsequent", "subsequently", "later", "also", "not", "being", "considered",
+    "considerations", "by", "me", "herein", "here", "provided", "given", "supplied", "submitted", "entered",
+    "contained", "as", "well", "even", "including", "up", "with", "without", "notice", "subject", "me", "my",
+    "it", "its", "should", "such", "serve", "serves", "disciplinary", "action", "including", "within"})
+ATTEST_FORBIDDEN = re.compile(
+    r"authori[sz]|consent\s+to|agree\s+to|agreement|(background|reference|drug|credit|criminal|employment|"
+    r"education|security|medical)\s+(check|screen|investigat|verif|test)|\bchecks?\b|\bscreen|release|arbitrat|"
+    r"at[\s-]will|electronic|signature|\bsign(ed|ing|s)?\b|e-?sign|\bcontact|\bsms\b|text\s+messag|marketing|"
+    r"newsletter|non-?compete|waive|indemnif|investigat|\bpolicy|\bterms\b|privacy|conditions|employee\s+handbook|"
+    r"\bage\b|\byears\s+old|eligib|legally|\bvisa|sponsor", re.I)
+ATTEST_MAX_CHARS = 600
+_SENTENCE_SPLIT = re.compile(r"[.!?;]+")
+_WORD = re.compile(r"[a-z]+(?:'[a-z]+)?")
+
+
+def _attestation_sentence_ok(sentence: str) -> bool:
+    """One sentence, every word in one class's vocabulary with that class's required words present."""
+    words = _WORD.findall(sentence.casefold())
+    if not words:
+        return True                       # an empty piece between separators says nothing
+    has = set(words)
+    # One sentence may join both classes ("...is accurate, and I understand
+    # that misrepresentation may result in dismissal": one of Jack's
+    # positive variants), so the words come from the union of the two
+    # vocabularies and either class's required words must be there.
+    if not has <= (ATTEST_VOCAB | CONSEQ_VOCAB):
+        return False
+    attests = bool(has & ATTEST_VERBS) and bool(has & ATTEST_INFO) and bool(has & ATTEST_TRUTH)
+    warns = bool(has & FALSE_WORDS) and bool(has & CONSEQUENCE_WORDS)
+    return attests or warns
+
+
+def attestation_ok(label: Any) -> bool:
+    """
+    Decision D's class: does every sentence of this label read as a
+    truth-and-completeness attestation or a consequence-of-
+    misrepresentation statement, from the bounded vocabularies, with no
+    forbidden clause, no marketing, legal-guard or profile-line match,
+    no HARD_STOPS kind but the certify / attest / acknowledge entry and
+    no criminal-record match, on any reading of the text? Nothing about
+    the box's state, requiredness or fine print is judged here (see
+    attestation_box_ok).
+    """
+    text = str(label or "")
+    if not text.strip() or len(text) > ATTEST_MAX_CHARS:
+        return False
+    variants = sensitive.text_variants(text)
+    if any(CONSENT_MARKETING.search(v) or ATTEST_FORBIDDEN.search(v) for v in variants):
+        return False
+    if any(sensitive.stop_kinds(v) - {"legal"} for v in variants):
+        return False
+    if any(sensitive.record_stop(v) for v in variants):
+        return False
+    if (sensitive.legal_guard({"label": text}) is not None
+            or sensitive.sensitive_line(text, SENSITIVE_PREFIXES) is not None
+            or sensitive.all_profile_lines(text)):
+        return False
+    # Every reading must pass sentence by sentence: an invisible character
+    # inside a word makes that word unknown on the as-written reading.
+    for v in variants:
+        if not all(_attestation_sentence_ok(s) for s in _SENTENCE_SPLIT.split(v)):
+            return False
+    return True
+
+
 # The policy reads only a visible <label> (for= or wrapping): an aria-label
 # is text Jack never sees, so it can satisfy only the exact allowlist.
 POLICY_LABEL_SOURCES = {"for", "wrap"}
+
+
+def attestation_box_ok(box: dict | None) -> bool:
+    """
+    A census box decision D may tick: the page marks it required on some
+    reading (the census's required key, from the attribute, aria-required
+    or a trailing *), its label comes from a visible <label>, rendered the
+    same as written, no fine print attached, and passes attestation_ok.
+    """
+    if not box or box.get("required") is not True or box.get("label_source") not in POLICY_LABEL_SOURCES:
+        return False
+    if normalize_label(box.get("label_inner")) != normalize_label(box.get("label_content")):
+        return False
+    if box.get("described"):
+        return False
+    return attestation_ok(box.get("label_inner"))
 
 
 def consent_box_ok(box: dict | None) -> bool:
@@ -519,15 +647,20 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
             # The consent policy (owner decision): terms / privacy wording
             # read from the census box, which is the label on the element.
             policy = idx is None and consent_box_ok(census_by_ref.get(ref))
+            # Decision D (Jack, 2026-11-02): a REQUIRED attestation box,
+            # judged on the census box's label, planned like a terms box.
+            attest = (idx is None and not policy and _is_required(f)
+                      and attestation_box_ok(census_by_ref.get(ref)))
             legal_hit = "legal" in kinds
             consent_handoff = (category == "consent"
                                or (legal_hit and category == "legal_declaration"))
-            if ((idx is not None or policy) and consent_handoff and not kinds - {"legal"}
+            if ((idx is not None or policy or attest) and consent_handoff and not kinds - {"legal"}
                     and line is None and sensitive.legal_guard(f) is None):
                 if legal_hit or category in SENSITIVE_CATEGORIES:
                     trace.append({"ref": ref, "label": label[:120], "category": category,
                                   "profile_path": None,
-                                  "source": "consent_policy" if policy else "consent_allowlist",
+                                  "source": ("attestation" if attest else "consent_policy" if policy
+                                             else "consent_allowlist"),
                                   "fit": "exact", "allowlist_index": idx})
                 consent_actions[ref] = "would_tick" if _is_required(f) else "leave"
                 continue
@@ -666,6 +799,11 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         # ticked.
         if box.get("checked") is not False and box.get("visible") is not True:
             content.append(f"{name}: hidden, and ticked")
+        # Decision E (Jack, 2026-11-02): a box carrying his own review mark
+        # new since before the pause is his answer, ticked or unticked as
+        # he left it; the hidden-and-ticked check above still applies.
+        if box.get("ref") and box.get("ref") in reviewed:
+            continue
         if box.get("ref") in grouped:
             group, option = grouped[box["ref"]]
             if group.get("ref") in reviewed:
@@ -689,7 +827,7 @@ def _decide(record: dict, profile, agent_submissions_today: int | None) -> dict:
         elif box.get("described"):
             content.append(f"{name}: has fine print attached")
         elif (normalize_label(box.get("label_inner")) not in allow
-              and not consent_box_ok(box)):
+              and not consent_box_ok(box) and not attestation_box_ok(box)):
             reason = f"{name}: not on consent_allowlist, and not a terms / privacy consent"
             # 8. An optional box left unticked is listed, not stopped on
             # (_optional_box: required exactly False, no trailing *, visible,

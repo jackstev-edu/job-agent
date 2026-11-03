@@ -70,6 +70,7 @@ SHARED_BOARDS = {"job-boards.greenhouse.io", "boards.greenhouse.io", "jobs.lever
 # Hosts where the employer is the subdomain.
 SUBDOMAIN_HOSTS = (".myworkdayjobs.com", ".avature.net")
 REMOVED_KEPT = 50                             # removed-on-load questions kept in the file for the Memory page
+OFFERS_KEPT = 50                              # "Always tick this exact wording" offers kept (Jack, 2026-11-02, item 6)
 
 _LOCK = threading.RLock()
 
@@ -251,12 +252,17 @@ class Learned:
     """
 
     def __init__(self, entries: list[dict], at: Path | None = None, unreadable: str | None = None,
-                 removed: list[dict] | None = None):
+                 removed: list[dict] | None = None, offers: list[dict] | None = None):
         self.entries = entries
         self.at = at or path()
         self.unreadable = unreadable
         self.removed: list[dict] = removed or []     # {"at", "question", "why"}, newest last
         self.just_removed: list[str] = []            # what this load removed, as one line each
+        # Boxes Jack ticked himself that neither the consent policy nor the
+        # attestation class covers, offered once on the Memory page as
+        # "Always tick this exact wording" (item 6): {"id", "label", "host",
+        # "posting", "at"}. Never a value; never ticked from here.
+        self.offers: list[dict] = offers or []
 
     @classmethod
     def load(cls, at: Path | None = None) -> "Learned":
@@ -274,7 +280,9 @@ class Learned:
                     and e.get("kind") in (CHOICE, ANSWER, CANDIDATE) and isinstance(e.get("id"), str)]
             kept_removed = [r for r in ((raw.get("removed") if isinstance(raw, dict) else None) or [])
                             if isinstance(r, dict) and isinstance(r.get("question"), str)]
-            store = cls(good, at, unreadable, kept_removed)
+            kept_offers = [o for o in ((raw.get("tick_offers") if isinstance(raw, dict) else None) or [])
+                           if isinstance(o, dict) and isinstance(o.get("id"), str) and isinstance(o.get("label"), str)]
+            store = cls(good, at, unreadable, kept_removed, kept_offers)
             if unreadable is None and store._clean_up():
                 try:
                     store.save()
@@ -315,7 +323,8 @@ class Learned:
     def _refresh(self) -> None:
         """Under the lock: the file as it is now replaces this copy, before a write is applied to it."""
         fresh = Learned.load(self.at)
-        self.entries, self.unreadable, self.removed = fresh.entries, fresh.unreadable, fresh.removed
+        self.entries, self.unreadable, self.removed, self.offers = (
+            fresh.entries, fresh.unreadable, fresh.removed, fresh.offers)
         if self.unreadable:
             raise Unreadable(self.unreadable)
 
@@ -328,7 +337,8 @@ class Learned:
                     "# Reused only on the exact same question. Edit or delete entries on the\n"
                     "# GUI's Memory page; profile.yaml is never written from here.\n"
                     + yaml.safe_dump({"version": 1, "entries": self.entries,
-                                      "removed": self.removed[-REMOVED_KEPT:]},
+                                      "removed": self.removed[-REMOVED_KEPT:],
+                                      "tick_offers": self.offers[-OFFERS_KEPT:]},
                                      allow_unicode=True, sort_keys=False, width=4096))
             fd, tmp = tempfile.mkstemp(prefix=f".{self.at.name}.", suffix=".tmp", dir=str(self.at.parent))
             try:
@@ -380,6 +390,38 @@ class Learned:
             e["answer"] = answer.strip()
             e["id"] = entry_id(e["key"], e["kind"], e.get("scope") or ANY, e["answer"])
             e["last_seen"] = _now()
+            self.save()
+            return True
+
+    # -- "Always tick this exact wording" offers (item 6) -----------------------
+    def add_offer(self, label: str, host: str, posting: str) -> dict | None:
+        """One offer per exact wording (normalised); None when it is already listed or the wording is refused."""
+        from . import approve
+        label = " ".join(str(label or "").split())
+        if not label or approve.allowlist_refusal(label) is not None:
+            return None
+        with _LOCK:
+            self._refresh()
+            key = _norm(label)
+            if any(_norm(o.get("label")) == key for o in self.offers):
+                return None
+            offer = {"id": hashlib.sha1(key.encode("utf-8")).hexdigest()[:12], "label": label[:300],
+                     "host": str(host or "")[:120], "posting": str(posting or "")[:300], "at": _now()}
+            self.offers.append(offer)
+            self.offers = self.offers[-OFFERS_KEPT:]
+            self.save()
+            return offer
+
+    def get_offer(self, offer_id: str) -> dict | None:
+        return next((o for o in self.offers if o.get("id") == offer_id), None)
+
+    def drop_offer(self, offer_id: str) -> bool:
+        with _LOCK:
+            self._refresh()
+            before = len(self.offers)
+            self.offers = [o for o in self.offers if o.get("id") != offer_id]
+            if len(self.offers) == before:
+                return False
             self.save()
             return True
 

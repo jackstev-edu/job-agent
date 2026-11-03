@@ -193,6 +193,86 @@ def apply_profile_line(path: Path, line: str, value: str, expected_stamp: str) -
     return backup
 
 
+# --- "Always tick this exact wording" (Jack, 2026-11-02, item 6) ------------
+
+def allowlist_refusal(label: str) -> str | None:
+    """
+    Why this wording may never be a consent_allowlist line, or None: it
+    reads as a legal, eligibility, EEO or pay question (LEGAL_GUARD or a
+    PROFILE_PATHS line), a marketing / opt-in wording, a per-company or
+    criminal-record question, any HARD_STOPS kind but the terms / consent
+    entry, or it is empty / over-long. A line here lets a box be ticked
+    on an exact match, so it must never answer a question.
+    """
+    from . import gate
+    text = " ".join(str(label or "").split())
+    if not text or len(text) > gate.ATTEST_MAX_CHARS:
+        return "an empty or over-long wording"
+    variants = sensitive.text_variants(text)
+    if any(gate.CONSENT_MARKETING.search(v) for v in variants):
+        return "a marketing / communications opt-in"
+    if any(sensitive.stop_kinds(v) - {"legal"} for v in variants) or any(sensitive.record_stop(v) for v in variants):
+        return "a credential, per-company or criminal-record question"
+    if any(sensitive.is_past_employer_question(v) for v in variants):
+        return "a past-employer question"
+    if (sensitive.legal_guard({"label": text}) is not None
+            or sensitive.sensitive_line(text, gate.SENSITIVE_PREFIXES) is not None
+            or sensitive.all_profile_lines(text)):
+        return "an eligibility, EEO or pay question"
+    return None
+
+
+def add_consent_allowlist_line(path: Path, label: str, expected_stamp: str) -> Path:
+    """
+    Append `label` (a quoted string, as written) to profile.yaml's
+    consent_allowlist, comments and order kept, after a timestamped
+    backup, under LOCK, refusing a wording allowlist_refusal names, one
+    already listed, a file that changed since `expected_stamp` (Changed)
+    and a consent_allowlist that is not a list. Jack's click only.
+    """
+    from ruamel.yaml import YAML
+    from ruamel.yaml.comments import CommentedSeq
+    from ruamel.yaml.scalarstring import DoubleQuotedScalarString
+    path = Path(path)
+    label = " ".join(str(label or "").split())
+    why = allowlist_refusal(label)
+    if why is not None:
+        raise Refused(f"never allowlisted: {why}")
+    with LOCK:
+        if profile_stamp(path) != expected_stamp or not expected_stamp:
+            raise Changed("profile.yaml changed since this was listed; nothing written")
+        text = path.read_text(encoding="utf-8")
+        rt = YAML()
+        rt.preserve_quotes = True
+        rt.width = 4096
+        rt.indent(mapping=2, sequence=4, offset=2)
+        data = rt.load(text)
+        if not isinstance(data, dict):
+            raise Refused("profile.yaml is empty")
+        current = data.get("consent_allowlist")
+        if current is None:
+            current = CommentedSeq()
+            data["consent_allowlist"] = current
+        if not isinstance(current, list):
+            raise Refused("consent_allowlist is not a list in profile.yaml")
+        if any(" ".join(str(c).split()).casefold() == label.casefold() for c in current):
+            raise Refused("this wording is already on consent_allowlist")
+        current.append(DoubleQuotedScalarString(label))
+        stamp = time.strftime('%Y%m%d-%H%M%S')
+        same = [b.name[len(f"{path.name}.bak-{stamp}"):] for b in backups_of(path)
+                if b.name.startswith(f"{path.name}.bak-{stamp}")]
+        n = max([1] + [int(s[1:]) for s in same if s[1:].isdigit()] + ([1] if "" in same else [0]))
+        backup = path.with_name(f"{path.name}.bak-{stamp}" + ("" if not same else f"-{n + 1:02d}"))
+        backup.write_text(text, encoding="utf-8")
+        from io import StringIO
+        out = StringIO()
+        rt.dump(data, out)
+        text_out = "\n".join(line_.rstrip() for line_ in out.getvalue().splitlines()) + "\n"
+        _atomic_write(path, text_out)
+        _prune_backups(path)
+    return backup
+
+
 # --- the retired aliases of the Suggestions panel (2026-10-31) --------------
 
 def aliases_path(profile_path: Path) -> Path:

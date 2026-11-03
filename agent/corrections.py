@@ -171,6 +171,39 @@ def learn_from(changes_: list[dict], *, url: str, portal: str, prof, log: list |
     return learned
 
 
+def offer_ticks(changes_: list[dict], *, url: str, log: list | None = None, store=None) -> list[dict]:
+    """
+    A checkbox Jack ticked himself under the pause whose explicit label
+    neither the consent policy nor decision D's attestation class covers
+    is offered once on the Memory page as "Always tick this exact
+    wording" (Jack, 2026-11-02, item 6); his click there writes the line
+    to consent_allowlist through approve.py. Never a legal, EEO, pay,
+    marketing or per-company wording (approve.allowlist_refusal), never a
+    box the label of which is the scan's nearby-text guess. Never raises.
+    """
+    from . import gate
+    out: list[dict] = []
+    try:
+        for ch in changes_:
+            f = ch.get("field") or {}
+            label = str(f.get("explicit_label") or "").strip()
+            if (f.get("type") or "").lower() != "checkbox" or ch.get("now") is not True or not label:
+                continue
+            if gate.consent_ok(label) or gate.attestation_ok(label):
+                continue
+            store_ = store or memory.Learned.load()
+            offer = store_.add_offer(label, memory.host_of(url), url)
+            if offer is not None:
+                out.append(offer)
+        if out and log is not None:
+            log.append(f"{len(out)} box(es) you ticked yourself can be allowed for good on the Memory page: "
+                       + ", ".join(f"'{o['label'][:40]}'" for o in out[:4]))
+    except Exception as e:
+        if log is not None:
+            log.append(f"couldn't offer the boxes you ticked ({type(e).__name__})")
+    return out
+
+
 def append(rows: list[dict], at: Path | None = None) -> Path:
     """Write the rows, one JSON object per line, to corrections.jsonl (or `at`)."""
     at = at or path()
@@ -330,6 +363,7 @@ def log_overrides(watch: Watch | None, fill, *, url: str, portal: str, log: list
             log.append(f"{len(found) - len(his)} change(s) under the pause carried no touch mark of yours: "
                        "recorded, not learned")
         learn_from(his, url=url, portal=portal, prof=prof, log=log, fields=watch.fields)
+        offer_ticks(his, url=url, log=log)
         return rows
     except Exception as e:
         log.append(f"couldn't record corrections ({type(e).__name__})")

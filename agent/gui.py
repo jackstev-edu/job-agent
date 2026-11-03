@@ -236,6 +236,46 @@ class State:
             self.notice = done
         return {"ok": True, "done": done}
 
+    # -- "Always tick this exact wording" (Jack, 2026-11-02, item 6) ------------
+    def always_tick(self, offer_id: str) -> dict:
+        """
+        Jack's click: one wording he ticked himself goes to profile.yaml's
+        consent_allowlist as a quoted string through approve.py (backup,
+        lock, a changed file refused, never a legal / EEO / pay /
+        marketing / per-company wording). The offer is dropped once the
+        profile holds it.
+        """
+        with self.lock:
+            path = self.profile_path
+        if path is None:
+            return {"ok": False, "error": "no profile to write"}
+        store = memory.Learned.load(self.memory_path)
+        offer = store.get_offer(str(offer_id)[:64])
+        if offer is None:
+            return {"ok": False, "error": "no such offer"}
+        try:
+            backup = approve.add_consent_allowlist_line(path, offer["label"], approve.profile_stamp(path))
+        except (approve.Changed, approve.Refused) as e:
+            return {"ok": False, "error": str(e)}
+        except Exception as e:
+            return {"ok": False, "error": f"couldn't write it ({type(e).__name__})"}
+        store.drop_offer(offer["id"])
+        done = f"consent_allowlist gained one line; backup {backup.name}"
+        with self.lock:
+            self.profile_changed = True
+            self.notice = done
+        return {"ok": True, "done": done}
+
+    def dismiss_tick(self, offer_id: str) -> dict:
+        try:
+            store = memory.Learned.load(self.memory_path)
+            ok = store.drop_offer(str(offer_id)[:64])
+        except memory.Unreadable as e:
+            return {"ok": False, "error": _UNREADABLE % e}
+        except Exception as e:
+            return {"ok": False, "error": f"couldn't dismiss it ({type(e).__name__})"}
+        return {"ok": ok} if ok else {"ok": False, "error": "no such offer"}
+
     # -- the Memory page (Jack, 2026-11-01, decision 3) -------------------------
     GROUPS = ("choice", "candidate", "legal", "portal")
 
@@ -279,7 +319,9 @@ class State:
         # 2026-11-02, item 2): the questions only, never a value.
         removed = [{"at": str(r.get("at") or ""), "question": str(r.get("question") or ""),
                     "why": str(r.get("why") or "")} for r in (store.removed or [])[-memory.REMOVED_KEPT:]]
-        return {"ok": True, "entries": out, "groups": list(self.GROUPS), "removed": removed}
+        offers = [{"id": str(o.get("id") or ""), "label": str(o.get("label") or ""), "host": str(o.get("host") or ""),
+                   "at": str(o.get("at") or "")} for o in (store.offers or [])[-memory.OFFERS_KEPT:]]
+        return {"ok": True, "entries": out, "groups": list(self.GROUPS), "removed": removed, "tick_offers": offers}
 
     def memory_edit(self, entry_id: str, answer: str) -> dict:
         """Jack tunes an answer: the entry keeps its question and kind; the next job routes on the new value."""
@@ -679,7 +721,9 @@ button.primary { background: #16202b; color: #fff; border-color: #16202b; }
                   ['candidate', 'Profile candidates', 'typed text that differs from your profile; Save to profile writes it'],
                   ['legal', 'Legal & EEO', 'your own answers, reused only on the identical question; edit by hand here or delete'],
                   ['portal', 'Portal answers', 'answers with no profile line; free text and per-company ones at the same host only']];
-  let memoryEntries = [], memoryRemoved = [];
+  let memoryEntries = [], memoryRemoved = [], memoryOffers = [];
+  // A short success or error line beside the control that was pressed.
+  const note = (host, r, okText) => { const n = el('span', (r && r.ok) ? okText : ('could not: ' + ((r && r.error) || 'no answer from the agent')), (r && r.ok) ? 'muted' : 'broken'); host.appendChild(n); return n; };
   const drawMemory = () => {
     const q = (document.getElementById('memory-search').value || '').toLowerCase();
     const box = document.getElementById('memory-groups'); box.replaceChildren();
@@ -718,6 +762,23 @@ button.primary { background: #16202b; color: #fff; border-color: #16202b; }
       box.appendChild(g);
     }
     if (!shown) box.appendChild(el('p', memoryEntries.length ? 'nothing matches' : 'nothing learned yet', 'muted'));
+    if (memoryOffers.length) {
+      const g = el('div', undefined, 'mgroup');
+      g.appendChild(el('h2', 'Boxes you ticked yourself (' + memoryOffers.length + ')'));
+      g.appendChild(el('div', 'Checkboxes you ticked under a pause that neither the terms / privacy policy nor the attestation class covers. "Always tick this exact wording" adds the wording to consent_allowlist in profile.yaml, on your click only; a required box with exactly that label is then ticked by the agent.', 'muted'));
+      for (const o of memoryOffers) {
+        const d = el('div', undefined, 'mentry');
+        d.appendChild(el('div', o.label, 'q'));
+        d.appendChild(el('div', (o.host ? 'seen at ' + o.host : '') + (o.at ? ' · ' + o.at : ''), 'meta'));
+        const row = el('div', undefined, 'row-actions');
+        const yes = el('button', 'Always tick this exact wording');
+        yes.addEventListener('click', () => { if (confirm('Add this exact wording to consent_allowlist in profile.yaml?')) api('/memory/always-tick', {id: o.id}).then(r => { note(row, r, 'added to consent_allowlist'); loadMemory(); refresh(); }); });
+        const no = el('button', 'Dismiss');
+        no.addEventListener('click', () => api('/memory/dismiss-tick', {id: o.id}).then(r => { note(row, r, 'dismissed'); loadMemory(); }));
+        row.appendChild(yes); row.appendChild(no); d.appendChild(row); g.appendChild(d);
+      }
+      box.appendChild(g);
+    }
     if (memoryRemoved.length) {
       const g = el('div', undefined, 'mgroup');
       g.appendChild(el('h2', 'Removed on load (' + memoryRemoved.length + ')'));
@@ -728,7 +789,8 @@ button.primary { background: #16202b; color: #fff; border-color: #16202b; }
     }
   };
   const loadMemory = () => fetch('/memory', {headers: {'X-Token': TOKEN}}).then(r => r.json()).then(r => {
-    memoryEntries = (r && r.ok && r.entries) ? r.entries : []; memoryRemoved = (r && r.ok && r.removed) ? r.removed : []; drawMemory();
+    memoryEntries = (r && r.ok && r.entries) ? r.entries : []; memoryRemoved = (r && r.ok && r.removed) ? r.removed : [];
+    memoryOffers = (r && r.ok && r.tick_offers) ? r.tick_offers : []; drawMemory();
     if (r && r.ok === false && r.error) { const box = document.getElementById('memory-groups'); box.replaceChildren(el('p', r.error, 'broken')); }
   }).catch(() => {});
   const showTab = which => {
@@ -880,6 +942,10 @@ class Server:
                     self._json(st.memory_delete(str(body.get("id", "")))); return
                 if path == "/memory/save":
                     self._json(st.save_to_profile(str(body.get("id", "")))); return
+                if path == "/memory/always-tick":
+                    self._json(st.always_tick(str(body.get("id", "")))); return
+                if path == "/memory/dismiss-tick":
+                    self._json(st.dismiss_tick(str(body.get("id", "")))); return
                 self._deny(HTTPStatus.NOT_FOUND, "no such action")
 
         self.httpd = ThreadingHTTPServer((host, port), Handler)

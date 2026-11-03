@@ -78,8 +78,11 @@ _BOX_LABEL_JS = extract.safe(r"""
   const described = (__ja.attr(el, 'aria-describedby') || '').split(/\s+/)
       .map(id => document.getElementById(id)?.textContent || '').join(' ');
   const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+  // Required as the census reads it: the attribute, aria-required, a trailing *.
+  const required = el.required === true || __ja.attr(el, 'aria-required') === 'true'
+                   || /\*\s*$/.test(lab.content || '') || /\*\s*$/.test(lab.inner || '');
   return {checked: !!el.checked, label_source: lab.source, label_inner: norm(lab.inner),
-          label_content: norm(lab.content), described: norm(described),
+          label_content: norm(lab.content), described: norm(described), required,
           visible: r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none',
           is_checkbox: __ja.tag(el) === 'INPUT' && (__ja.type(el) || '').toLowerCase() === 'checkbox'};
 }
@@ -109,9 +112,10 @@ def tick_allowed(page: "Page", result: dict, profile, steps: list[str]) -> list[
     """
     Tick each box the gate planned as would_tick, after re-reading its label
     on the element itself: it must still be a visible native checkbox whose
-    label passes the consent policy or exactly matches the profile's
-    allowlist. Returns the refs ticked. Anything else is left alone, and the
-    gate's second pass then stops on it.
+    label passes the consent policy, passes decision D's attestation class
+    while the box reads as required (Jack, 2026-11-02), or exactly matches
+    the profile's allowlist. Returns the refs ticked. Anything else is left
+    alone, and the gate's second pass then stops on it.
     """
     ticked: list[str] = []
     allow = profile.consent_allowlist()
@@ -130,7 +134,7 @@ def tick_allowed(page: "Page", result: dict, profile, steps: list[str]) -> list[
         if box.get("checked"):
             continue
         exact = gate._allowlist_index(box, allow) is not None
-        if not (exact or gate.consent_box_ok(box)):
+        if not (exact or gate.consent_box_ok(box) or gate.attestation_box_ok(box)):
             continue
         try:
             loc.first.check(timeout=4000)
