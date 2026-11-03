@@ -379,26 +379,16 @@ _SCAN_JS = safe(r"""
     }
     return null;
   };
-  const signatureBlock = el => !!blockWith(el, NAME_RX, false);
-  // The Name box of that block (Jack, 2026-11-03): its own label holds the
-  // word "name", the same walk finds a date-part box (a text box or a
-  // dropdown) beside it, and the block holds nothing else (every other
-  // control is a date part: a Certifications or References block with a
-  // Name box beside an Issuer or Company box is no signature block; fix
-  // of 0530a70's review). Structure only; signdate.py decides whether the
-  // page is a self-identification form, whether the label is a bare name
-  // with no sign wording, and fills it from the profile's name lines,
-  // never the model; a marked box it does not fill is Jack's.
+  // The signature block holds nothing but the Name / signature box and
+  // date parts: judged at the enclosing fieldset / section / group (nested
+  // row markup must not hide an Issuer box in a sibling row), counting
+  // every visible control, so a Certifications or References block, or a
+  // block with a radio pair, is no signature block for the clock (fix of
+  // 98febb9's review, finding 3) nor for the Name box's fill (5d099c5's
+  // review, finding 4).
   const DATE_RX = /^(signature\s+|today'?s\s+|current\s+|the\s+)?(date|month|day|year)(\s+(signed|of\s+signature))?(\s*\(.*\))?\s*:?\s*\*?$/i;
   const NAME_WORD_RX = /\bname\b/i;
-  const signatureName = el => {
-    if (!NAME_WORD_RX.test(labelFor(el))) return false;
-    const block = blockWith(el, DATE_RX, true);
-    if (!block) return false;
-    // "Nothing else" is judged at the enclosing fieldset / section / group
-    // (nested row markup must not hide an Issuer box in a sibling row),
-    // counting every visible control: a checkbox, radio or combobox there
-    // is something else (fix of 5d099c5's review, finding 4).
+  const soleBlock = (el, block) => {
     let scope = block;
     for (let p = block, i = 0; p && p !== document.body && i < 6; p = __ja.parent(p), i++) {
       const tag = __ja.tag(p);
@@ -408,8 +398,22 @@ _SCAN_JS = safe(r"""
     const SKIP_TYPES = ['hidden', 'submit', 'button', 'reset', 'image'];
     const controls = [...scope.querySelectorAll('input, textarea, select, [role=combobox], [role=listbox], [role=radio], [role=checkbox]')]
       .filter(c => isVisible(c) && !SKIP_TYPES.includes((__ja.type(c) || '').toLowerCase()));
-    return controls.every(c => c === el || ((__ja.tag(c) === 'SELECT' || plainBox(c)) && DATE_RX.test(labelFor(c).trim())));
+    const part = c => (__ja.tag(c) === 'SELECT' || plainBox(c)) && (DATE_RX.test(labelFor(c).trim()) || NAME_RX.test(labelFor(c).trim()));
+    return controls.every(c => c === el || part(c));
   };
+  const signatureBlock = el => { const b = blockWith(el, NAME_RX, false); return !!b && soleBlock(el, b); };
+  // The Name box of that block (Jack, 2026-11-03): its own label holds the
+  // word "name" and the same walk finds a date-part box (a text box or a
+  // dropdown) beside it: `signature_name`. Whether the block holds nothing
+  // else is a second mark, `signature_name_sole`: only a sole box is
+  // filled from the profile's name lines; a marked box that is not sole,
+  // or that signdate.py does not fill, is Jack's, never the model's (fix
+  // of 98febb9's BLOCK: an unmarked box fell back to the model). Structure
+  // only; signdate.py decides whether the page is a self-identification
+  // form and whether the label is a bare name with no sign wording.
+  const nameBlock = el => NAME_WORD_RX.test(labelFor(el)) ? blockWith(el, DATE_RX, true) : null;
+  const signatureName = el => !!nameBlock(el);
+  const signatureNameSole = el => { const b = nameBlock(el); return !!b && soleBlock(el, b); };
 
   // Each stamped element's tag, type and name, as the scan saw it. A read
   // refuses an element that no longer matches (a reused or swapped node).
@@ -582,6 +586,7 @@ _SCAN_JS = safe(r"""
       section: sectionOf(el),
       signature_block: signatureBlock(el),
       signature_name: signatureName(el),
+      signature_name_sole: signatureNameSole(el),
       inputmode: __ja.attr(el, 'inputmode') || '',
       maxlength: el.maxLength > 0 ? el.maxLength : null,
       tag, dom_name: __ja.name(el) || '', dom_id: __ja.id(el) || '',

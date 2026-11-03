@@ -334,7 +334,7 @@ def test_the_signature_name_box_takes_the_profiles_name_lines_and_any_box_that_s
     # The gate's recomputation.
     from test_gate import profile as gate_profile
     named_prof = gate_profile(personal={"first_name": "Test", "last_name": "Person"})
-    box_ = {"ref": "n1", "type": "text", "label": "Your Name", "signature_name": True, "required": True}
+    box_ = {"ref": "n1", "type": "text", "label": "Your Name", "signature_name": True, "signature_name_sole": True, "required": True}
     eeo = {"ref": "e1", "type": "select", "label": "Are you a protected veteran?", "options": ["Yes", "No"]}
 
     def record(field=box_, value="Test Person"):
@@ -354,6 +354,7 @@ def test_the_signature_name_box_takes_the_profiles_name_lines_and_any_box_that_s
     v = gate_run(record(value="Someone Else"), named_prof)
     check(v["content_verdict"] == gate.WOULD_STOP and any("name lines" in x for x in v["content_reasons"]), "another value: stops")
     check(gate_run(record(field=dict(box_, signature_name=False)), named_prof)["content_verdict"] == gate.WOULD_STOP, "not the block's Name box: stops")
+    check(gate_run(record(field=dict(box_, signature_name_sole=False)), named_prof)["content_verdict"] == gate.WOULD_STOP, "marked but not sole: stops")
     check(gate_run(record(field=dict(box_, label="Signature")), named_prof)["content_verdict"] == gate.WOULD_STOP, "a Signature label: stops")
     check(gate_run(record(), gate_profile())["content_verdict"] == gate.WOULD_STOP, "a profile with no name lines: stops")
     check.done()
@@ -434,25 +435,39 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
     with mock_page(_page("certs", SELECTS, eeo=DISABILITY + CERTS)) as page:
         fill = _fill(page, full, seen)
         by = {f["name"]: f for f in fill.fields}
-        check(not by["cert_name"].get("signature_name") and fill.plan.get(by["cert_name"]["ref"], {}).get("source") != signdate.NAME_SOURCE
-              and by["sig_name"].get("signature_name") and fill.plan.get(by["sig_name"]["ref"], {}).get("value") == "Test Person",
-              "a Certifications Name box beside an Issuer box is not the signature Name box; the block's own is")
+        check(not by["cert_name"].get("signature_name_sole") and fill.plan.get(by["cert_name"]["ref"], {}).get("source") != signdate.NAME_SOURCE
+              and by["sig_name"].get("signature_name_sole") and fill.plan.get(by["sig_name"]["ref"], {}).get("value") == "Test Person"
+              and not by["cert_year"].get("signature_block") and _values(page)["cy"] == "",
+              "a Certifications Name box beside an Issuer box is not the sole Name box, nor its Year the clock's; the block's own is")
+    seen = []
     with mock_page(_page("nested", SELECTS, eeo=DISABILITY + NESTED_CERTS)) as page:
-        fill = _fill(page, full, [])
+        fill = _fill(page, full, seen)
         by = {f["name"]: f for f in fill.fields}
-        check(not by["cert_name"].get("signature_name") and fill.plan.get(by["cert_name"]["ref"], {}).get("source") != signdate.NAME_SOURCE
-              and _values(page)["cn"] == "" and by["sig_name"].get("signature_name"),
-              "a nested-row Certifications Name box (the Issuer in a sibling row of the fieldset) is not the signature Name box")
+        flag = next((fl for fl in fill.flags if fl.get("ref") == by["cert_name"]["ref"]), None)
+        check(by["cert_name"].get("signature_name") and not by["cert_name"].get("signature_name_sole")
+              and fill.plan.get(by["cert_name"]["ref"], {}).get("source") != signdate.NAME_SOURCE
+              and flag and flag.get("source") == "human" and "Name" not in seen and _values(page)["cn"] == ""
+              and by["sig_name"].get("signature_name_sole"),
+              f"a nested-row Certifications Name box (the Issuer in a sibling row of the fieldset) is marked but not sole: Jack's, never the model ({flag and flag.get('reason')}, {seen})")
+        check(not by["cert_year"].get("signature_block") and fill.plan.get(by["cert_year"]["ref"], {}).get("source") != "clock"
+              and _values(page)["cy"] == "" and "Year" not in [l for l in seen if l == "Year"][:0],
+              f"the Certifications Year box is not the clock's: no invented year ({_values(page)['cy']!r})")
     html = PAGE.replace("EEO", DISABILITY).replace("DATES", "")
     assert SIG_BLOCK_HTML in html, "the fixture's signature block as expected"
     html = html.replace(SIG_BLOCK_HTML, RADIO_BLOCK)
     p = TEST_HOME / "signname-radio.html"
     p.write_text(html, encoding="utf-8")
+    seen = []
     with mock_page(p) as page:
-        fill = _fill(page, full, [])
+        fill = _fill(page, full, seen)
         by = {f["name"]: f for f in fill.fields}
-        check("sig_name" in by and not by["sig_name"].get("signature_name") and _values(page)["nm"] == "",
-              f"a radio pair in the block is something else: the Name box is not marked ({_values(page)})")
+        flag = next((fl for fl in fill.flags if fl.get("ref") == by["sig_name"]["ref"]), None)
+        check("sig_name" in by and by["sig_name"].get("signature_name") and not by["sig_name"].get("signature_name_sole")
+              and by["sig_name"]["ref"] not in fill.plan and flag and flag.get("source") == "human" and "Your Name" not in seen
+              and _values(page)["nm"] == "",
+              f"a radio pair in the block is something else: the Name box is marked but not sole, Jack's, never the model ({flag and flag.get('reason')}, {seen})")
+        check(not by["sig_date"].get("signature_block") and fill.plan.get(by["sig_date"]["ref"], {}).get("source") != "clock" and _values(page)["dt"] == "",
+              f"...and the Date box beside it is not the clock's either ({_values(page)})")
     # A marked box of another type (a textarea "Full name") the route cannot
     # fill is Jack's, never the model's (fix of 5d099c5's review, BLOCK 1).
     seen = []
@@ -473,7 +488,9 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
           and signdate.is_signature_box({"type": "text", "label": "Initials"})
           and signdate.is_signature_box({"type": "text", "label": "Name", "placeholder": "Signature"})
           and signdate.is_signature_box({"type": "text", "label": "Name", "name": "applicant_signature"})
-          and signdate.is_signature_box({"type": "text", "label": "Signatory"}),
+          and signdate.is_signature_box({"type": "text", "label": "Signatory"})
+          and signdate.is_signature_box({"type": "email", "label": "Signature"})
+          and signdate.is_signature_box({"type": "combobox", "label": "Initials"}),
           "sign words on any of the box's own texts; 'initial' as in 0530a70 (a Middle initial box is a false positive, Jack's to lift)")
     # The gate: a model fill in the Name box stops; a filled box that signs stops; an eeo category on the Name box passes.
     from test_gate import profile as gate_profile
@@ -492,7 +509,7 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
         r["snapshot"]["n1"] = plan_entry["value"]
         return r
 
-    name_box = {"ref": "n1", "type": "text", "label": "Your Name", "signature_name": True, "required": True}
+    name_box = {"ref": "n1", "type": "text", "label": "Your Name", "signature_name": True, "signature_name_sole": True, "required": True}
     v = gate_run(record(name_box, {"value": "Test Person", "source": "model", "confidence": "high"}), named_prof)
     check(v["content_verdict"] == gate.WOULD_STOP and any("name lines only" in x for x in v["content_reasons"]),
           f"the gate: a model fill in the signature Name box stops ({v['content_reasons']})")

@@ -27,7 +27,7 @@ RECORD_VERSION = 1
 _FIELD_KEYS = ("ref", "type", "widget", "label", "name", "placeholder", "required",
                "options", "option_refs", "help_text", "search_required", "secret",
                "stable_identity", "credential_step", "sigs", "raw_stop", "raw_legal", "section",
-               "signature_block", "signature_name", "inputmode")
+               "signature_block", "signature_name", "signature_name_sole", "inputmode")
 
 # The parts of a plan decision the gate reads.
 _DECISION_KEYS = ("value", "source", "profile_path", "fit", "confidence", "needs_review",

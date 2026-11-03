@@ -205,7 +205,9 @@ def _own_words(field: dict) -> list[str]:
 
 def is_signature_box(field: dict) -> bool:
     """Does anything the box says about itself read as a signature / initials box on any reading? Such a box is Jack's."""
-    if (field.get("type") or "").lower() not in ("text", "textarea", ""):
+    # Every text-entry type and a custom combobox (98febb9's review,
+    # finding 5): a type=email "Signature" box signs as a text one does.
+    if (field.get("type") or "").lower() not in ("text", "textarea", "", "email", "tel", "url", "search", "number", "combobox"):
         return False
     return any(_SIGN_WORDS.search(v) for v in _own_words(field))
 
@@ -242,8 +244,11 @@ def name_plan_for(field: dict, fields: list[dict], prof, category: str | None = 
     the page holds an EEO-guarded question, and the profile holds both
     name lines. Never the model; never a secret box.
     """
-    if (not field.get("signature_name") or field.get("secret") or field.get("options")
-            or (field.get("type") or "").lower() not in ("text", "")):
+    # Filled only when the block holds nothing but this box and date parts
+    # (`signature_name_sole`); a marked box that is not sole is Jack's
+    # through name_box_is_jacks (fix of 98febb9's BLOCK).
+    if (not field.get("signature_name") or not field.get("signature_name_sole") or field.get("secret")
+            or field.get("options") or (field.get("type") or "").lower() not in ("text", "")):
         return None
     if sensitive.stop_reason(sensitive._question_text(field)) is not None or field.get("raw_stop") or field.get("raw_legal"):
         return None
