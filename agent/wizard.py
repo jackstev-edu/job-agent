@@ -1128,6 +1128,12 @@ class Wizard:
         """Does the tab show another shape than the paused page's (address or fields, after a settle)? Unreadable then or now: changed."""
         return pending.get("shape") is None or self._moved(pending["shape"])
 
+    @staticmethod
+    def _no_form_park(pending: dict) -> bool:
+        """The one shapeless pause the address rule may confirm: a park with no fill in hand because the page showed no fields, no Next and no Submit."""
+        return (pending.get("kind") == "parked" and pending.get("fill") is None and not pending.get("cap")
+                and str(pending.get("reason") or "").startswith("a page with no fields"))
+
     def _no_fields_now(self) -> bool | None:
         """Does the page show no fillable control now (the form wait's own probe)? None if it can't be read."""
         try:
@@ -1291,7 +1297,14 @@ class Wizard:
                 # address can say /confirmation: fix of b499329's review).
                 held = pending.get("fill")
                 refs = [r for f in (held.fields if held is not None else []) for r in (f.get("option_refs") or [f.get("ref")]) if r]
-                confirmed, evidence = self._confirmed_strict(pending.get("shape"), refs, changed=self._changed_since(pending))
+                # A moved pause keeps its shape under "before" (fold of
+                # ba21953's review, finding 1); a pause with no shape counts
+                # as changed only for the park with no fill and no form at
+                # all (Intuit's /Success page), never for a cap, CAPTCHA or
+                # account pause whose page still shows the form (finding 2).
+                shape = pending.get("shape") if pending.get("shape") is not None else pending.get("before")
+                changed = self._moved(shape) if shape is not None else self._no_form_park(pending)
+                confirmed, evidence = self._confirmed_strict(shape, refs, changed=changed)
                 if confirmed:
                     self._log_overrides(pending)
                     self._finish_confirmed(evidence, f"{kind} pause")

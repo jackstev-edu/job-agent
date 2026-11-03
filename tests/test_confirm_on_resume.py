@@ -28,7 +28,8 @@ from test_wizard import CLICKS_JS, HOST, _routes
 
 # Every fixture records clicks and key presses into window.__clicks, so
 # "nothing pressed" is a real assertion (b499329's review, finding 4).
-KEYS_JS = """<script>document.addEventListener('keydown', e => { window.__clicks = window.__clicks || []; window.__clicks.push('key:' + e.key); }, true);</script>"""
+KEYS_JS = """<script>document.addEventListener('keydown', e => { window.__clicks = window.__clicks || []; window.__clicks.push('key:' + e.key); }, true);
+document.addEventListener('click', e => { if (e.target.closest('input, select, textarea, label')) { window.__clicks = window.__clicks || []; window.__clicks.push('box:' + (e.target.id || e.target.name || e.target.tagName)); } }, true);</script>"""
 EMPTY = f"""<!doctype html><html><head><title>Apply - Example Co</title></head><body>
 <h1>Your application</h1><p>We are getting your application ready.</p>{CLICKS_JS}{KEYS_JS}</body></html>"""
 SUCCESS_SEARCH = f"""<!doctype html><html><head><title>Example Co</title></head><body>
@@ -106,6 +107,38 @@ def test_the_generic_sentence_beside_a_box_on_an_ordinary_address_is_never_marke
     check.done()
 
 
+def test_a_moved_pause_on_the_unchanged_form_at_a_confirmation_address_is_not_confirmed_and_a_footer_form_counts():
+    # Fold of ba21953's review, findings 1 and 3. A "didn't move on after
+    # Next" pause keeps its shape under "before": on ba21953 the check read
+    # no shape, counted the page as changed and the address rule confirmed
+    # the unchanged form. The footer case here starts from a pause WITH a
+    # shape, so the paused form is gone and only the probe can refuse.
+    from test_pick_up import CITY_GATES_NEXT, REFERENCE, _page, _run
+    check = Checks()
+    # The sentence sits on the paused page itself (the mock's PROSE slot is step 3's).
+    prose = "<p>Thank you for applying. Please review your answers before submitting.</p>"
+    with _run(_page(city=CITY_GATES_NEXT + prose, next_disabled=True), start="/apply/confirmation", auto_submit=lambda: True) as (page, w):
+        out = w.run()
+        check(out.status == wizard.WAITING and w.pending.get("shape") is not None,
+              f"a pause with the page's shape in hand (Next stayed disabled) ({out.status}: {w.pending.get('kind')})")
+        # The GUI's moved pause keeps its shape under "before" (wizard._pause's
+        # extra), not "shape": the pending is rebuilt in that form.
+        shape = w.pending.pop("shape")
+        w.pending.update({"kind": "moved", "before": shape, "body": "the page didn't move on after Next"})
+        out = w.continue_from({})
+        check(out.status != "submitted" and out.submitted_by is None,
+              f"Continue on the unchanged form at /apply/confirmation after a moved pause: not confirmed ({out.status}: {out.reason})")
+    with _run(_page(city=REFERENCE), start="/steps", auto_submit=lambda: True) as (page, w):
+        out = w.run()
+        check(out.status == wizard.WAITING and w.pending["kind"] == "gate", f"the gate pause on the reference box ({out.status})")
+        page.set_content(FOOTER_FORM.replace("Thank you for applying so far", "Thank you for applying"))
+        page.wait_for_timeout(300)
+        out = w.continue_from({})
+        check(out.status != "submitted" and out.submitted_by is None,
+              f"the paused form gone, the sentence shown, the new form inside a <footer>: the probe still counts it, not confirmed ({out.status}: {out.reason})")
+    check.done()
+
+
 def test_a_form_inside_a_footer_still_counts_and_an_unchanged_form_at_a_confirmation_address_is_not_confirmed():
     # Fix of b499329's BLOCK and its finding 2. On b499329 the footer form
     # was read as "no fillable control" and the page marked submitted; a
@@ -118,7 +151,7 @@ def test_a_form_inside_a_footer_still_counts_and_an_unchanged_form_at_a_confirma
     check(out.status != "submitted" and out.submitted_by is None and (out.evidence or {}).get("no_form") is not True,
           f"the sentence with the form inside a <footer>: never marked submitted ({out.status}, {out.reason})")
     prose = "<p>Thank you for applying. Please review your answers before submitting.</p>"
-    with _run(_page(city=REFERENCE, prose=prose), start="/apply/confirmation", auto_submit=lambda: True) as (page, w):
+    with _run(_page(city=REFERENCE + prose), start="/apply/confirmation", auto_submit=lambda: True) as (page, w):
         out = w.run()
         check(out.status == wizard.WAITING and w.pending["kind"] == "gate", f"the gate pause on the reference box ({out.status}: {out.reason})")
         out = w.continue_from({})
