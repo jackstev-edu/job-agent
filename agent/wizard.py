@@ -37,6 +37,7 @@ import contextlib
 import re
 import time
 from collections import Counter
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field as dataclass_field
 from typing import TYPE_CHECKING
 
@@ -124,22 +125,31 @@ _FIND_NEXT_JS = r"""
 # writable input / select / textarea (the scan's own skips: button-like
 # types, disabled, readOnly, the aria-hidden tabindex=-1 validation input)
 # or a combobox / listbox the scan enriches. A yes/no that stamps nothing;
-# the scan itself still decides what is a field.
+# the scan itself still decides what is a field. With `outsideChrome`
+# (the strict confirmation check, Jack, 2026-11-02, item 9) a control
+# inside header / nav / footer / [role=banner] / [role=contentinfo] (a
+# site search box) does not count.
 _HAS_FIELDS_JS = r"""
-() => {
+(outsideChrome) => {
   const vis = el => {
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
+  const CHROME = 'header, nav, footer, [role=banner], [role=contentinfo], [role=navigation]';
   return [...document.querySelectorAll('input, select, textarea, [role=combobox], [role=listbox]')].some(el => {
     const type = (el.type || '').toLowerCase();
     if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type)) return false;
     if (el.disabled || el.readOnly) return false;
     if (el.getAttribute('aria-hidden') === 'true' && el.tabIndex === -1) return false;
+    if (outsideChrome && el.closest(CHROME)) return false;
     return vis(el);
   });
 }
 """
+
+# A path segment that says the application went through (Jack, 2026-11-02,
+# item 9: Intuit's Avature parked on its /Success page on every Continue).
+SUCCESS_SEGMENTS = {"success", "confirmation", "thank-you", "thankyou", "thanks"}
 
 
 # Which of these refs carry a trusted-input mark from the activity listener
@@ -1056,30 +1066,53 @@ class Wizard:
         """Does the tab show another shape than the paused page's (address or fields, after a settle)? Unreadable then or now: changed."""
         return pending.get("shape") is None or self._moved(pending["shape"])
 
-    def _no_fields_now(self) -> bool | None:
+    def _no_fields_now(self, outside_chrome: bool = False) -> bool | None:
         """Does the page show no fillable control now (the form wait's own probe)? None if it can't be read."""
         try:
-            return not bool(self.page.evaluate(_HAS_FIELDS_JS))
+            return not bool(self.page.evaluate(_HAS_FIELDS_JS, outside_chrome))
         except Exception:
             return None
 
+    def _success_address(self) -> bool:
+        """Does the page's path hold a segment equal to success, confirmation, thank-you, thankyou or thanks?"""
+        try:
+            path = urlsplit(str(self.page.url or "")).path or ""
+        except Exception:
+            return False
+        return any(seg.lower() in SUCCESS_SEGMENTS for seg in path.split("/") if seg)
+
     def _confirmed_strict(self, shape, refs: list[str]) -> tuple[bool, dict]:
         """
-        The read-only confirmation check for a page that changed under a
-        pause other than ready (Jack, 2026-10-31): the portal's signature
-        counts; the generic sentence counts only with the form of the
-        paused shape gone AND no fillable field on the page now, so a
-        step whose prose says "received" beside its boxes is filled,
-        never marked submitted. The ready park keeps its own check
-        (_after_ready).
+        The read-only confirmation check on every resume (Jack, 2026-11-02,
+        item 9; the 2026-10-31 rule widened to parks with no fill in hand):
+        the portal's signature counts; the generic sentence counts only
+        together with no fillable control outside the page's header /
+        nav / footer, OR a path segment equal to success / confirmation /
+        thank-you / thankyou / thanks. It reads, clicks nothing, and only
+        marks "submitted by Jack". A step whose prose says "received"
+        beside its boxes on an ordinary address is filled, never marked
+        submitted. The ready park keeps its own check (_after_ready).
         """
         confirmed, evidence = submit_mod.confirmation(
             self.page, portal=self.portal, portal_method=self.portal_method, start_url=self.url,
             refs=[r for r in refs if extract.is_current(r)], form_gone=self._form_gone_since(shape))
         by_signature = evidence.get("portal_signal") == "match"
-        by_sentence = (bool(evidence.get("generic_text")) and bool(evidence.get("form_gone"))
-                       and self._no_fields_now() is True)
-        return (confirmed and (by_signature or by_sentence)), evidence
+        no_form = self._no_fields_now(outside_chrome=True) is True
+        by_address = self._success_address()
+        by_sentence = bool(evidence.get("generic_text")) and (no_form or by_address)
+        evidence = {**evidence, "no_form_outside_chrome": no_form, "success_address": by_address}
+        return (by_signature or by_sentence), evidence
+
+    def _finish_confirmed(self, evidence: dict, what: str) -> None:
+        """A confirmation seen on a resume: the job ends as submitted by Jack, with the full record's verdict for its gate_runs row."""
+        record = self._record(self.out.steps, self.out.events, wizard=True)
+        result = gate.decide(record, self.prof, agent_submissions_today=self.agent_submissions_today)
+        self.out.record, self.out.gate_result, self.out.evidence = record, result, evidence
+        self.out.events.append({"kind": "confirmation", "detail": f"seen after a {what}", "handled": "jack"})
+        self.out.log.append(f"{READY_SUBMITTED} (not his answer; correct it with apply.py status)")
+        self.out.status, self.out.reason, self.out.submitted_by = "submitted", READY_SUBMITTED, "jack"
+        self.out.wizard = None
+        raise _Finished(self.out)
 
     def _pick_up(self, pending: dict, info: dict, *, what: str) -> None:
         """
@@ -1100,14 +1133,7 @@ class Wizard:
         refs = [r for f in (fill.fields if fill is not None else []) for r in (f.get("option_refs") or [f.get("ref")]) if r]
         confirmed, evidence = self._confirmed_strict(pending.get("shape"), refs)
         if confirmed:
-            record = self._record(self.out.steps, self.out.events, wizard=True)
-            result = gate.decide(record, self.prof, agent_submissions_today=self.agent_submissions_today)
-            self.out.record, self.out.gate_result, self.out.evidence = record, result, evidence
-            self.out.events.append({"kind": "confirmation", "detail": f"seen after a {what}", "handled": "jack"})
-            self.out.log.append(f"{READY_SUBMITTED} (not his answer; correct it with apply.py status)")
-            self.out.status, self.out.reason, self.out.submitted_by = "submitted", READY_SUBMITTED, "jack"
-            self.out.wizard = None
-            raise _Finished(self.out)
+            self._finish_confirmed(evidence, what)
         self._protect_held = True
 
     def _resume_fill(self, pending: dict, info: dict) -> tuple:
@@ -1187,6 +1213,18 @@ class Wizard:
             kind = pending.get("kind")
             self.out.log.append(f"resumed after a {kind} pause")
             self._capture("continue")
+            if kind not in ("ready", "closed"):
+                # Every Continue runs the strict confirmation check first
+                # (Jack, 2026-11-02, item 9), parks with no fill in hand
+                # included: Intuit's Avature parked on its /Success page on
+                # every Continue. Read-only; it only marks "submitted by
+                # Jack". The ready park keeps its own check below.
+                held = pending.get("fill")
+                refs = [r for f in (held.fields if held is not None else []) for r in (f.get("option_refs") or [f.get("ref")]) if r]
+                confirmed, evidence = self._confirmed_strict(pending.get("shape"), refs)
+                if confirmed:
+                    self._log_overrides(pending)
+                    self._finish_confirmed(evidence, f"{kind} pause")
             # Jack's overrides under the pause, from the watch's last good
             # read (the page now if it still shows the form, else the last
             # poll or his own press before it moved on), before anything
