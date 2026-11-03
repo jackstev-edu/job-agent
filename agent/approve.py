@@ -195,14 +195,28 @@ def apply_profile_line(path: Path, line: str, value: str, expected_stamp: str) -
 
 # --- "Always tick this exact wording" (Jack, 2026-11-02, item 6) ------------
 
+# Wordings "Always tick this exact wording" refuses outright (Jack,
+# 2026-11-03): an allowlist line is ticked on every portal that shows it,
+# and none of these is a consent to terms. Matched on every reading.
+ALLOWLIST_FORBIDDEN = re.compile(
+    r"authori[sz]|\brelease|(background|reference|drug|credit|criminal|employment|education|medical)\s+"
+    r"(check|screen|investigat|verif|test)|\bchecks?\b|\bscreening|arbitrat|at[\s-]will|e-?sign|electronic\s+signature|"
+    r"\bsign(ed|ing|ature)?\b|\bcontact|\bsms\b|text\s+messag|marketing|newsletter|non-?compete|restrictive\s+covenant",
+    re.I)
+
+
 def allowlist_refusal(label: str) -> str | None:
     """
     Why this wording may never be a consent_allowlist line, or None: it
     reads as a legal, eligibility, EEO or pay question (LEGAL_GUARD or a
-    PROFILE_PATHS line), a marketing / opt-in wording, a per-company or
-    criminal-record question, any HARD_STOPS kind but the terms / consent
-    entry, or it is empty / over-long. A line here lets a box be ticked
-    on an exact match, so it must never answer a question.
+    PROFILE_PATHS line), a marketing / opt-in wording, an authorize /
+    release / check / arbitration / at-will / signing / contact /
+    non-compete wording (ALLOWLIST_FORBIDDEN, Jack, 2026-11-03), a
+    per-company or criminal-record question, any HARD_STOPS kind but the
+    terms / consent entry, or it is empty / over-long. A line here lets
+    a box be ticked on an exact match, so it must never answer a
+    question. The server route (gui.State.always_tick, through
+    add_consent_allowlist_line) refuses on this, not only the button.
     """
     from . import gate
     text = " ".join(str(label or "").split())
@@ -211,6 +225,9 @@ def allowlist_refusal(label: str) -> str | None:
     variants = sensitive.text_variants(text)
     if any(gate.CONSENT_MARKETING.search(v) for v in variants):
         return "a marketing / communications opt-in"
+    if any(ALLOWLIST_FORBIDDEN.search(v) for v in variants):
+        return ("an authorize / release / check / arbitration / at-will / signing / contact / marketing / "
+                "non-compete wording")
     if any(sensitive.stop_kinds(v) - {"legal"} for v in variants) or any(sensitive.record_stop(v) for v in variants):
         return "a credential, per-company or criminal-record question"
     if any(sensitive.is_past_employer_question(v) for v in variants):

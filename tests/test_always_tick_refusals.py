@@ -1,0 +1,125 @@
+"""
+test_always_tick_refusals.py — "Always tick this exact wording" refuses the wordings Jack named (2026-11-03).
+
+WHAT THIS DOES: Runs approve.allowlist_refusal over an authorize, release,
+background / reference / drug / credit check, arbitration, at-will,
+e-signature / signing, contact / SMS / marketing / newsletter and
+non-compete wording (each refused, each with the reason) and over a plain
+handbook acceptance (allowed); posts each refused wording straight at the
+server route /memory/always-tick with an offer planted in the store, and
+shows the route answers ok: false, writes nothing to profile.yaml and
+keeps the offer; shows corrections.offer_ticks never offers one of them.
+WHY IT MATTERS: A consent_allowlist line is ticked on every portal that
+shows it. Jack's click must not be able to allowlist an "I authorize..."
+or "I release..." box (2026-11-02 report, decision 5; his go 2026-11-03),
+and the refusal has to live in the route, since the button is only a
+convenience.
+
+Run from anywhere:  .venv/Scripts/python.exe tests/test_always_tick_refusals.py
+"""
+import hashlib
+
+from _fill_run import PROFILE
+from _harness import TEST_HOME, Checks, run_as_script
+from agent import approve, corrections, gui, memory
+from agent.profile import Profile
+from test_gui import _req
+
+REFUSED = [
+    ("authorize", "I authorize Example Co to verify the information in this application"),
+    ("release", "I release Example Co and its agents from any liability"),
+    ("background check", "I understand that a background check will be conducted"),
+    ("reference check", "I agree that reference checks may be carried out"),
+    ("drug check", "I agree to a pre-employment drug screen"),
+    ("credit check", "I consent to a credit check as part of this application"),
+    ("arbitration", "I agree to resolve any dispute by binding arbitration"),
+    ("at-will", "I understand that my employment would be at-will"),
+    ("e-signature", "I agree that ticking this box is my e-signature"),
+    ("signing", "By signing below I accept the above"),
+    ("contact", "You may contact my current employer"),
+    ("SMS", "I agree to receive SMS messages about my application"),
+    ("marketing", "I agree to receive marketing emails"),
+    ("newsletter", "Sign me up for the newsletter"),
+    ("non-compete", "I accept the non-compete clause"),
+]
+ALLOWED = "I accept the employee handbook"
+
+
+def test_each_named_wording_is_refused_with_its_reason_and_a_plain_acceptance_is_not():
+    # Fails on 5ba4a07 for authorize, release, the checks, arbitration,
+    # at-will, e-signature, signing and non-compete: allowlist_refusal
+    # returned None (marketing, SMS, newsletter and "contact me" were
+    # already refused by the consent policy's marketing patterns).
+    check = Checks()
+    for what, label in REFUSED:
+        why = approve.allowlist_refusal(label)
+        check(why is not None, f"{what}: refused ({why})")
+    check(approve.allowlist_refusal(ALLOWED) is None, "a plain handbook acceptance is still allowed")
+    check(approve.allowlist_refusal("I agree to the Terms of Service and Privacy Policy") is None,
+          "a terms / privacy wording is still allowed (the policy ticks it anyway)")
+    check.done()
+
+
+def _state(name):
+    state = gui.State()
+    state.memory_path = TEST_HOME / f"always-tick-{name}.yaml"
+    state.memory_path.unlink(missing_ok=True)
+    state.profile_path = TEST_HOME / f"always-tick-{name}-profile.yaml"
+    state.profile_path.write_text(PROFILE, encoding="utf-8")
+    return state
+
+
+def _plant(store, label):
+    """An offer put straight into the store, past add_offer's own refusal: what an older store or a hand edit could hold."""
+    offer = {"id": hashlib.sha1(label.casefold().encode()).hexdigest()[:12], "label": label,
+             "host": "careers.example-co.com", "posting": "https://careers.example-co.com/apply", "at": "2026-11-03T00:00:00"}
+    store.offers.append(offer)
+    store.save()
+    return offer["id"]
+
+
+def test_the_server_route_refuses_each_wording_and_writes_nothing():
+    # Fails on 5ba4a07: the route wrote the authorize / release / ... lines
+    # (allowlist_refusal let them through).
+    check = Checks()
+    state = _state("route")
+    store = memory.Learned.load(state.memory_path)
+    ids = {what: _plant(store, label) for what, label in REFUSED}
+    ok_id = _plant(store, ALLOWED)
+    server = gui.Server(state).start()
+    try:
+        origin = f"http://127.0.0.1:{server.port}"
+        for what, _label in REFUSED:
+            status, _, body = _req(server, "POST", "/memory/always-tick", {"id": ids[what]}, origin=origin)
+            check(status == 200 and body.get("ok") is False and "never allowlisted" in str(body.get("error")),
+                  f"{what}: the route refuses ({body})")
+        check(Profile.load(state.profile_path).consent_allowlist() == [], "nothing written to consent_allowlist")
+        check(not approve.backups_of(state.profile_path), "no backup taken: the file was never touched")
+        kept = {o["id"] for o in memory.Learned.load(state.memory_path).offers}
+        check(all(ids[w] in kept for w, _ in REFUSED), "a refused offer stays listed (nothing was written for it)")
+        status, _, body = _req(server, "POST", "/memory/always-tick", {"id": ok_id}, origin=origin)
+        check(status == 200 and body.get("ok") is True and Profile.load(state.profile_path).consent_allowlist() == [ALLOWED],
+              f"the plain acceptance still goes through the same route ({body})")
+    finally:
+        server.stop()
+    check.done()
+
+
+def test_offer_ticks_never_offers_one_of_them():
+    # Fails on 5ba4a07 for the wordings allowlist_refusal let through.
+    check = Checks()
+    state = _state("offers")
+    store = memory.Learned.load(state.memory_path)
+
+    def change(label):
+        return {"field": {"ref": "x", "type": "checkbox", "label": label, "explicit_label": label},
+                "kind": "filled_blank", "agent": None, "now": True, "decision": {}, "category": "consent"}
+
+    offered = corrections.offer_ticks([change(l) for _, l in REFUSED] + [change(ALLOWED)],
+                                      url="https://careers.example-co.com/apply", log=[], store=store)
+    check([o["label"] for o in offered] == [ALLOWED], f"only the plain acceptance is offered ({[o['label'] for o in offered]})")
+    check.done()
+
+
+if __name__ == "__main__":
+    run_as_script(globals())
