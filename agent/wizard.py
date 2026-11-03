@@ -911,6 +911,24 @@ class Wizard:
             raise _Parked("this page needs you: " + reasons[:300])
         self._after_pause(fill, marked_before, {})
 
+    def _shape_changed(self, before) -> bool:
+        """
+        For the address rule of the confirmation check only: two READABLE
+        shapes that differ (address or fields, after a settle). A shape that
+        could not be read then or now says nothing about the page, so it is
+        not "changed" here (fix of ca612ec's BLOCK: _moved reads an
+        unreadable side as moved, which is right for the pick-up decision
+        and wrong for marking a job submitted).
+        """
+        if before is None:
+            return False
+        with contextlib.suppress(Exception):
+            browser_mod.settle(self.page, 600)
+        now = follow.read_shape(self.page)
+        if now is None:
+            return False
+        return (now["url"], now["fields"]) != (before["url"], before["fields"])
+
     def _moved(self, before) -> bool:
         """Has the page changed since `before` (address or field structure)?"""
         browser_mod.settle(self.page, 600)
@@ -1208,7 +1226,7 @@ class Wizard:
         # shape that could not be read at pause time says nothing about the
         # page, so the address rule does not count then (fix of 7ef5c9b's
         # BLOCK: `_changed_since` reads an unreadable shape as changed).
-        confirmed, evidence = self._confirmed_strict(pending.get("shape"), refs, changed=pending.get("shape") is not None)
+        confirmed, evidence = self._confirmed_strict(pending.get("shape"), refs, changed=self._shape_changed(pending.get("shape")))
         if confirmed:
             self._finish_confirmed(evidence, what)
         self._protect_held = True
@@ -1307,7 +1325,7 @@ class Wizard:
                 # all (Intuit's /Success page), never for a cap, CAPTCHA or
                 # account pause whose page still shows the form (finding 2).
                 shape = pending.get("shape") if pending.get("shape") is not None else pending.get("before")
-                changed = self._moved(shape) if shape is not None else self._no_form_park(pending)
+                changed = self._shape_changed(shape) if shape is not None else self._no_form_park(pending)
                 confirmed, evidence = self._confirmed_strict(shape, refs, changed=changed)
                 if confirmed:
                     self._log_overrides(pending)

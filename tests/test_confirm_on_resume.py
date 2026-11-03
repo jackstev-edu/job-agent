@@ -143,7 +143,7 @@ def test_a_pause_whose_shape_could_not_be_read_is_not_confirmed_by_the_address_r
     # Fix of 7ef5c9b's BLOCK: an unreadable shape at pause time made
     # _changed_since say "changed", and _pick_up then ran the check with
     # changed=True, so the address rule confirmed the unchanged form. On
-    # 7ef5c9b this run ends "submitted".
+    # f00dbfa (the parent of the fix) this run ends "submitted".
     from test_pick_up import REFERENCE, _page, _run
     check = Checks()
     prose = "<p>Thank you for applying. Please review your answers before submitting.</p>"
@@ -154,6 +154,36 @@ def test_a_pause_whose_shape_could_not_be_read_is_not_confirmed_by_the_address_r
         out = w.continue_from({})
         check(out.status != "submitted" and out.submitted_by is None,
               f"an unreadable pause shape on the unchanged form at /apply/confirmation: not confirmed on any path ({out.status}: {out.reason})")
+    check.done()
+
+
+def test_a_read_that_fails_after_continue_never_counts_as_a_changed_page_for_the_address_rule():
+    # Fix of ca612ec's BLOCK: _moved reads a failed read as "moved", so a
+    # readable pause shape followed by one failed read after Continue
+    # reached the address rule as "changed" on both the every-Continue check
+    # and the pick-up path. Here follow.read_shape fails once after Continue
+    # on the unchanged form at /apply/confirmation with the sentence: not
+    # confirmed. On ca612ec this run ends "submitted".
+    from test_pick_up import REFERENCE, _page, _run
+    from agent import follow
+    check = Checks()
+    prose = "<p>Thank you for applying. Please review your answers before submitting.</p>"
+    with _run(_page(city=REFERENCE + prose), start="/apply/confirmation", auto_submit=lambda: True) as (page, w):
+        out = w.run()
+        check(out.status == wizard.WAITING and w.pending["kind"] == "gate" and w.pending.get("shape") is not None,
+              f"the gate pause with a readable shape ({out.status})")
+        real = follow.read_shape
+        calls = {"n": 0}
+
+        def flaky(pg):
+            calls["n"] += 1
+            return None if calls["n"] == 1 else real(pg)
+
+        with mock.patch.object(follow, "read_shape", side_effect=flaky):
+            out = w.continue_from({})
+        check(calls["n"] >= 1, "the read was asked for")
+        check(out.status != "submitted" and out.submitted_by is None,
+              f"one failed read after Continue on the unchanged form: never confirmed by the address rule ({out.status}: {out.reason})")
     check.done()
 
 
