@@ -285,38 +285,62 @@ def consent_ok(label: Any) -> bool:
 # knowledge"); (2) a statement that a false statement, misrepresentation
 # or omission may lead to rejection, withdrawal of an offer or dismissal.
 # "This can be ticked for similar wording too. It won't always be the
-# same": each sentence is judged by a bounded vocabulary (every word of it
-# must be in the class's vocabulary, and the class's required words must
-# be there), not by a fixed phrase. Any other clause makes it Jack's
-# (ATTEST_FORBIDDEN: authorize, consent to, agree to, background /
-# reference / drug / credit check, release of information, arbitration,
-# at-will, electronic signature / signing, contact / SMS / marketing /
-# newsletter, non-compete); so does any LEGAL_GUARD, PROFILE_PATHS or
-# CONSENT_MARKETING match, any HARD_STOPS kind but the one certify /
-# attest / acknowledge entry (read past ONLY inside this check, for that
-# one tick: Jack's answer on the plan), and the criminal-record pattern.
-# Never an optional box. Page text can only fail this check.
-# Each of Jack's two sentence classes is a fixed grammar: the slots are
-# bounded word lists in a fixed order, so "similar wording" (another verb,
-# another truth word, a lead-in, "to the best of my knowledge") passes and
-# a clause that is no attestation and no consequence of misrepresentation
-# (an at-will clause, a declaration about Jack, an agreement) does not,
-# whatever connective joins it (second fix of c8a18cf's BLOCK: a word-bag
-# check let vocabulary words build other clauses).
-_LEAD = r"(?:by (?:checking|ticking|selecting|clicking) (?:this|the) box(?: below)? )?"
-_INFO = r"(?:information|statements?|answers?|responses?|details|facts|data|representations?)"
-_SOURCE = (r"(?: (?:i have |i've |that i have )?(?:provided|given|made|supplied|submitted|entered|contained|furnished"
-           r"|set forth|stated)(?: by me)?(?: (?:herein|above|below))?)?")
-_WHERE = (r"(?: (?:in|on|within|as part of|throughout) (?:this|my|the)(?: employment| job)?"
-          r" (?:application(?: form| process)?|form|process))?")
+# same": each sentence kind is a fixed pattern (Jack, 2026-11-03): the
+# slots are bounded word lists in a fixed order, so "similar wording"
+# (another verb, another truth word, a lead-in, "to the best of my
+# knowledge") passes and a clause that is no attestation and no
+# consequence of misrepresentation (an at-will clause, a declaration
+# about Jack, an agreement) does not, whatever connective joins it. Any
+# other clause makes it Jack's (ATTEST_FORBIDDEN: authorize, consent to,
+# agree to, background / reference / drug / credit check, release of
+# information, arbitration, at-will, electronic signature / signing,
+# contact / SMS / marketing / newsletter, non-compete); so does any
+# LEGAL_GUARD, PROFILE_PATHS or CONSENT_MARKETING match, any HARD_STOPS
+# kind but the one certify / attest / acknowledge entry (read past ONLY
+# inside this check, for that one tick: Jack's answer on the plan), and
+# the criminal-record pattern. Never an optional box. Page text can only
+# fail this check.
+# The subject of an attestation comes from a closed list naming Jack's
+# own answers (Jack, 2026-11-03, the third fix of c8a18cf's BLOCK): the
+# information / statements / answers / responses he provided, gave,
+# submitted or entered, optionally "in this application"; "my answers";
+# "my application". A subject that points at text on the page ("the
+# facts set forth below", "the statements contained herein", "the
+# following") certifies the page's words, not his, and is his: those
+# words are forbidden outright and the subject slot has no place for
+# them. "made" names his answers only with "I have" or "in this
+# application" beside it.
+_LEAD = r"(?:by (?:checking|ticking|selecting|clicking) (?:this|the) box )?"
+_INFO = r"(?:information|statements?|answers?|responses?|details|representations?)"
+_GIVEN = r"(?:provided|given|supplied|submitted|entered|furnished)"
+_WHERE = r" (?:in|on|within|as part of|throughout) (?:this|my|the)(?: employment| job)? application(?: form| process)?"
+# The subject slot. Each alternative opens with a different word, so the
+# pattern never has two ways to read one text.
+_SUBJECT = (r"(?:"
+            r"(?:the |this )?" + _INFO +                                 # "the information ..." needs a source or a place
+            r"(?:"
+            r" (?:i have |i've |that i have )(?:" + _GIVEN + r"|made)(?: by me)?(?:" + _WHERE + r")?"
+            r"| " + _GIVEN + r"(?: by me)?(?:" + _WHERE + r")?"
+            r"| made(?: by me)?" + _WHERE +
+            r"|" + _WHERE +
+            r")"
+            r"|my " + _INFO +                                               # "my answers ..." names his own
+            r"(?:"
+            r" (?:i have |i've |that i have )(?:" + _GIVEN + r"|made)(?: by me)?(?:" + _WHERE + r")?"
+            r"| " + _GIVEN + r"(?: by me)?(?:" + _WHERE + r")?"
+            r"| made(?: by me)?" + _WHERE +
+            r"|" + _WHERE +
+            r")?"
+            r"|my application"
+            r")")
 _TRUTH = r"(?:true|accurate|correct|complete|truthful|factual|honest)"
 _TRUTHS = (r"(?: (?:completely|fully|entirely))? " + _TRUTH
            + r"(?:(?: and| or)?(?: (?:completely|fully|entirely))? " + _TRUTH + r")*")
 _BEST = r"(?: (?:to|according to) the best of my (?:knowledge(?: and belief)?|belief))?"
 ATTEST_CLASS = re.compile(
     "^" + _LEAD + r"i (?:hereby )?(?:also )?(?:certify|attest|acknowledge|affirm|declare|confirm|state|swear"
-    r"|represent|verify|understand)(?: that)?(?: (?:all|each|every|any))?(?: of)?(?: (?:the|my|this))? "
-    + _INFO + _SOURCE + _WHERE + r" (?:is|are|has been|have been|was|were)(?: (?:all|both))?" + _TRUTHS + _BEST + "$")
+    r"|represent|verify|understand)(?: that)?(?: (?:all|each|every|any))?(?: of)? "
+    + _SUBJECT + r" (?:is|are|has been|have been|was|were)(?: (?:all|both))?" + _TRUTHS + _BEST + "$")
 _FALSE_NP = (r"(?:(?:any|a|the|such) )?(?:(?:material )?(?:misrepresentations?|omissions?(?: of (?:a )?material facts?)?"
              r"|falsifications?|misstatements?)|(?:false|untrue|inaccurate|incorrect|incomplete|misleading|fraudulent"
              r"|dishonest) (?:statements?|information|answers?|representations?|responses?))")
@@ -326,7 +350,7 @@ _CONSEQ_NP = (r"(?:(?:the|my|an|a|immediate) )*(?:rejection|refusal|denial|disqu
               r"(?: from (?:further )?consideration)?")
 CONSEQ_CLASS = re.compile(
     r"^(?:i (?:also )?(?:understand|acknowledge)(?: that)? )?" + _FALSE_NP + r"(?:(?: or| and)? " + _FALSE_NP + r")*"
-    r"(?: (?:made )?(?:in|on) (?:this|my|the)(?: employment| job)? (?:application|form))?"
+    r"(?: (?:made )?(?:in|on) (?:this|my|the)(?: employment| job)? application)?"
     r" (?:may|will|can|could|shall|would) (?:result in|lead to|be (?:grounds|cause|sufficient cause|a basis) for"
     r"|constitute grounds for|cause) " + _CONSEQ_NP + r"(?:(?: or| and)? " + _CONSEQ_NP + r")*"
     r"(?: (?:even )?if (?:discovered|found)(?: after (?:hire|hiring|employment))?)?$")
@@ -337,7 +361,11 @@ ATTEST_FORBIDDEN = re.compile(
     r"(terminat|dismiss|discharg)\w*\s+(of\s+\w+\s+)?at\s+any\s+time|at\s+any\s+time\s+(by|regardless)|"
     r"electronic|signature|\bsign(ed|ing|s)?\b|e-?sign|\bcontact|\bsms\b|text\s+messag|marketing|"
     r"newsletter|non-?compete|waive|indemnif|investigat|\bpolicy|\bterms\b|privacy|conditions|employee\s+handbook|"
-    r"\bage\b|\byears\s+old|eligib|legally|\bvisa|sponsor", re.I)
+    r"\bage\b|\byears\s+old|eligib|legally|\bvisa|sponsor|"
+    # A subject that points at text on the page, not at Jack's answers
+    # (Jack, 2026-11-03): the words themselves are forbidden.
+    r"set\s+forth|\bherein\b|\bhereto\b|\bbelow\b|\babove\b|\bthe\s+facts?\b|\bthe\s+following\b|\bcontained\b|"
+    r"\bstated\b|\bthis\s+form\b|\bthe\s+form\b|\battached\b|\benclosed\b", re.I)
 ATTEST_MAX_CHARS = 600
 _SENTENCE_SPLIT = re.compile(r"[.!?;]+")
 # A sentence's clauses: cut at an "and" / "or" (a comma before it or not)
@@ -346,8 +374,13 @@ _SENTENCE_SPLIT = re.compile(r"[.!?;]+")
 _CLAUSE_SPLIT = re.compile(r"(?:,\s*)?\b(?:and|or)\s+(?=(?:i|that|my)\b)", re.I)
 # Characters a label of the class may hold: letters (any script: a non-Latin
 # letter then fails the grammar), digits (likewise), spaces and plain
-# punctuation. An emoji, a symbol or an invisible character refuses.
-_ALLOWED_CHARS = re.compile(r"^[^\W_\s]*(?:[\s.,;:!?'\"()\u2019\u2018\u201c\u201d-]+[^\W_\s]*)*$", re.UNICODE)
+# punctuation. An emoji, a symbol or an invisible character refuses. One
+# character class, matched whole: linear in the label's length, with no
+# nested or overlapping quantifier (Jack, 2026-11-03; the earlier
+# `(?:sep+ word*)*` shape backtracked exponentially on a run of
+# punctuation before a symbol). `\w` admits the underscore, so that is
+# refused apart.
+_ALLOWED_CHARS = re.compile(r"[\w\s.,;:!?'\"()\u2019\u2018\u201c\u201d-]*", re.UNICODE)
 
 
 def _attestation_clause_ok(clause: str) -> bool:
@@ -380,9 +413,13 @@ def attestation_ok(label: Any) -> bool:
     attestation_box_ok).
     """
     text = str(label or "")
+    # The length first, before any pattern runs (Jack, 2026-11-03): over
+    # ATTEST_MAX_CHARS is his, whatever it says.
     if not text.strip() or len(text) > ATTEST_MAX_CHARS:
         return False
     variants = sensitive.text_variants(text)
+    if any(len(v) > ATTEST_MAX_CHARS for v in variants):
+        return False
     if any(CONSENT_MARKETING.search(v) or ATTEST_FORBIDDEN.search(v) for v in variants):
         return False
     if any(sensitive.stop_kinds(v) - {"legal"} for v in variants):
@@ -397,7 +434,7 @@ def attestation_ok(label: Any) -> bool:
     # an emoji or a symbol on any reading refuses, and a non-Latin letter
     # or a digit fails the grammar.
     for v in variants:
-        if not _ALLOWED_CHARS.match(v):
+        if "_" in v or not _ALLOWED_CHARS.fullmatch(v):
             return False
         if not all(_attestation_sentence_ok(piece) for piece in _SENTENCE_SPLIT.split(v)):
             return False

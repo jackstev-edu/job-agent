@@ -110,7 +110,20 @@ LEGAL = [
     ("an attachment clause", "I certify that the information is true and complete and have attached my resume and cv."),
     ("an employment declaration", "I state that I have been in employment during this process with accurate information."),
     ("a symbol", "I certify that the information is true and complete \U0001F6AB"),
+    # Third fix of c8a18cf's BLOCK (0c7177b's review; Jack, 2026-11-03): a
+    # subject that points at text on the page, not at Jack's answers. Each
+    # passes attestation_ok on 0c7177b.
+    ("the facts set forth below", "I certify that the facts set forth below are true and correct."),
+    ("the statements given below", "I confirm that the statements given below are true."),
+    ("the statements contained herein", "I acknowledge that the statements contained herein are true and complete."),
+    ("the statements made on this form", "I certify that the statements made on this form are true."),
+    ("the following", "I certify that the following is true and complete."),
+    ("the information above", "I certify that the information above is true and complete."),
+    ("agentless 'made' with no place", "I certify that the statements made are true and complete."),
+    ("a bare 'the information'", "I certify that the information is true and complete."),
+    ("a consequence on this form", "I understand that false statements on this form may result in dismissal."),
 ]
+PAGE_TEXT_SUBJECT = "I certify that the facts set forth below are true and correct."
 MIXED = "I agree to the terms and certify that my answers are true"
 
 
@@ -129,6 +142,33 @@ def test_the_attestation_class_takes_jacks_variants_and_nothing_else():
     check(not gate.consent_ok(ATT), "the terms / privacy policy still refuses a certification (unchanged)")
     check(gate.attestation_ok(ATT + " " + ATT), "two attestation sentences pass")
     check(not gate.attestation_ok(ATT * 12), "over-long: never")
+    for text in ("I certify that my answers are true and complete.",
+                 "I certify that my responses in this application are accurate.",
+                 "I confirm that my application is complete and accurate.",
+                 "I certify that the answers I've given are true."):
+        check(gate.attestation_ok(text), f"a subject from the closed list passes: {text!r}")
+    check.done()
+
+
+def test_the_attestation_check_is_linear_in_the_labels_length():
+    # Third fix of c8a18cf's BLOCK (0c7177b's review, finding 2): the
+    # character-class pattern `(?:sep+ word*)*` backtracked exponentially on
+    # a run of punctuation before a symbol; on 0c7177b this test does not
+    # finish. Jack (2026-11-03): the length is checked before any pattern,
+    # the pattern itself is one character class.
+    import time
+    check = Checks()
+    punctuation = "." * 10_000 + "*"
+    start = time.perf_counter()
+    check(gate._ALLOWED_CHARS.fullmatch(punctuation) is None, "ten thousand dots then a symbol: refused by the character class")
+    check(not gate.attestation_ok(punctuation), "...and by attestation_ok (over-long, before any pattern runs)")
+    short = "." * 500 + "*"
+    check(not gate.attestation_ok(short), "five hundred dots then a symbol (under the length cap): refused")
+    for n in (30, 60, 120):
+        check(not gate.attestation_ok(f"{ATT[:-1]} {'-' * n}*"), f"a positive followed by {n} dashes and a symbol: refused")
+    elapsed = time.perf_counter() - start
+    check(elapsed < 2.0, f"all of it in under two seconds ({elapsed:.3f}s)")
+    check(not gate.attestation_ok(ATT.replace(" ", "_")), "an underscore is never part of the class")
     check.done()
 
 
@@ -156,6 +196,9 @@ def test_the_gate_plans_a_required_attestation_box_as_a_consent_tick_and_stops_o
           "terms bundled with a certification: Jack's")
     v = gate_run(_att_record(label=LEGAL[0][1]))
     check(v["content_verdict"] == gate.WOULD_STOP and "f9" not in v["consent_actions"], "a LEGAL_GUARD wording: Jack's")
+    v = gate_run(_att_record(label=PAGE_TEXT_SUBJECT))
+    check(v["content_verdict"] == gate.WOULD_STOP and "f9" not in v["consent_actions"],
+          f"a subject pointing at the page's text: never planned as a tick (fails on 0c7177b) ({v['content_reasons']})")
     r = _att_record()
     r["census"][-1]["described"] = "and I authorize a background check"
     check(gate_run(r)["content_verdict"] == gate.WOULD_STOP, "fine print attached: Jack's")
