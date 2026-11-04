@@ -655,7 +655,8 @@ leave his 2026-11-02 decision text as written:
   non-compete wording, in the server route itself, not only the button.
 - E's waiver is per element only: one touched box never waives another
   box, in a group or out of one. A required checkbox group Jack ticks
-  one box of resolves and the job moves on, with no sibling waived.
+  one box of resolves that group's required stop only, with no sibling
+  waived (amended 2026-11-03 evening).
 - B: a date box whose own label, help text or placeholder hits any
   LEGAL_GUARD kind is his (the box's own text, not the surrounding
   form's). A plain Date box on a disability self-identification form
@@ -664,7 +665,9 @@ leave his 2026-11-02 decision text as written:
   decision B recognises, only a box labelled as a name) is filled from
   the profile's name lines only, never the model; the gate recomputes
   the value and stops on a mismatch. Any other signature box, or a label
-  with sign / signature wording, is his.
+  with sign / signature wording, is his (a clock-dated date box of
+  decision B, "Signature date" or a Date box calling itself a
+  signature, is outside that wording: Jack, 2026-11-03 evening).
 - C covers every portal, with the 2026-11-02 tenant definition,
   superseding "Workday tenants only" in docs/PLAN-workday.md item 8. A
   shared ATS host with no company in it is doubt. A non-plain
@@ -681,6 +684,73 @@ leave his 2026-11-02 decision text as written:
 - Kept as built: the shared Workday / Avature "acme" scope, and the
   "Yes, I ... / No, I ..." strict fits for a checkbox statement.
 
+Added by Jack on 2026-11-03 (evening; his decisions on the report of
+the 2026-11-03 round, a small round of decided work, items a-g), in
+plain words; these supersede older lines where they conflict:
+
+- The 2026-11-03 block above is confirmed as written.
+- The per-company design rule gains its second exception: abb7fd0's
+  DoD / clearance-only past-employer wording (a past-employer-worded
+  question whose only legal kinds are DoD or clearance stays learnable).
+- "A typed answer at the same host only" becomes "the same tenant" (the
+  2026-11-02 tenant definition; the shared Workday / Avature scope kept).
+- E's line: a required checkbox group Jack ticks one box of resolves
+  that group's required stop only.
+- A clock-dated date box is outside "sign / signature wording":
+  "Signature date", and a Date box calling itself a signature, are
+  decision B's, from the clock only. The gate's skip of the sign-box
+  stop for a clock-dated box stays.
+- Hand-written consent_allowlist lines are Jack's, not re-checked at
+  tick time.
+- C's grammar variants ("worked at", "been employed at", "an employee
+  of", "were you ever employed by") are confirmed. Help text making the
+  question Jack's is confirmed.
+- signdate.NEVER_CATEGORIES stays without legal_declaration and unknown,
+  said so in its comment.
+- A Name box the classifier calls legal_declaration fills through
+  verify_name: confirmed.
+- C keeps its route ON, with two checks added to the route and so to the
+  gate's recomputation (item c): any list entry appearing, on any
+  reading, in the label, help, placeholder, section, options or the
+  split name attribute is doubt (whole words for an entry's words of 3+
+  characters and for short entries); any letter outside ASCII in the
+  help, placeholder, section or options is doubt.
+- "Always tick" (item d): the four shapes df987d9 regressed are restored
+  ("Noncompetition", "call or WhatsApp me", "reverify my employment
+  history", an embedded "employment_at_will"); then the pattern is
+  closed: no further plain forms, no narrow-shape rewrite.
+- The signature Name box and block (item e): a box marked
+  signature_name with no profile_name plan is flagged to Jack whatever
+  the page, on hold passes and in follow mode too, never the mapper; the
+  gate's stop stays. A signature block needs a full date: one Date box,
+  or all of Month, Day and Year; a Name + Year row is no block, for the
+  clock or the Name box. "Middle initial" alone leaves the sign words;
+  "initials" and every other initial wording stay. NAME_RX widens to
+  the Name box's closed word list, so "Full legal name" dates too.
+- Snapshots (item f): values that are yes / no / n/a / none (any case)
+  are never stripped as learned or typed values; a dropdown button's
+  shown value is still blanked. Nothing else: no more snapshot folds.
+- D (item b): 16b6ac3's review fix is applied (the bare-place
+  alternative dropped from the subject slot, so "the statements in this
+  application" and "the information in this application" refuse) and
+  the route is turned ON, with one fix attempt; a BLOCK on it turns the
+  route OFF in one commit, recorded here, with no further attempts
+  without Jack's word. (Item b's commit records which it ended as.)
+- Process for the round: one fix attempt per item; a surviving BLOCK on
+  any item but D reverts that item with a revert commit; an item with
+  an open BLOCK is never pushed; a FLAG is folded only when it is a
+  stop-to-pass or safety issue, every other FLAG one line in TODO.
+- ACCEPTED residuals, one line each: a second company or prose in the
+  section that is on no entry of Jack's list (the label's grammar asks
+  about one company and his list is complete); a padded tenant
+  (acme-global); Always tick's remaining plain-language forms (a
+  seatbelt on his own click, not a gate: no further hardening);
+  ALLOWLIST_FORBIDDEN's overreach; 24e483f's two snapshot shapes and
+  c6cfa8f's heading residual; a profile value's positional mark in an
+  option list; the address rule's differing-shape residual (2119361);
+  d37a30b's "touched, not left ticked"; ba21953's reading of the
+  no-fields park.
+
 ## Design rules — do not relax these
 
 - The model never answers legal questions. Eligibility, EEO and
@@ -688,7 +758,8 @@ leave his 2026-11-02 decision text as written:
   or an answer he entered himself that the agent recorded, reused only
   for the same question (Jack, 2026-11-01): the exact key (normalised
   label, field type, sorted options), a choice only equal to one of the
-  form's current options, a typed answer at the same host only. A
+  form's current options, a typed answer at the same tenant only (the
+  2026-11-02 tenant; Jack, 2026-11-03 evening). A
   profile line answered with a strict fit (exact, verbatim, bool or
   decline: the fits the gate trusts) wins over a learned answer; a
   learned exact-key entry beats only a loose fit (substring,
@@ -706,7 +777,10 @@ leave his 2026-11-02 decision text as written:
   work_history.past_employers list, with the label's company loosely
   matching the tenant and no doubt wording, is answered "No" (a yes / no
   question) or "N/A" (a required details box); any match or any doubt
-  is his. The gate recomputes that match itself.
+  is his. The gate recomputes that match itself. The second exception
+  (abb7fd0; Jack, 2026-11-03 evening): a past-employer-worded question
+  whose only legal kinds are DoD or clearance stays learnable under
+  decision 1 of the fold round.
 - `profile.yaml` is changed only by Jack's hand (his editor, or `init`
   writing the blank template at his command) or his own click on the
   Memory page (Save to profile; Always tick this exact wording, which
@@ -757,8 +831,11 @@ leave his 2026-11-02 decision text as written:
   misrepresentation statement, no forbidden clause, no LEGAL_GUARD,
   PROFILE_PATHS or marketing match, no stop kind other than the
   certify / attest / acknowledge one, which is read past only inside
-  that check for that one tick); or a label exactly matching a line in
-  the profile's `consent_allowlist`. On any route, a required box is
+  that check for that one tick; the route's state after the 2026-11-03
+  evening round is recorded in that block's D line); or a label exactly
+  matching a line in the profile's `consent_allowlist` (a hand-written
+  line is Jack's, not re-checked at tick time: 2026-11-03 evening). On
+  any route, a required box is
   ticked mid-wizard as built, and on the final page only when
   auto-submit is ON. Never marketing or opt-ins (Jack, 2026-10-29).
   Never learned. A census stop is waived for a box carrying Jack's own
@@ -866,7 +943,8 @@ How the code keeps them, and rules of its own:
   signature Name box of a self-identification form takes the profile's
   name lines as an ordinary text fill, planned by `agent/signdate.py`
   and recomputed by the gate; a box with sign / signature wording is
-  never filled). It must stay that way.
+  never filled, a clock-dated date box of decision B being outside that
+  wording: Jack, 2026-11-03 evening). It must stay that way.
 - The submit gate: a pure function of the record and the profile. It never
   clicks, ticks or submits itself; `submit.py` (milestone 5) acts on its
   verdict, nothing else does. Filling is routed exactly as before
@@ -1052,5 +1130,8 @@ above, as are the 2026-11-01 evening round (item 1 built) and the
 2026-11-02 round (decisions A-E; items 1-13 of Jack's brief, recorded
 in TODO's "Round of 2026-11-02"; Waymo and the Workday widgets are the
 round after it) and Jack's 2026-11-03 decisions on its report (the
-fixes of the four open BLOCKs, item 9, the TODO log; items 10-13 are
+fixes of the four open BLOCKs, item 9, the TODO log) and his evening
+decisions on that report (the small round of items a-g: records, D's
+one last shot, C's two checks, Always tick's four shapes, the Name box
+and block, snapshots, the TODO log; items 10-13 are
 the next round). A new session resumes from those files.

@@ -112,6 +112,11 @@ def value_for(field: dict, today: datetime.date | None = None) -> str | None:
 # before it. A classifier reading of work authorization or pay on a date
 # box is not overridden either (fold of 9e3d5fb's finding 3); an eeo
 # reading is the expected one on a self-identification form and stays.
+# legal_declaration and unknown stay OUT on purpose (Jack, 2026-11-03
+# evening): the classifier calls a signature-block date box
+# legal_declaration (its own description lists e-signature) or unknown
+# (the classifier failed), and refusing those would refuse the very box
+# decision B targets; the box is the clock's by structure.
 NEVER_CATEGORIES = frozenset({"credential", "consent", "per_company", "work_authorization", "compensation"})
 
 
