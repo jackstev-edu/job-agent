@@ -194,11 +194,13 @@ _NAME_WORDS = frozenset({"your", "full", "legal", "printed", "print", "type", "t
 # "signs anything" line in CLAUDE.md). Read on every reading of the label,
 # help text, placeholder and the name attribute split into words (fix of
 # 0530a70's review: the label alone let a "Name" box with placeholder
-# "Signature" through). "initial" / "initials" as in 0530a70: a "Middle
-# initial" box is caught too (a false positive, Jack's to lift; the
-# pattern was narrowed in 5d099c5 without his approval and is restored).
+# "Signature" through). "initial" / "initials" as in 0530a70, with one
+# lift (item e, Jack, 2026-11-03 evening): "Middle initial" alone (the
+# singular right after "middle") is a name part, not a signing box;
+# "initials", "Middle initials", "Please initial" and every other initial
+# wording still sign.
 _SIGN_WORDS = re.compile(r"\bsign(?:ature|atures|ed|ing|s|er|ers|ee|ees|atory|atories)?\b|\be-?sign\w*|\be-?sig\b"
-                         r"|\binitials?\b|\bautograph", re.I)
+                         r"|(?<!\bmiddle )\binitial\b|\binitials\b|\bautograph", re.I)
 
 
 def _own_words(field: dict) -> list[str]:
@@ -276,16 +278,21 @@ def name_plan_for(field: dict, fields: list[dict], prof, category: str | None = 
 
 def name_box_is_jacks(field: dict, fields: list[dict]) -> bool:
     """
-    A box the scan marked as the signature Name box, on a self-
-    identification form: when the route does not fill it from the
+    A box the scan marked as the signature Name box (a name label in a
+    block holding a full date): when the route does not fill it from the
     profile's name lines (a line missing, a label outside the closed
-    list, a sign word anywhere), it is Jack's, never the model's (fix of
-    0530a70's review); the gate stops on any other source for it.
+    list, a sign word anywhere, no EEO question among the fields given),
+    it is Jack's, never the model's (fix of 0530a70's review); the gate
+    stops on any other source for it. Whatever the page (item e, Jack,
+    2026-11-03 evening): on a hold pass or in follow mode the route sees
+    only the open fields, so an EEO question already holding a value is
+    not among them, and the marked box must still never reach the mapper.
+    `fields` is kept for the callers' shape and no longer read.
     """
     # Whatever the box's type (a textarea, a combobox, an email box the scan
     # marked): a mark with no profile_name plan is his (fix of 5d099c5's
     # review, BLOCK 1).
-    return bool(field.get("signature_name")) and self_identification_page(fields)
+    return bool(field.get("signature_name"))
 
 
 def verify_name(field: dict, decision: dict | None, fields: list[dict], prof, category: str | None = None) -> bool:

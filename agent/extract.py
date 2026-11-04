@@ -357,7 +357,20 @@ _SCAN_JS = safe(r"""
   // that also holds a Name / signature box? Structure only; the Python
   // side (signdate.py) decides whether the page is a self-identification
   // form and whether the box names a date part with a stated format.
-  const NAME_RX = /^(your\s+|full\s+|applicant'?s?\s+|candidate'?s?\s+|printed\s+|legal\s+)?(name|signature|e-?signature|electronic\s+signature)(\s*\(.*\))?\s*:?\s*\*?$/i;
+  // A name label: the word "name" once, every other word from the Name
+  // box's closed list (signdate._NAME_WORDS: "Full legal name", "Name of
+  // applicant", "Printed name (please print)"; item e, Jack, 2026-11-03
+  // evening, so the dates beside such a box are the clock's too), or a
+  // signature label (the block's anchor for the clock as before).
+  const NAME_WORDS = new Set(['your', 'full', 'legal', 'printed', 'print', 'type', 'typed', 'please', 'enter', 'applicant',
+    'applicants', "applicant's", 'candidate', 'candidates', "candidate's", 'employee', 'employees', "employee's", 'of', 'the',
+    'as', 'it', 'appears', 'clearly', 'here', 'below', 'above']);
+  const SIG_RX = /^(your\s+|full\s+|applicant'?s?\s+|candidate'?s?\s+|printed\s+|legal\s+)?(signature|e-?signature|electronic\s+signature)(\s*\(.*\))?\s*:?\s*\*?$/i;
+  const nameLabel = l => {
+    const words = (String(l || '').toLowerCase().replace(/’/g, "'").match(/[a-z']+/g) || []);
+    return words.filter(w => w === 'name').length === 1 && words.every(w => w === 'name' || NAME_WORDS.has(w));
+  };
+  const NAME_RX = { test: l => nameLabel(l) || SIG_RX.test(String(l || '').trim()) };
   const plainBox = b => ['INPUT', 'TEXTAREA'].includes(__ja.tag(b)) && isVisible(b)
       && !['hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'password'].includes((__ja.type(b) || '').toLowerCase());
   // The block's container (or null): the smallest ancestor, as above, that
@@ -388,20 +401,36 @@ _SCAN_JS = safe(r"""
   // review, finding 4).
   const DATE_RX = /^(signature\s+|today'?s\s+|current\s+|the\s+)?(date|month|day|year)(\s+(signed|of\s+signature))?(\s*\(.*\))?\s*:?\s*\*?$/i;
   const NAME_WORD_RX = /\bname\b/i;
-  const soleBlock = (el, block) => {
-    let scope = block;
+  // The scope a block is judged at: the enclosing fieldset / section /
+  // group within six levels, else the block itself.
+  const scopeOf = block => {
     for (let p = block, i = 0; p && p !== document.body && i < 6; p = __ja.parent(p), i++) {
       const tag = __ja.tag(p);
       if (tag === 'FORM') break;
-      if (tag === 'FIELDSET' || tag === 'SECTION' || ['group', 'region'].includes(__ja.attr(p, 'role') || '')) { scope = p; break; }
+      if (tag === 'FIELDSET' || tag === 'SECTION' || ['group', 'region'].includes(__ja.attr(p, 'role') || '')) return p;
     }
+    return block;
+  };
+  const soleBlock = (el, block) => {
+    const scope = scopeOf(block);
     const SKIP_TYPES = ['hidden', 'submit', 'button', 'reset', 'image'];
     const controls = [...scope.querySelectorAll('input, textarea, select, [role=combobox], [role=listbox], [role=radio], [role=checkbox]')]
       .filter(c => isVisible(c) && !SKIP_TYPES.includes((__ja.type(c) || '').toLowerCase()));
     const part = c => (__ja.tag(c) === 'SELECT' || plainBox(c)) && (DATE_RX.test(labelFor(c).trim()) || NAME_RX.test(labelFor(c).trim()));
     return controls.every(c => c === el || part(c));
   };
-  const signatureBlock = el => { const b = blockWith(el, NAME_RX, false); return !!b && soleBlock(el, b); };
+  // A signature block needs a full date (item e, Jack, 2026-11-03 evening):
+  // one Date box, or all of Month, Day and Year, among the scope's date-part
+  // boxes and dropdowns. A Name + Year row is no block, for the clock or
+  // the Name box (a Certifications row).
+  const fullDate = block => {
+    const parts = new Set([...scopeOf(block).querySelectorAll('input, textarea, select')]
+      .filter(c => __ja.tag(c) === 'SELECT' || plainBox(c))
+      .map(c => { const m = DATE_RX.exec(labelFor(c).trim()); return m ? m[2].toLowerCase() : null; })
+      .filter(Boolean));
+    return parts.has('date') || (parts.has('month') && parts.has('day') && parts.has('year'));
+  };
+  const signatureBlock = el => { const b = blockWith(el, NAME_RX, false); return !!b && fullDate(b) && soleBlock(el, b); };
   // The Name box of that block (Jack, 2026-11-03): its own label holds the
   // word "name" and the same walk finds a date-part box (a text box or a
   // dropdown) beside it: `signature_name`. Whether the block holds nothing
@@ -411,7 +440,9 @@ _SCAN_JS = safe(r"""
   // of 98febb9's BLOCK: an unmarked box fell back to the model). Structure
   // only; signdate.py decides whether the page is a self-identification
   // form and whether the label is a bare name with no sign wording.
-  const nameBlock = el => NAME_WORD_RX.test(labelFor(el)) ? blockWith(el, DATE_RX, true) : null;
+  // The block must hold a full date (fullDate) for either mark: a Name +
+  // Year row marks nothing (item e, Jack, 2026-11-03 evening).
+  const nameBlock = el => { const b = NAME_WORD_RX.test(labelFor(el)) ? blockWith(el, DATE_RX, true) : null; return b && fullDate(b) ? b : null; };
   const signatureName = el => !!nameBlock(el);
   const signatureNameSole = el => { const b = nameBlock(el); return !!b && soleBlock(el, b); };
 
