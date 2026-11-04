@@ -17,7 +17,10 @@ that is not empty, and no entry of it loosely matches the tenant or the
 company named, in either direction. Any match or any doubt goes to Jack:
 a doubt word anywhere in the label, help text, placeholder or options
 ("subsidiaries", "affiliates", "or", "contractor", "including",
-"formerly" ...), a stop kind other than per-company, a legal guard kind,
+"formerly" ...), any list entry appearing as whole words in the label,
+help, placeholder, section, options or the split name attribute, any
+letter outside ASCII in the help, placeholder, section or options (both
+Jack, 2026-11-03 evening), a stop kind other than per-company, a legal guard kind,
 the page's own raw stop / legal flag, a sensitive or credential category,
 a shared ATS host or an address that names no tenant, an entry that is
 not a bare name (the whole list is doubt then, said so in the job log).
@@ -171,14 +174,61 @@ def _readings(text: Any) -> list[str]:
     return [" ".join(v.casefold().split()) for v in sensitive.text_variants(str(text or ""))]
 
 
-def has_doubt(field: dict) -> bool:
+def _entry_words(entry: Any) -> list[str]:
+    """
+    The whole words an entry is looked for by (Jack, 2026-11-03 evening,
+    item c, as written): every word of it of three or more characters
+    ("Beta Corp": beta, corp); a short entry ("GM", "P&G") by its letters
+    run together and by its words as one phrase.
+    """
+    words = _norm(entry).split()
+    long_words = [w for w in words if len(w) >= 3]
+    if long_words:
+        return long_words
+    joined = "".join(words)
+    phrase = " ".join(words)
+    return [p for p in {joined, phrase} if len(p) >= 2]
+
+
+def entry_in_text(past_employers: list | None, field: dict) -> bool:
+    """
+    Does any list entry appear, as whole words on any reading, in the
+    label, help text, placeholder, section, an option or the name
+    attribute split into words (Jack, 2026-11-03 evening, item c)? Such
+    a question may be about a company he worked for, in any shape the
+    grammar cannot see ("Former Contoso employees" over the box), so it
+    is doubt. Whole words: "Betamax" does not hold "Beta".
+    """
+    entries = [str(e) for e in (past_employers or []) if str(e or "").strip()]
+    if not entries:
+        return False
+    texts = [field.get("label"), field.get("help_text"), field.get("placeholder"), field.get("section"),
+             *(field.get("options") or []), sensitive._identifier_words(str(field.get("name") or ""))]
+    readings = [f" {_norm(v)} " for t in texts for v in sensitive.text_variants(str(t or ""))]
+    for entry in entries:
+        for word in _entry_words(entry):
+            if any(f" {word} " in r for r in readings):
+                return True
+    return False
+
+
+def _non_ascii_letter(text: Any) -> bool:
+    """A letter outside ASCII on any reading of the text (Jack, 2026-11-03 evening, item c): the blacklists cannot read it, so it is doubt."""
+    return any(c.isalpha() and ord(c) > 127 for v in sensitive.text_variants(str(text or "")) for c in v)
+
+
+def has_doubt(field: dict, past_employers: list | None = None) -> bool:
     """
     A doubt word on any reading of the label, help text, placeholder,
     section (the legend or heading over the box) or an option; and beside
     the label (whose grammar admits one plain company) anything outside
     the closed allowlist: a help text or placeholder that is not empty or
     a fixed placeholder, an option that is not "Yes", "No" or a
-    placeholder row. A second company in any shape fails that.
+    placeholder row. A second company in any shape fails that. Two more
+    (Jack, 2026-11-03 evening, item c): any entry of `past_employers`
+    appearing as whole words in the label, help, placeholder, section,
+    options or the split name attribute; any letter outside ASCII in the
+    help, placeholder, section or options.
     """
     texts = [field.get("label"), field.get("help_text"), field.get("placeholder"), field.get("section"),
              *(field.get("options") or [])]
@@ -192,6 +242,11 @@ def has_doubt(field: dict) -> bool:
     for o in field.get("options") or []:
         if any(_norm(v) not in _PLAIN_OPTIONS | _PLACEHOLDERS for v in sensitive.text_variants(str(o or ""))):
             return True
+    if any(_non_ascii_letter(t) for t in (field.get("help_text"), field.get("placeholder"), field.get("section"),
+                                          *(field.get("options") or []))):
+        return True
+    if entry_in_text(past_employers, field):
+        return True
     return False
 
 
@@ -328,10 +383,10 @@ def plan_for(field: dict, url: str, past_employers: list | None, category: str |
     if (sensitive.stop_kinds(text) - {"per_company"} or sensitive.legal_guard_kinds(field)
             or field.get("raw_stop") or field.get("raw_legal")):
         return None
-    if has_doubt(field):
-        return None
     employers = [str(e) for e in past_employers if str(e or "").strip()]
     if not employers:
+        return None
+    if has_doubt(field, employers):
         return None
     parsed = parse_label(field.get("label"))
     if parsed is None:

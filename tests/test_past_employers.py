@@ -243,6 +243,83 @@ def test_any_match_or_any_doubt_goes_to_jack():
     check.done()
 
 
+def test_a_list_entry_in_the_question_or_a_letter_outside_ascii_beside_it_is_doubt():
+    # Jack, 2026-11-03 evening, item c: C stays on with two checks in the
+    # route (and so in the gate's recomputation). Each "Jack's" case gave
+    # "No" on b09c8ab: "Former Contoso employees" over the box with
+    # Contoso on the list, the entry in the split name attribute, a short
+    # entry as a whole word in the section, an accented or Cyrillic letter
+    # in the section. The "No" cases are guards for the whole-word rule
+    # and the accepted residual (the section naming a company on no entry).
+    check = Checks()
+    contoso = _prof("c-list", ["Contoso"])
+    beta = _prof("c-beta", ["Beta Corp"])
+    gm = _prof("c-gm", ["GM"])
+    jacks = [
+        ("'Former Contoso employees' over the box, Contoso on the list", [dict(YESNO, section="Former Contoso employees")], contoso),
+        ("the entry in the split name attribute", [dict(YESNO, name="worked_for_contoso")], contoso),
+        ("the entry in the split name attribute, camel-cased", [dict(YESNO, name="formerContosoEmployee")], contoso),
+        ("a short entry as a whole word in the section", [dict(YESNO, section="GM employees")], gm),
+        ("one word of a two-word entry in the section", [dict(YESNO, section="Former Beta employees")], beta),
+        ("the entry's suffix word in the section (Jack's rule as written: every word of 3+ characters)",
+         [dict(YESNO, section="Contoso Corp employees")], beta),
+        ("the entry with an invisible character inside it in the section", [dict(YESNO, section="Former Con­toso employees")], contoso),
+        ("an accented letter in the section", [dict(YESNO, section="Anciens employés")], beta),
+        ("a Cyrillic look-alike inside the company in the section", [dict(YESNO, section="Former Cоntoso employees")], beta),
+        ("a letter outside ASCII in the help text (a guard: any help text is doubt)", [dict(YESNO, help_text="Контосо")], beta),
+        ("a letter outside ASCII in an option (a guard)", [dict(YESNO, options=["Yes", "No", "Нет"])], beta),
+        ("a letter outside ASCII in the placeholder (a guard)", [dict(YESNO, placeholder="Sélectionner")], beta),
+        ("the entry in an option (a guard: any other option is doubt)", [dict(YESNO, options=["Yes", "No", "Contoso"])], contoso),
+    ]
+    for what, fields, prof in jacks:
+        plan, flags, for_model = _route(fields, prof, WORKDAY)
+        check("q1" not in plan and not for_model and [fl["ref"] for fl in flags] == ["q1"],
+              f"{what}: Jack's, never the model ({plan}, {[fl.get('reason') for fl in flags]})")
+    nos = [
+        ("'Former Contoso employees' over the box, Contoso off the list (the accepted residual)", [dict(YESNO, section="Former Contoso employees")], beta),
+        ("'Betamax employees' over the box with Beta Corp on the list (whole words)", [dict(YESNO, section="Betamax employees")], beta),
+        ("'GMC employees' over the box with GM on the list (whole words)", [dict(YESNO, section="GMC employees")], gm),
+        ("a plain ASCII section", [dict(YESNO, section="Employment history")], beta),
+        ("a name attribute holding no entry", [dict(YESNO, name="worked_for_northwind_before")], beta),
+    ]
+    for what, fields, prof in nos:
+        plan, flags, for_model = _route(fields, prof, WORKDAY)
+        check(plan.get("q1", {}).get("value") == "No" and plan["q1"]["source"] == employers.SOURCE and not flags and not for_model,
+              f"{what}: No, as before ({plan}, {[fl.get('reason') for fl in flags]})")
+    check(employers.entry_in_text(["Contoso"], dict(YESNO, section="Former Contoso employees"))
+          and employers.entry_in_text(["Contoso"], dict(YESNO, name="worked_for_contoso"))
+          and employers.entry_in_text(["P&G"], dict(YESNO, section="P&G alumni"))
+          and employers.entry_in_text(["P&G"], dict(YESNO, section="PG alumni"))
+          and not employers.entry_in_text(["Contoso"], dict(YESNO, section="Contosoland"))
+          and not employers.entry_in_text([], dict(YESNO, section="Former Contoso employees"))
+          and not employers.entry_in_text(None, dict(YESNO, section="Former Contoso employees")),
+          "entry_in_text: whole words on every text, a short entry by its letters or its phrase, nothing with no list")
+    check(employers._non_ascii_letter("Anciens employés") and employers._non_ascii_letter("Cоntoso")
+          and not employers._non_ascii_letter("Former Contoso employees") and not employers._non_ascii_letter("Yes / No - 2020"),
+          "a letter outside ASCII, not punctuation or a digit")
+    check(not employers.has_doubt(dict(YESNO, section="Former Contoso employees"))
+          and employers.has_doubt(dict(YESNO, section="Former Contoso employees"), ["Contoso"]),
+          "has_doubt reads the list it is given")
+    # The gate recomputes both checks from the record and the profile.
+    r = base()
+    r["url"] = r["final_url"] = WORKDAY
+    r["census"] = []
+    r["fields"] += [dict(YESNO, section="Former Contoso employees")]
+    r["categories"]["q1"] = "per_company"
+    r["plan"]["q1"] = {"value": "No", "source": employers.SOURCE, "fit": "exact", "profile_path": "work_history.past_employers"}
+    r["results"]["q1"] = {"filled": True, "unconfirmed": False}
+    r["snapshot"]["q1"] = "No"
+    check(gate_run(r, beta)["content_verdict"] == gate.WOULD_SUBMIT, "the gate passes the accepted residual's No")
+    v = gate_run(r, contoso)
+    check(v["content_verdict"] == gate.WOULD_STOP and any("not recomputed" in x for x in v["content_reasons"]),
+          f"the gate stops when the list holds the section's company ({v['content_reasons']})")
+    accented = dict(r, fields=[*r["fields"][:-1], dict(YESNO, section="Anciens employés")])
+    check(gate_run(accented, beta)["content_verdict"] == gate.WOULD_STOP, "the gate stops on a letter outside ASCII in the section")
+    named = dict(r, fields=[*r["fields"][:-1], dict(YESNO, name="worked_for_contoso")])
+    check(gate_run(named, contoso)["content_verdict"] == gate.WOULD_STOP, "the gate stops on the entry in the name attribute")
+    check.done()
+
+
 PAGE = """<!doctype html><html><body><h1>Additional questions (mock)</h1><form>
 <fieldset><legend>Have you worked for Northwind before?</legend>
 <label><input type="radio" name="worked" value="y"> Yes</label><label><input type="radio" name="worked" value="n"> No</label></fieldset>
