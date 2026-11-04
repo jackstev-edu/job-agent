@@ -309,22 +309,25 @@ def consent_ok(label: Any) -> bool:
 # following") certifies the page's words, not his, and is his: those
 # words are forbidden outright and the subject slot has no place for
 # them. "made" names his answers only with "I have" or "in this
-# application" beside it.
-_LEAD = r"(?:by (?:checking|ticking|selecting|clicking) (?:this|the) box )?"
+# application" beside it. A bare place with no giving verb and no "my"
+# ("the statements in this application", "the information on the
+# application form") is no subject either: it can point at a sentence
+# printed on the page (16b6ac3's review; Jack, 2026-11-03 evening, item
+# b: the bare-place alternative is dropped from the the / this branch).
+_LEAD =r"(?:by (?:checking|ticking|selecting|clicking) (?:this|the) box )?"
 _INFO = r"(?:information|statements?|answers?|responses?|details|representations?)"
 _GIVEN = r"(?:provided|given|supplied|submitted|entered|furnished)"
 _WHERE = r" (?:in|on|within|as part of|throughout) (?:this|my|the)(?: employment| job)? application(?: form| process)?"
 # The subject slot. Each alternative opens with a different word, so the
 # pattern never has two ways to read one text.
 _SUBJECT = (r"(?:"
-            r"(?:the |this )?" + _INFO +                                 # "the information ..." needs a source or a place
+            r"(?:the |this )?" + _INFO +                                 # "the information ..." needs a source (a giving verb); a bare place is none
             r"(?:"
             r" (?:i have |i've |that i have )(?:" + _GIVEN + r"|made)(?: by me)?(?:" + _WHERE + r")?"
             r"| " + _GIVEN + r"(?: by me)?(?:" + _WHERE + r")?"
             r"| made(?: by me)?" + _WHERE +
-            r"|" + _WHERE +
             r")"
-            r"|my " + _INFO +                                               # "my answers ..." names his own
+            r"|my " + _INFO +                                              # "my answers ..." names his own
             r"(?:"
             r" (?:i have |i've |that i have )(?:" + _GIVEN + r"|made)(?: by me)?(?:" + _WHERE + r")?"
             r"| " + _GIVEN + r"(?: by me)?(?:" + _WHERE + r")?"
@@ -401,23 +404,25 @@ def _attestation_sentence_ok(sentence: str) -> bool:
     return all(_attestation_clause_ok(c) for c in _CLAUSE_SPLIT.split(sentence))
 
 
-# The attestation route is OFF (Jack, 2026-11-03): the fourth BLOCK on
+# The attestation route's switch (Jack, 2026-11-03): the fourth BLOCK on
 # decision D's check (16b6ac3's review: "the statements in this
 # application" still passed, a subject that can point at a sentence
-# printed on the page) used up the three fix attempts Jack allowed, and
-# his recorded consequence is that the check returns False, with E and
-# Always tick kept. The grammar below stays as the record of the attempt
-# (`_attestation_grammar_ok`, reachable by tests only); no tick, plan or
-# offer reads it while this is False. Turning it back on is Jack's call.
-ATTESTATION_ROUTE_ON = False
+# printed on the page) switched it OFF (2bbaa21). Jack's evening decision
+# the same day (item b, "one last shot") applied that review's fix (the
+# bare-place alternative dropped from the subject slot) and turned it
+# back ON, with one fix attempt: a BLOCK on it turns this False again in
+# one commit, with no further attempts without his word. While False the
+# check returns False for every label and no tick, plan or offer reads
+# the grammar (`_attestation_grammar_ok`).
+ATTESTATION_ROUTE_ON = True
 
 
 def attestation_ok(label: Any) -> bool:
     """
     Decision D's class, as the gate and submit.py's tick helper read it:
-    False for every label while ATTESTATION_ROUTE_ON is False (Jack,
-    2026-11-03), so no attestation box is ever planned as a tick or
-    ticked. With the route on it would be _attestation_grammar_ok.
+    _attestation_grammar_ok while ATTESTATION_ROUTE_ON is True (Jack,
+    2026-11-03 evening, item b); False for every label while it is False,
+    so no attestation box is then planned as a tick or ticked.
     """
     if not ATTESTATION_ROUTE_ON:
         return False
@@ -433,8 +438,8 @@ def _attestation_grammar_ok(label: Any) -> bool:
     no HARD_STOPS kind but the certify / attest / acknowledge entry and
     no criminal-record match, on any reading of the text? Nothing about
     the box's state, requiredness or fine print is judged here (see
-    attestation_box_ok). Known hole (16b6ac3's review): a bare place
-    ("the statements in this application") still passes.
+    attestation_box_ok). A bare place ("the statements in this
+    application") is no subject since item b of 2026-11-03 evening.
     """
     text = str(label or "")
     # The length first, before any pattern runs (Jack, 2026-11-03): over

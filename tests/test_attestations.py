@@ -1,13 +1,15 @@
 """
 test_attestations.py — decisions D and E (Jack, 2026-11-02) and the Memory page's "Always tick this exact wording".
 
-WHAT THIS DOES: Runs the attestation grammar (gate._attestation_grammar_ok)
-over Jack's positive variants and the negatives (each forbidden clause
-appended to a positive, a LEGAL_GUARD wording, a mixed terms-and-certify
-wording, a page-text subject: never); shows that with the route OFF
-(Jack, 2026-11-03, after the fourth BLOCK on decision D) gate.attestation_ok
-refuses every label, the gate plans no attestation box as a tick and
-submit.py's tick helper ticks none; decision E: a census
+WHAT THIS DOES: Runs gate.attestation_ok (the route ON again since Jack's
+evening decision of 2026-11-03, item b, with 16b6ac3's review fix: a bare
+place is no subject) over Jack's six positive variants (ticked) and the
+negatives (each forbidden clause appended to a positive, a LEGAL_GUARD
+wording, a mixed terms-and-certify wording, a page-text subject, a bare
+place: never); shows the gate plans a REQUIRED attestation box as a
+consent tick (trace source "attestation") and stops on an optional one;
+in a headless browser, that submit.py's tick helper ticks the required
+attestation box and not the optional or mixed ones; decision E: a census
 box carrying Jack's review mark passes ticked or unticked as he left it,
 and a wizard run where Jack ticks a mixed certification box himself under
 the gate pause goes on through Submit after Continue; and the offer: a
@@ -127,12 +129,14 @@ PAGE_TEXT_SUBJECT = "I certify that the facts set forth below are true and corre
 MIXED = "I agree to the terms and certify that my answers are true"
 
 
-def test_the_attestation_grammar_takes_jacks_variants_and_nothing_else():
-    # Fails on ab0a09e: no attestation check. Since the route was switched
-    # off (Jack, 2026-11-03, the fourth BLOCK) this is the grammar behind
-    # it, _attestation_grammar_ok, kept as the record of the attempt.
-    grammar = gate._attestation_grammar_ok
+def test_the_attestation_class_takes_jacks_variants_and_nothing_else():
+    # Fails on ab0a09e: no attestation check; on 2bbaa21 (the route off)
+    # every positive refused. Jack, 2026-11-03 evening, item b: the route
+    # is on, so attestation_ok is the grammar itself.
+    grammar = gate.attestation_ok
     check = Checks()
+    check(gate.ATTESTATION_ROUTE_ON is True and gate.attestation_ok(ATT) is gate._attestation_grammar_ok(ATT) is True,
+          "the route is on: attestation_ok is the grammar")
     for text in POSITIVE:
         check(grammar(text), f"the grammar takes: {text[:70]!r}")
     for what, clause in FORBIDDEN:
@@ -155,40 +159,36 @@ def test_the_attestation_grammar_takes_jacks_variants_and_nothing_else():
 
 # The hole 16b6ac3's review found in the grammar (its fourth BLOCK): a
 # bare place with no giving verb and no "my" can point at a sentence
-# printed on the page. Each passes _attestation_grammar_ok; the route
-# being off, attestation_ok refuses them with everything else.
+# printed on the page. Each passed the grammar on 16b6ac3; since item b
+# of 2026-11-03 evening (the bare-place alternative dropped from the
+# the / this branch) each refuses, the two Jack named included.
 BARE_PLACE = [
     "I certify that the statement on this application form is true.",
     "I confirm that this statement in the application is true.",
     "I certify that the statements in this application are true.",
     "I acknowledge that the representations in this application are accurate.",
     "I certify that the information on the application is true.",
+    "I certify that the information in this application is true.",
+    "I certify that the statements in this application are true and complete.",
+    "I certify that the information in this application is true and complete to the best of my knowledge.",
 ]
 
 
-def test_the_attestation_route_is_off_so_no_label_passes_and_no_box_is_ticked_or_planned():
-    # Jack, 2026-11-03: the fourth BLOCK on decision D switches the route
-    # off. Fails on 16b6ac3 (every positive passed, the required box was
-    # planned as a tick and ticked).
+def test_a_bare_place_is_no_subject_and_a_giving_verb_or_my_still_is():
+    # Jack, 2026-11-03 evening, item b: 16b6ac3's review fix. Fails on
+    # 16b6ac3 (each bare place passed the grammar) and on 2bbaa21 (the
+    # route off: attestation_ok refused Jack's six too).
     check = Checks()
-    check(gate.ATTESTATION_ROUTE_ON is False, "the route is off")
-    for text in POSITIVE + BARE_PLACE + [MIXED]:
-        check(not gate.attestation_ok(text), f"attestation_ok refuses: {text[:60]!r}")
-    for required in (True, False):
-        v = gate_run(_att_record(required=required))
-        check(v["content_verdict"] == gate.WOULD_STOP and "f9" not in v["consent_actions"]
-              and not any(t.get("source") == "attestation" for t in v["trace"]),
-              f"the gate never plans an attestation box as a tick (required={required}): {v['content_reasons']}")
-    p = TEST_HOME / "attest-tick-off.html"
-    p.write_text(TICK_PAGE, encoding="utf-8")
-    with mock_page(p) as page:
-        fields = extract.extract_fields(page)
-        by = {f["name"]: f for f in fields}
-        actions = {by["att"]["ref"]: "would_tick", by["opt"]["ref"]: "would_tick", by["mix"]["ref"]: "would_tick"}
-        ticked = submit.tick_allowed(page, {"consent_actions": actions}, _Profile(), [])
-        states = dict(page.evaluate("[...document.querySelectorAll('input[type=checkbox]')].map(b => [b.id, b.checked])"))
-        check(ticked == [] and states == {"att": False, "opt": False, "mix": False},
-              f"the tick helper ticks no attestation box, though the actions named it ({states})")
+    check(gate.ATTESTATION_ROUTE_ON is True, "the route is on")
+    for text in BARE_PLACE:
+        check(not gate.attestation_ok(text) and not gate._attestation_grammar_ok(text), f"a bare place refuses: {text[:70]!r}")
+    for text in ("I certify that the information provided in this application is true.",
+                 "I certify that the statements I have made in this application are true.",
+                 "I certify that the statements made in this application are true.",
+                 "I certify that my statements in this application are true.",
+                 "I certify that my answers on this application form are complete."):
+        check(gate.attestation_ok(text), f"a giving verb, 'made in this application' or 'my' still names his own: {text[:70]!r}")
+    check(not gate.attestation_ok(MIXED), "the mixed wording still refuses")
     check.done()
 
 
@@ -225,14 +225,18 @@ def _att_record(label=ATT, required=True, category="legal_declaration"):
     return r
 
 
-def test_the_gate_stops_on_every_attestation_box_while_the_route_is_off():
-    # Was "plans a required attestation box as a consent tick" (c8a18cf);
-    # with the route off (Jack, 2026-11-03) the required box stops like
-    # the optional one. The other cases were always stops.
+def test_the_gate_plans_a_required_attestation_box_as_a_consent_tick_and_stops_on_an_optional_one():
+    # Fails on ab0a09e (the census stopped "not on consent_allowlist, and
+    # not a terms / privacy consent") and on 2bbaa21 (the route off: the
+    # required box stopped). The other cases were always stops.
     check = Checks()
     v = gate_run(_att_record())
+    check(v["content_verdict"] == gate.WOULD_SUBMIT and v["consent_actions"].get("f9") == "would_tick"
+          and any(t.get("ref") == "f9" and t.get("source") == "attestation" for t in v["trace"]),
+          f"a required attestation box: planned as a tick, traced as an attestation ({v['content_reasons']})")
+    v = gate_run(_att_record(label=BARE_PLACE[2]))
     check(v["content_verdict"] == gate.WOULD_STOP and "f9" not in v["consent_actions"],
-          f"a required attestation box: not planned, the gate stops ({v['content_reasons']})")
+          f"a required box with a bare-place subject: never planned, the gate stops ({v['content_reasons']})")
     v = gate_run(_att_record(required=False))
     check(v["content_verdict"] == gate.WOULD_STOP and "f9" not in v["consent_actions"],
           f"an optional attestation box: never planned, the gate stops ({v['content_reasons']})")
@@ -293,10 +297,9 @@ class _Profile:
         return []
 
 
-def test_the_tick_helper_ticks_no_attestation_box_while_the_route_is_off():
-    # Was "ticks a required attestation box only" (c8a18cf); with the route
-    # off (Jack, 2026-11-03) it ticks none of the three, whatever the
-    # actions name. Fails on 16b6ac3 (the required box was ticked).
+def test_the_tick_helper_ticks_a_required_attestation_box_only():
+    # Fails on ab0a09e (tick_allowed ticked nothing but the policy's and
+    # the allowlist's) and on 2bbaa21 (the route off: none of the three).
     check = Checks()
     p = TEST_HOME / "attest-tick.html"
     p.write_text(TICK_PAGE, encoding="utf-8")
@@ -307,8 +310,16 @@ def test_the_tick_helper_ticks_no_attestation_box_while_the_route_is_off():
         steps = []
         ticked = submit.tick_allowed(page, {"consent_actions": actions}, _Profile(), steps)
         states = dict(page.evaluate("[...document.querySelectorAll('input[type=checkbox]')].map(b => [b.id, b.checked])"))
-        check(ticked == [] and states == {"att": False, "opt": False, "mix": False},
-              f"no box ticked, though the actions named three ({states})")
+        check(ticked == [by["att"]["ref"]] and states == {"att": True, "opt": False, "mix": False},
+              f"only the required attestation box, though the actions named three ({states})")
+        page.uncheck("#att")
+        page.evaluate("() => { document.getElementById('att').removeAttribute('required'); }")
+        ticked = submit.tick_allowed(page, {"consent_actions": actions}, _Profile(), [])
+        check(ticked == [] and not page.is_checked("#att"), "the same box no longer required: not ticked")
+        page.evaluate("() => { document.getElementById('att').setAttribute('required', ''); "
+                      "document.querySelector('label[for=att]').textContent = " + json.dumps(BARE_PLACE[2]) + "; }")
+        ticked = submit.tick_allowed(page, {"consent_actions": actions}, _Profile(), [])
+        check(ticked == [] and not page.is_checked("#att"), "required again but relabelled with a bare place: not ticked")
     check.done()
 
 
@@ -360,16 +371,16 @@ def test_a_box_jack_ticked_is_offered_once_and_his_click_writes_one_allowlist_li
                                        change(MIXED, now=False), change("I accept the handbook", explicit=False),
                                        change("Have you worked at Acme?"), change(MIXED)],
                                       url="https://careers.example-co.com/apply", log=log, store=store)
-    # With the attestation route off (Jack, 2026-11-03) an attestation box
-    # Jack ticked is a box neither class covers, so it is offered too.
-    check([o["label"] for o in offered] == [MIXED, ATT] and len(store.offers) == 2,
-          f"two offers: the mixed box and the attestation; a policy box, a legal, a marketing and an unticked box, a "
+    # With the attestation route on (Jack, 2026-11-03 evening, item b) an
+    # attestation box is covered by its class and never offered.
+    check([o["label"] for o in offered] == [MIXED] and len(store.offers) == 1,
+          f"one offer: the mixed box; a policy box, an attestation, a legal, a marketing and an unticked box, a "
           f"nearby-text label and a per-company wording are never offered ({[o['label'] for o in store.offers]})")
     check(any("Memory page" in l for l in log), f"the job log says so ({log})")
     status, _, body = _req(state_server := gui.Server(state).start(), "GET", "/memory")
     try:
-        check(status == 200 and body["ok"] and [o["label"] for o in body["tick_offers"]] == [MIXED, ATT],
-              "the Memory page lists the offers")
+        check(status == 200 and body["ok"] and [o["label"] for o in body["tick_offers"]] == [MIXED],
+              "the Memory page lists the offer")
         oid = body["tick_offers"][0]["id"]
         origin = f"http://127.0.0.1:{state_server.port}"
         status, _, bad = _req(state_server, "POST", "/memory/always-tick", {"id": oid}, origin=origin, token="wrong")
@@ -381,15 +392,13 @@ def test_a_box_jack_ticked_is_offered_once_and_his_click_writes_one_allowlist_li
               and f'- "{MIXED}"' in text and state.take_profile_changed() is True,
               f"his click writes the one quoted line and flags the reload ({body}, {text[-200:]!r})")
         check(approve.backups_of(state.profile_path), "a backup was taken first")
-        check([o["label"] for o in memory.Learned.load(state.memory_path).offers] == [ATT],
-              "the offer is gone once the profile holds it; the other stays")
+        check(memory.Learned.load(state.memory_path).offers == [], "the offer is gone once the profile holds it")
         status, _, body = _req(state_server, "POST", "/memory/always-tick", {"id": oid}, origin=origin)
         check(body.get("ok") is False, "offered once: a second click finds nothing")
         corrections.offer_ticks([change("I accept the employee handbook")], url="https://x.example/", store=memory.Learned.load(state.memory_path))
         oid2 = next(o["id"] for o in memory.Learned.load(state.memory_path).offers if o["label"] == "I accept the employee handbook")
         status, _, body = _req(state_server, "POST", "/memory/dismiss-tick", {"id": oid2}, origin=origin)
-        check(body.get("ok") is True and [o["label"] for o in memory.Learned.load(state.memory_path).offers] == [ATT],
-              "Dismiss drops it")
+        check(body.get("ok") is True and memory.Learned.load(state.memory_path).offers == [], "Dismiss drops it")
         check(Profile.load(state.profile_path).consent_allowlist() == [MIXED], "a dismissed wording is not written")
     finally:
         state_server.stop()

@@ -3624,17 +3624,16 @@ Step 1: the full suite alone at 941a777 (518 passed, 0 failed, 35:01);
 refusals; E per element; B's own-text guard; the signature Name box; C's
 four holes; snapshot stripping; item 9 committed; this log).
 
-- Decision D's attestation route is OFF (gate.ATTESTATION_ROUTE_ON =
-  False; attestation_ok returns False for every label). 16b6ac3, the
-  third and last fix attempt Jack allowed, was BLOCKed (a bare place
-  "the statements in this application" still passed the subject slot),
-  so per his 2026-11-03 decision the route is switched off with E and
-  Always tick kept; the grammar stays as _attestation_grammar_ok, read
-  by tests only. An attestation box Jack ticks himself is now offered
-  for "Always tick this exact wording" like any box neither class
-  covers. Turning the route back on is Jack's call; the review's
-  smallest fix (drop the bare-place alternative from the the/this
-  branch) is recorded in reviews.md of this round's scratchpad.
+- Decision D's attestation route was switched OFF in 2bbaa21
+  (gate.ATTESTATION_ROUTE_ON = False) after 16b6ac3, the third and last
+  fix attempt Jack allowed, was BLOCKed (a bare place "the statements in
+  this application" still passed the subject slot), with E and Always
+  tick kept and an attestation box Jack ticked himself offered for
+  "Always tick this exact wording". Jack's evening decision of
+  2026-11-03 (item b of that round, "one last shot") applied the
+  review's smallest fix (the bare-place alternative dropped from the
+  the / this branch) and turned the route back ON; see that round's
+  entry below for the result of its one fix attempt.
 
 Reviewer FLAGs of the round, one line each (the unedited outputs are in
 the round's report to Jack, which quotes every review in full; none

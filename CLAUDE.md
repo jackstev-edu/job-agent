@@ -735,7 +735,8 @@ plain words; these supersede older lines where they conflict:
   application" and "the information in this application" refuse) and
   the route is turned ON, with one fix attempt; a BLOCK on it turns the
   route OFF in one commit, recorded here, with no further attempts
-  without Jack's word. (Item b's commit records which it ended as.)
+  without Jack's word. Item b's result: the route is ON (commit b of
+  the round; all six of Jack's example wordings pass, none refused).
 - Process for the round: one fix attempt per item; a surviving BLOCK on
   any item but D reverts that item with a revert commit; an item with
   an open BLOCK is never pushed; a FLAG is folded only when it is a
