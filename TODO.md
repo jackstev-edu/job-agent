@@ -462,6 +462,17 @@
 - The dropdown display check compares whole words by Unicode letters and
   numbers; a script with no letter or number marks (and look-alike
   characters generally) still falls under the Unicode parity item below.
+- Decision C's entry-in-text check (4909445, 2026-11-03 evening): a
+  combining mark NFKC does not compose and is_invisible does not drop
+  (U+0337 inside "Contoso" in the section) is no letter and splits the
+  entry, so a list entry escapes the check and the question is answered
+  "No". Smallest fix: any Mn / Mc / Me character in the help text,
+  placeholder, section or options is doubt.
+- The page script's name-label reading (bcd5a6b, 2026-11-03 evening):
+  NFKC runs before the non-ASCII refusal, so a fullwidth-spelled name
+  label anchors a signature block and the clock fills its dates; the
+  Python side refuses the raw reading. Smallest fix: refuse a non-ASCII
+  letter in the raw text as well as the NFKC text.
 
 Accepted for now (CLAUDE.md threat model: a page that changes a field
 between scan and fill, or splits words with invisible or look-alike
@@ -3613,7 +3624,8 @@ tick this exact wording"; 7 decision B; 8 decision C (the
 work_history.past_employers line); 9 the strict confirmation check on
 every resume; 10 sign-up retries and the fixed error categories; 11
 the Memory page buttons; 12 the owed folds (the moved-pause re-prompt
-dropped by Jack) and the four unwrapped scripts; 13 the report. Waymo
+dropped by Jack) and the five unwrapped scripts (_HAS_FIELDS_JS moved
+here on 2026-11-03 evening, item g); 13 the report. Waymo
 and the Workday widgets (phone-code multiselect, dropdown buttons, year
 boxes, repeating sections) are the next round, from item 4's snapshots.
 
@@ -3697,8 +3709,8 @@ folded unless named as a fold or fix commit):
   stale). The test file holds guard rows for the alternatives the pattern
   kept, so a dropped alternative fails.
 - b499329 / ba21953 (i, item 9): _HAS_FIELDS_JS is still not wrapped in
-  extract.safe (fails safe: an unreadable probe never confirms); it
-  belongs with item 12's four unwrapped scripts. The address rule now
+  extract.safe (fails safe: an unreadable probe never confirms); MOVED
+  onto item 12's list of unwrapped scripts (2026-11-03 evening, item g). The address rule now
   counts only on a changed shape and an account pause with a pasted code
   types the code first (folded as the safe direction in ba21953; Jack
   confirms the reading of his 2026-11-01 item 3).
@@ -3855,3 +3867,140 @@ folded unless named as a fold or fix commit):
   container as a chooser's are. Also: no negative test for either; the
   per-element querySelectorAll over a wrapping label is quadratic on a
   page with one huge labelled widget (cache per label).
+
+## Round of 2026-11-03, evening (Jack's decisions on the report of the 2026-11-03 round)
+
+A small round of decided work, items a-g, one commit each, one fix
+attempt per item (a surviving BLOCK reverts the item; D goes back
+OFF), reviewers one at a time on Opus. Items a records (a57dc97), b
+decision D's one last shot (b09c8ab: 16b6ac3's review fix applied, the
+route ON), c decision C's two checks (4909445), d Always tick final
+(e38458a), e the signature Name box and block (0ec23c5, with one fold
+bcd5a6b of its review's three pass-direction findings), f snapshots
+(db003a2), g this entry. No item was BLOCKed; every review was FLAG.
+The unedited outputs are in the round's report to Jack.
+
+- Decision D's attestation route is ON again (b09c8ab): the bare-place
+  alternative left the the / this branch of gate._SUBJECT, so "the
+  statements in this application" and "the information in this
+  application" refuse; all six of Jack's example wordings pass. One
+  further BLOCK, by his rule, turns the route OFF for good without his
+  word.
+- Decision C's route stays ON with the two checks (4909445). Jack's
+  accepted residuals of the round (CLAUDE.md, the evening block) are
+  decided: not re-raised here.
+- "Always tick" (e38458a) is CLOSED: no further plain forms, no
+  narrow-shape rewrite.
+
+Reviewer FLAGs of the round, one line each (none folded unless named
+as the fold commit bcd5a6b):
+- a57dc97 (a): the per-company bullet opens "with one exception" and
+  then adds "The second exception"; say "two exceptions" (Jack's edit).
+- a57dc97 (a): "stays learnable" reads broader than memory.py: only the
+  past-employer wording bar is lifted; a per_company category or stop
+  kind still bars learning. Say so in the bullet (Jack's edit).
+- a57dc97 (a): the "Never narrow ... beyond decisions A-E of 2026-11-02"
+  line names only A-E while the 2026-11-03 and evening blocks carry
+  pass-direction carve-outs (the clock-dated sign-box skip, "Middle
+  initial", hand-written allowlist lines); add "and Jack's decisions of
+  2026-11-03 and its evening as written" (Jack's edit).
+- a57dc97 (a): "not re-checked at tick time" is only ALLOWLIST_FORBIDDEN;
+  every gate and tick check on the allowlist route still applies
+  (label source, no fine print, consent handoff, no legal kind, no
+  profile line); say so (Jack's edit).
+- b09c8ab (b): "made" takes any _WHERE ("the statements made on this
+  application form are true" passes) while the comment says "I have"
+  or "in this application" only, and the "made on this form" negative
+  is one word away. DECISION for Jack: tie "made" to "in this
+  application" (narrower), or keep and record the passing label as a
+  positive. Recommendation: tie it.
+- b09c8ab (b): test gap: no case for "made" / "provided" with the other
+  _WHERE forms ("on this application form", "as part of the application
+  process"), in either direction.
+- b09c8ab (b): the rewritten TODO paragraph pointed at an evening entry
+  that did not exist yet (this one).
+- b09c8ab (b, carried from 16b6ac3's review, live again with the route
+  ON): a passive "provided throughout the application process" can mean
+  information the employer gave.
+- b09c8ab (b): `_LEAD =r"` lost its space (restored in item g's commit).
+- 4909445 (c): a combining mark NFKC does not compose and is_invisible
+  does not drop (U+0337 inside "Contoso") is no letter and splits the
+  entry, so the section check misses it: the ACCEPTED look-alike /
+  word-splitting Unicode class; listed under MUST FIX BEFORE AUTO-SUBMIT
+  (smallest fix: any Mn / Mc / Me character in the help, placeholder,
+  section or options is doubt).
+- 4909445 (c): an accented entry ("Nestlé") is looked for as "nestl";
+  add the NFKD form with marks dropped as a second reading (Jack's call).
+- 4909445 (c): a list entry with a common word of 3+ characters ("The
+  Home Depot", "Bank of America") makes nearly every question doubt:
+  the rule as Jack wrote it; DECISION for Jack: keep, or drop corporate
+  suffixes and articles from an entry's words. Recommendation: drop
+  them (the module's _SUFFIXES).
+- 4909445 (c): test gap: the accented-section and name-attribute gate
+  cases assert WOULD_STOP only, not the "not recomputed" reason, and the
+  name case has no beta-list counterpart.
+- e38458a (d): the record says the underscore form ("employment_at_will")
+  was refused on 7d34acc; it was not (its class had no underscore). The
+  form 7d34acc refused and df987d9 dropped is the separator-less one
+  ("EmploymentAtWill"), which still passes and stays out under Jack's
+  closure of the pattern. The underscore form is newly refused.
+- e38458a (d): the regression property pins only 5da85c0's and
+  d9c5b10's literals; the reviewer checked by hand that no refusal of
+  the parent is lost; add the parent's pattern as a third literal.
+- 0ec23c5 (e): fullDate is judged at the block's scope (the enclosing
+  fieldset / section / group), so a Name + Year row inside a fieldset
+  holding a Date box elsewhere is a block; soleBlock still refuses when
+  anything else is there. DECISION for Jack: record the scope reading,
+  or judge at the row.
+- 0ec23c5 (e): nameLabel drops the old free parenthetical tail, so
+  "Your name (required)" no longer anchors a block and its dates are not
+  the clock's (the safe direction; a lost behaviour, untested). DECISION
+  for Jack: keep, or allow a parenthetical on a sign-free label.
+- 0ec23c5 (e): "whatever the page, on hold passes and in follow mode"
+  is tested at the route level only; no hold-pass or follow-mode test
+  with the EEO box already holding a value.
+- 0ec23c5 (e): findings 1, 4 and 5 folded in bcd5a6b (the closed
+  date-part reading and visible dropdowns only; one closed-list name
+  box per scope; a letter outside ASCII refuses a name label); finding
+  6 (the fail-on comments named f00dbfa, the parent is e38458a)
+  corrected there.
+- db003a2 (f): the "nothing else" guard has no negative for a longer
+  extra holding one of the four words ("None of the above", "Yes, I am
+  a protected veteran"); a substring mutation of the filter would pass.
+- db003a2 (f): consequence of Jack's decision: a learned or planned
+  "Yes" / "No" / "None" shown inside a label's text (a react-select
+  single-value div inside a wrapping label, an aria-labelledby target)
+  now appears in a snapshot ("Are you a protected veteran? Yes"); the
+  dropdown button's own text is still blanked.
+- db003a2 (f): a list-valued extra (["Yes"]) is not filtered (toward
+  redaction); dump's docstring does not mention NEVER_STRIPPED.
+- bcd5a6b (e fold): a NEW WIDENING against 0ec23c5, from the fold
+  itself: the page script's nameLabel runs NFKC before refusing a letter
+  outside ASCII, so a fullwidth-spelled name label ("Ｙｏｕｒ Ｎａｍｅ")
+  folds to ASCII and anchors a signature block whose dates the clock
+  then fills (the parent read it as no words); the Python side refuses
+  it on the raw reading. The ACCEPTED look-alike Unicode class: listed
+  under MUST FIX BEFORE AUTO-SUBMIT. Smallest fix (next round, Jack's
+  word: no fold-of-a-fold): refuse a non-ASCII letter in the raw text as
+  well as the NFKC text.
+- bcd5a6b (e fold): the closed date-part reading is used in fullDate
+  only; blockWith(DATE_RX) and soleBlock's part() still read DATE_RX
+  with its free parenthetical, so "Your Name" + "Date" + "Date (of
+  expiry)" is still full and sole; and labels the closed list accepts
+  that DATE_RX does not ("Select month") now complete a full date where
+  the parent found none (within Jack's Month + Day + Year rule; the
+  clock still needs Python's date_part and a stated format). Smallest
+  fix: datePart in soleBlock's part() too (refuses more).
+- bcd5a6b (e fold): test gaps: the "Name 署名" page proves only the
+  Python refusal (reverting the JS line leaves it passing: assert the
+  dates beside it are not the clock's); the Cyrillic "Your Nаme" check
+  already refused on 0ec23c5 (the raw reading holds no "name"), so the
+  fail-on claim holds for the combined check only.
+
+Decisions for Jack from the round, each with a recommendation, are in
+the round's report; the main ones: tie "made" to "in this application"
+in the attestation grammar (recommended); drop corporate suffixes and
+articles from an entry's words in decision C's entry check
+(recommended); the two bcd5a6b fixes above (recommended, one commit
+next round); the scope reading of fullDate (record it); the lost
+"Your name (required)" anchor (keep the narrowing).

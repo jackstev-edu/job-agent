@@ -314,7 +314,7 @@ def consent_ok(label: Any) -> bool:
 # application form") is no subject either: it can point at a sentence
 # printed on the page (16b6ac3's review; Jack, 2026-11-03 evening, item
 # b: the bare-place alternative is dropped from the the / this branch).
-_LEAD =r"(?:by (?:checking|ticking|selecting|clicking) (?:this|the) box )?"
+_LEAD = r"(?:by (?:checking|ticking|selecting|clicking) (?:this|the) box )?"
 _INFO = r"(?:information|statements?|answers?|responses?|details|representations?)"
 _GIVEN = r"(?:provided|given|supplied|submitted|entered|furnished)"
 _WHERE = r" (?:in|on|within|as part of|throughout) (?:this|my|the)(?: employment| job)? application(?: form| process)?"
