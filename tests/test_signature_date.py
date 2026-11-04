@@ -375,6 +375,15 @@ NESTED_CERTS = """<fieldset><legend>Certifications</legend>
 # 2026-11-03 evening): a Name + Year row is no block.
 PLAIN_CERTS = """<div class="row"><label for="cn">Name</label><input id="cn" name="cert_name">
 <label for="cy">Year</label><input id="cy" name="cert_year" placeholder="YYYY"></div>"""
+# Fold of 0ec23c5's review: a Name beside a "Date (of certification)" box
+# (a free parenthetical is no date part); a Name + Year with hidden Month
+# and Day dropdowns; a second closed-list name box in the block.
+CERT_DATE = """<div class="row"><label for="cn">Name</label><input id="cn" name="cert_name">
+<label for="cd">Date (of certification)</label><input id="cd" name="cert_date" placeholder="MM/DD/YYYY"></div>"""
+HIDDEN_SELECTS = """<label for="yr">Year</label><select id="yr" name="sig_year"><option value="">Select</option><option>2026</option></select>
+<label for="hm" hidden>Month</label><select id="hm" name="sig_month" hidden><option>11</option></select>
+<label for="hd" hidden>Day</label><select id="hd" name="sig_day" hidden><option>2</option></select>"""
+TWO_NAMES = """<label for="en">Name of the employee</label><input id="en" name="emp_name">"""
 # The signature block's dates reduced to a Year: no full date.
 YEAR_ONLY = """<label for="yr">Year</label><select id="yr" name="sig_year"><option value="">Select</option>
 <option>2025</option><option>2026</option><option>2027</option></select>"""
@@ -421,7 +430,7 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
                       f"{label!r}: a name label from the closed list, filled from the lines ({d}, {_values(page)['nm']!r})")
                 # Item e (Jack, 2026-11-03 evening): NAME_RX takes the same
                 # closed list, so the dates beside such a box are the
-                # clock's too ("Full legal name" dated nothing on f00dbfa).
+                # clock's too ("Full legal name" dated nothing on e38458a).
                 check(by["sig_year"].get("signature_block") and _values(page)["mo"] == "11" and _values(page)["dy"] == "2"
                       and _values(page)["yr"] == "2026",
                       f"{label!r}: the block's dates take the clock beside it ({_values(page)})")
@@ -459,7 +468,7 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
         # Item e (Jack, 2026-11-03 evening): a Name + Year row holds no full
         # date, so it is no block at all: the Name box is not marked (an
         # ordinary name box, routed as before item f) and nothing is
-        # planned from the name lines; on f00dbfa it was marked, not sole.
+        # planned from the name lines; on e38458a it was marked, not sole.
         check(not by["cert_name"].get("signature_name") and not by["cert_name"].get("signature_name_sole")
               and fill.plan.get(by["cert_name"]["ref"], {}).get("source") != signdate.NAME_SOURCE
               and _values(page)["cn"] == "" and by["sig_name"].get("signature_name_sole"),
@@ -468,7 +477,7 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
               and _values(page)["cy"] == "",
               f"the Certifications Year box is not the clock's: no invented year ({_values(page)['cy']!r})")
     # A plain-div Certifications row with no fieldset, on a page holding an
-    # EEO question: neither box filled (item e; on f00dbfa the sole scope
+    # EEO question: neither box filled (item e; on e38458a the sole scope
     # fell back to the row, so the Name box took the name and Year dated).
     seen = []
     with mock_page(_page("plain-certs", SELECTS, eeo=DISABILITY + PLAIN_CERTS)) as page:
@@ -498,10 +507,49 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
         check(by["sig_name"].get("signature_name_sole") and by["sig_date"].get("signature_block")
               and _values(page)["nm"] == "Test Person" and _values(page)["dt"] == "11/02/2026",
               f"one Date box is a full date: the block stands ({_values(page)})")
+    # Fold of 0ec23c5's review (findings 1, 4 and 5; each filled on
+    # 0ec23c5): a date part is read on the closed list, so "Date (of
+    # certification)" is none and a Name beside it is no signature Name
+    # box; hidden Month / Day dropdowns complete nothing; a second
+    # closed-list name box in the block leaves both for Jack; a name label
+    # holding a letter outside ASCII is no bare name.
+    with mock_page(_page("cert-date", SELECTS, eeo=DISABILITY + CERT_DATE)) as page:
+        fill = _fill(page, full, [])
+        by = {f["name"]: f for f in fill.fields}
+        check(not by["cert_name"].get("signature_name_sole") and fill.plan.get(by["cert_name"]["ref"], {}).get("source") != signdate.NAME_SOURCE
+              and not by["cert_date"].get("signature_block") and _values(page)["cn"] == "" and _values(page)["cd"] == "",
+              f"a 'Date (of certification)' beside a Name is no full date: neither box filled ({_values(page)})")
+    with mock_page(_page("hidden-selects", HIDDEN_SELECTS)) as page:
+        fill = _fill(page, full, [])
+        by = {f["name"]: f for f in fill.fields}
+        check(not by["sig_name"].get("signature_name") and not by["sig_year"].get("signature_block")
+              and _values(page)["nm"] == "" and _values(page)["yr"] == "",
+              f"hidden Month / Day dropdowns complete no date: no block ({_values(page)})")
+    seen = []
+    with mock_page(_page("two-names", SELECTS + TWO_NAMES)) as page:
+        fill = _fill(page, full, seen)
+        by = {f["name"]: f for f in fill.fields}
+        check(by["sig_name"].get("signature_name") and not by["sig_name"].get("signature_name_sole")
+              and by["emp_name"].get("signature_name") and not by["emp_name"].get("signature_name_sole")
+              and by["sig_name"]["ref"] not in fill.plan and by["emp_name"]["ref"] not in fill.plan
+              and "Your Name" not in seen and "Name of the employee" not in seen
+              and _values(page)["nm"] == "" and _values(page)["en"] == "",
+              f"two closed-list name boxes in the block: neither is sole, both are Jack's, never the model ({_values(page)}, {seen})")
+    seen = []
+    with mock_page(_name_page("other-script", "Name 署名")) as page:
+        fill = _fill(page, full, seen)
+        by = {f["name"]: f for f in fill.fields}
+        flag = next((fl for fl in fill.flags if fl.get("ref") == by["sig_name"]["ref"]), None)
+        check(by["sig_name"]["ref"] not in fill.plan and flag and flag.get("source") == "human"
+              and not any("署名" in str(l) for l in seen) and _values(page)["nm"] == "",
+              f"a name label with a word in another script: Jack's, never the model, empty ({flag and flag.get('reason')}, {seen})")
+    check(not signdate._name_box({"type": "text", "label": "Name 署名"}) and not signdate._name_box({"type": "text", "label": "Your Nаme"})
+          and signdate._name_box({"type": "text", "label": "Your Name"}),
+          "the Python side refuses a letter outside ASCII in a name label (a Cyrillic а inside 'Name' too)")
     # A marked Name box with no profile_name plan is Jack's whatever the
     # page (item e): here a page with no EEO question, as a hold pass or
     # follow mode sees one whose EEO question already holds a value. On
-    # f00dbfa it went to the mapper.
+    # e38458a it went to the mapper.
     marked = {"ref": "n1", "type": "text", "label": "Your Name", "signature_name": True, "signature_name_sole": True, "required": True}
     other = {"ref": "t1", "type": "text", "label": "City", "required": False}
     plan, flags, for_model = pipeline.route([marked, other], {"n1": "personal_fact", "t1": "personal_fact"}, full, set())
@@ -543,7 +591,7 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
               and "Full name" not in seen and page.evaluate("document.getElementById('nm').value") == "",
               f"a textarea Name box: marked, not filled, Jack's, never the model ({flag and flag.get('reason')}, {seen})")
     # "Middle initial" alone leaves the sign words (item e, Jack, 2026-11-03
-    # evening); every other initial wording stays. On f00dbfa the first
+    # evening); every other initial wording stays. On e38458a the first
     # three were signature boxes.
     check(not signdate.is_signature_box({"type": "text", "label": "Middle initial"})
           and not signdate.is_signature_box({"type": "text", "label": "Middle Initial:"})
@@ -584,7 +632,7 @@ def test_a_name_box_the_route_cannot_fill_is_jacks_and_sign_words_anywhere_on_it
     v = gate_run(record(dict(name_box, type="textarea", label="Full name"), {"value": "Test Person", "source": "model", "confidence": "high"}), named_prof)
     check(v["content_verdict"] == gate.WOULD_STOP and any("name lines only" in x for x in v["content_reasons"]),
           f"the gate: a model fill in a marked textarea Name box stops too ({v['content_reasons']})")
-    # Whatever the page (item e): the same stop with no EEO question in the record (on f00dbfa it passed).
+    # Whatever the page (item e): the same stop with no EEO question in the record (on e38458a it passed).
     no_eeo = record(name_box, {"value": "Test Person", "source": "model", "confidence": "high"})
     no_eeo["fields"] = [f for f in no_eeo["fields"] if f["ref"] != "e1"]
     for k in ("categories", "plan", "results", "snapshot"):

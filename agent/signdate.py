@@ -225,6 +225,11 @@ def _name_box(field: dict) -> bool:
     if not variants or is_signature_box(field):
         return False
     for v in variants:
+        # A letter outside ASCII refuses (fold of 0ec23c5's review, finding
+        # 5): a word in another script ("Name 署名") would otherwise drop
+        # out of the word list silently and the box read as a bare name.
+        if any(c.isalpha() and ord(c) > 127 for c in v):
+            return False
         words = re.findall(r"[a-z']+", _norm(v).replace("’", "'"))
         if words.count("name") != 1 or any(w not in _NAME_WORDS for w in words if w != "name"):
             return False

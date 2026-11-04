@@ -367,7 +367,12 @@ _SCAN_JS = safe(r"""
     'as', 'it', 'appears', 'clearly', 'here', 'below', 'above']);
   const SIG_RX = /^(your\s+|full\s+|applicant'?s?\s+|candidate'?s?\s+|printed\s+|legal\s+)?(signature|e-?signature|electronic\s+signature)(\s*\(.*\))?\s*:?\s*\*?$/i;
   const nameLabel = l => {
-    const words = (String(l || '').toLowerCase().replace(/’/g, "'").match(/[a-z']+/g) || []);
+    const text = String(l || '').normalize('NFKC');
+    // A letter outside ASCII refuses (fold of 0ec23c5's review, finding 5):
+    // a word in another script would otherwise drop out of the word list
+    // silently ("Name 署名" read as a bare name).
+    if ([...text].some(c => c.charCodeAt(0) > 127 && /\p{L}/u.test(c))) return false;
+    const words = (text.toLowerCase().replace(/’/g, "'").match(/[a-z']+/g) || []);
     return words.filter(w => w === 'name').length === 1 && words.every(w => w === 'name' || NAME_WORDS.has(w));
   };
   const NAME_RX = { test: l => nameLabel(l) || SIG_RX.test(String(l || '').trim()) };
@@ -423,10 +428,23 @@ _SCAN_JS = safe(r"""
   // one Date box, or all of Month, Day and Year, among the scope's date-part
   // boxes and dropdowns. A Name + Year row is no block, for the clock or
   // the Name box (a Certifications row).
+  // A date part is read as signdate.date_part reads it (fold of 0ec23c5's
+  // review, finding 1): exactly one part word and every other word from
+  // the same closed list, no free parenthetical ("Date (of certification)"
+  // is no date part); a dropdown counts only when visible.
+  const DATE_EXTRA = new Set(['signature', 'signed', 'signing', 'today', 'todays', 's', 'of', 'the', 'mm', 'dd', 'yyyy', 'yy',
+    'please', 'enter', 'select', 'current', 'this', 'application', 'form']);
+  const DATE_PARTS = new Set(['month', 'day', 'year', 'date']);
+  const datePart = l => {
+    const words = String(l || '').toLowerCase().match(/[a-z]+/g) || [];
+    const parts = words.filter(w => DATE_PARTS.has(w));
+    if (parts.length !== 1 || words.some(w => !DATE_EXTRA.has(w) && !DATE_PARTS.has(w))) return null;
+    return parts[0];
+  };
   const fullDate = block => {
     const parts = new Set([...scopeOf(block).querySelectorAll('input, textarea, select')]
-      .filter(c => __ja.tag(c) === 'SELECT' || plainBox(c))
-      .map(c => { const m = DATE_RX.exec(labelFor(c).trim()); return m ? m[2].toLowerCase() : null; })
+      .filter(c => (__ja.tag(c) === 'SELECT' && isVisible(c)) || plainBox(c))
+      .map(c => datePart(labelFor(c)))
       .filter(Boolean));
     return parts.has('date') || (parts.has('month') && parts.has('day') && parts.has('year'));
   };
@@ -444,7 +462,12 @@ _SCAN_JS = safe(r"""
   // Year row marks nothing (item e, Jack, 2026-11-03 evening).
   const nameBlock = el => { const b = NAME_WORD_RX.test(labelFor(el)) ? blockWith(el, DATE_RX, true) : null; return b && fullDate(b) ? b : null; };
   const signatureName = el => !!nameBlock(el);
-  const signatureNameSole = el => { const b = nameBlock(el); return !!b && soleBlock(el, b); };
+  // Sole also means the one closed-list name box in the scope (fold of
+  // 0ec23c5's review, finding 4): a second one ("Name of the employee")
+  // beside "Your Name" leaves both for Jack, as the narrower NAME_RX did.
+  const otherNameBox = (el, block) => [...scopeOf(block).querySelectorAll('input, textarea, select')]
+    .some(c => c !== el && (__ja.tag(c) === 'SELECT' || plainBox(c)) && nameLabel(labelFor(c)));
+  const signatureNameSole = el => { const b = nameBlock(el); return !!b && soleBlock(el, b) && !otherNameBox(el, b); };
 
   // Each stamped element's tag, type and name, as the scan saw it. A read
   // refuses an element that no longer matches (a reused or swapped node).
