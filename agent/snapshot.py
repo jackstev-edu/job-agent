@@ -185,6 +185,10 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", str(s))).strip().casefold()
 
 
+# Learned or typed values never stripped (Jack, 2026-11-03 evening, item f).
+NEVER_STRIPPED = frozenset({"yes", "no", "n/a", "none"})
+
+
 def profile_values(data: Any) -> tuple[set[str], set[str]]:
     """
     Every leaf value of the profile as normalised text (3+ characters), and
@@ -309,7 +313,12 @@ def dump(page: "Page", profile_data: Any, extra_values: Any = ()) -> dict:
     # learned or planned answer redacted inside an option list would mark
     # the chosen answer by its position.
     p_texts, p_digits = profile_values(profile_data)
-    texts, digits = profile_values([profile_data, list(extra_values or [])])
+    # A learned or typed "Yes", "No", "N/A" or "None" (any case) is never
+    # stripped (Jack, 2026-11-03 evening, item f): it is the form's own
+    # vocabulary, and stripping it blanked every label and heading holding
+    # "yes" or "n/a". Profile values are read as before.
+    extras = [v for v in (extra_values or []) if _norm(v) not in NEVER_STRIPPED]
+    texts, digits = profile_values([profile_data, extras])
     out = strip_values(out, texts, digits, p_texts, p_digits)
     out["taken"] = datetime.now().isoformat(timespec="seconds")   # after the strip: a year is often a profile value
     return out

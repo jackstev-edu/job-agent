@@ -168,7 +168,38 @@ ECHO_PAGE.write_text("""<!doctype html><html><head><meta charset="utf-8"><title>
 <label id="r3lbl">LEARNED-ECHO-SENTINEL</label><div role="Radio menuitemradio" aria-labelledby="r3lbl" tabindex="-1"></div></div>
 <div class="ashby-application-form-input-yesno" id="ashby"><button type="button">LEARNED-ECHO-SENTINEL</button><a href="#">LEARNED-ECHO-SENTINEL</a><div role="button" tabindex="0">Other</div></div>
 <label for="nm">Nickname</label><input id="nm" value="TYPED-ECHO-SENTINEL">
+<h3>Answer Yes or N/A if none applies</h3>
+<label for="yn">Reply Yes or No</label><input id="yn">
 </main></body></html>""", encoding="utf-8")
+
+
+def test_a_learned_or_typed_yes_no_or_n_a_never_strips_anything():
+    # Jack, 2026-11-03 evening, item f: a learned or typed "Yes" / "No" /
+    # "N/A" / "None" (any case) is never stripped as an extra value, so the
+    # headings and labels built from the form's own yes / no vocabulary
+    # stay. Fails on 0ec23c5: "Yes" (three characters) redacted the heading and
+    # the label. A profile value is read as
+    # before (the mutation guard for "nothing else"), and a dropdown
+    # button's shown value is still blanked.
+    check = Checks()
+    with mock_page(ECHO_PAGE) as page:
+        d = snapshot.dump(page, {}, extra_values=["Yes", "N/A", "none", "NO", " yes ", "n/a"])
+        h5 = [e for e in d["elements"] if e["tag"] == "h3"][-1]           # the last h3: the yes / n/a heading
+        yn = next(e for e in d["elements"] if e.get("id") == "yn")
+        text = json.dumps(d)
+        check(h5["text"] == "Answer Yes or N/A if none applies", f"a heading holding Yes and N/A stays ({h5['text']!r})")
+        check(yn["label"] == "Reply Yes or No", f"a text box's label holding Yes and No stays ({yn['label']!r})")
+        check(snapshot.REDACTED not in text, "nothing at all is redacted for those values")
+        check(snapshot.NEVER_STRIPPED == {"yes", "no", "n/a", "none"}, "the four values, as Jack named them")
+        d2 = snapshot.dump(page, {}, extra_values=["Yes", "Answer"])
+        check([e for e in d2["elements"] if e["tag"] == "h3"][-1]["text"] == snapshot.REDACTED,
+              "...while another extra value beside them still strips (the floor and the strip are unchanged)")
+        d3 = snapshot.dump(page, {"eeo": {"veteran": "Yes"}})
+        check([e for e in d3["elements"] if e["tag"] == "h3"][-1]["text"] == snapshot.REDACTED,
+              "a profile value 'Yes' is stripped as before: nothing else changed")
+        btn = next(e for e in d["elements"] if e.get("automation_id") == "stateDropdown")
+        check(btn["text"] == "" and "aria-label" not in btn["aria"], "a dropdown button's shown value is still blanked")
+    check.done()
 
 
 def test_a_dump_also_strips_learned_answers_and_typed_values_and_never_a_dropdowns_shown_value():
