@@ -101,6 +101,21 @@ VARIANTS = [
     ("typed name as signature", "My typed name below has the same legal effect as my handwritten one"),
     ("a dashed credit-report", "I consent to a credit-report"),
     ("a dashed employment-verification", "I consent to employment-verification"),
+    # Item d of 2026-11-03 evening (Jack): the four shapes df987d9 regressed,
+    # each refused on 7d34acc and allowed on df987d9 / 4909445; then the
+    # pattern is closed.
+    ("'Noncompetition' (restored)", "I accept the Noncompetition clause"),
+    ("'call or WhatsApp me' (restored)", "Example Co may call or WhatsApp me"),
+    ("'reverify my employment history' (restored)", "Example Co may reverify my employment history"),
+    ("an embedded 'employment_at_will' (restored)", "I accept employment_at_will"),
+    ("an embedded 'AT_WILL' in a code (restored)", "Policy EMPLOYMENT_AT_WILL_2026 accepted"),
+]
+# Plain words the restored at-will anchor must not sweep up: "that will"
+# and "what will" are no "at will". (The unanchored compet / verif stems
+# refuse more, which Jack accepts: competencies already was.)
+STILL_ALLOWED = [
+    ("'that will'", "I understand that will be the process"),
+    ("'what will'", "I have read what will happen next"),
 ]
 # gate.CONSENT_DECLARE: an age or eligibility statement is a declaration, never a consent line.
 DECLARATIONS = [
@@ -157,6 +172,8 @@ def test_each_named_wording_is_refused_with_its_reason_and_a_plain_acceptance_is
     check(approve.allowlist_refusal(ALLOWED) is None, "a plain handbook acceptance is still allowed")
     check(approve.allowlist_refusal("I agree to the Terms of Service and Privacy Policy") is None,
           "a terms / privacy wording is still allowed (the policy ticks it anyway)")
+    for what, label in STILL_ALLOWED:
+        check(not approve.ALLOWLIST_FORBIDDEN.search(label), f"{what}: not swept up by the restored at-will anchor")
     check.done()
 
 

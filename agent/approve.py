@@ -207,8 +207,19 @@ def apply_profile_line(path: Path, line: str, value: str, expected_stamp: str) -
 # gains inquiry / record / information; "not to compete" and "covenant not
 # to"; "call or text me", "texts", "texting"; "referees"; "permit" /
 # "permission"; "verify my employment / education / identity / history /
-# records" in either order. The at-will term keeps its old unanchored
-# shape (bounding it was a logged FLAG, not a fold).
+# records" in either order. The at-will term: anchored to a non-letter
+# (item d, Jack, 2026-11-03 evening): an embedded "employment_at_will"
+# refuses, "that will" does not; df987d9's `\bat` had let the embedded
+# form through, and its comment here ("keeps its old unanchored shape")
+# was stale: d9c5b10 bounded it, 7d34acc reverted that, df987d9
+# anchored it again.
+# Item d of 2026-11-03 evening, final: the four shapes df987d9 regressed
+# are restored ("Noncompetition" through an unanchored compet stem,
+# "call or WhatsApp me" through up to two words before "me", "reverify
+# my employment history" through an unanchored verif stem, the embedded
+# "employment_at_will"), and then this pattern is CLOSED (Jack): no
+# further plain forms, no narrow-shape rewrite. It is a seatbelt on his
+# own click, not a gate.
 _DASH = r"[\s\-‐-―−]"
 # Third fix (7d34acc's review; the last attempt): the plain forms the
 # repo's own refusal vocabularies already know (gate.ATTEST_FORBIDDEN's
@@ -220,6 +231,10 @@ _DASH = r"[\s\-‐-―−]"
 # portal. gate.CONSENT_DECLARE (an age or eligibility statement) is read
 # in allowlist_refusal as well.
 _J = _DASH + r"+"
+# "at will" after a non-letter (a space, a dash, an underscore, the start),
+# joined by spaces, dashes or underscores: "employment_at_will", "at-will",
+# "at will"; never "that will" or "what will" (item d, 2026-11-03 evening).
+_AT_WILL = r"(?:^|[^a-z])at[\s\-‐-―−_]*will"
 ALLOWLIST_FORBIDDEN = re.compile(
     # authorize / permit / allow / grant / release / waive / indemnify / hold harmless
     r"authori[sz]|\bpermi(t|ss)\w*|\ballow\w*|\bgrant\w*|\brelease|\bwaiv\w*|indemnif|\bharmless|\bdischarg\w*|"
@@ -227,20 +242,20 @@ ALLOWLIST_FORBIDDEN = re.compile(
     r"\bbackground\b|\breferenc\w*|\breferees?\b|\bdrug\w*|\balcohol|toxicolog|\bsubstance|"
     r"\bcredit" + _J + r"(report|history|check|score|screen|investigat|verif|test|inquir|enquir|record|information)|"
     r"\bconsumer" + _J + r"report|(criminal|employment|education|medical|identity)" + _J + r"(check|screen|investigat|verif|test)|"
-    r"investigat|\bverif\w*|\bscreen\w*|\bvett(ing|ed)\b|\bcheck(s|ed|ing)?\b|"
+    r"investigat|verif\w*|\bscreen\w*|\bvett(ing|ed)\b|\bcheck(s|ed|ing)?\b|"
     # arbitration, at-will in every shape
-    r"arbitrat|\bat" + _DASH + r"*will|with\s+or\s+without|without\s+(cause|notice)|for\s+any\s+reason|"
+    r"arbitrat|" + _AT_WILL + r"|with\s+or\s+without|without\s+(cause|notice)|for\s+any\s+reason|"
     r"(terminat|dismiss|discharg)\w*.{0,40}at\s+any\s+time|at\s+any\s+time\s+(by|regardless)|"
     # signing
     r"e-?sign|electronic" + _J + r"signature|signatur|\bsign(s|ed|ing|er|ers)?\b|undersign|handwritten|"
     r"typed" + _J + r"name|legally" + _J + r"binding|"
     # contact, SMS, marketing
     r"\bcontact|\bsms\b|text" + _J + r"messag|\btexts?\s+me\b|\btexts\b|\btexting\b|"
-    r"\b(call|phone|e-?mail|text|message|reach|send|notify|inform|update)\w*\s+(\w+\s+)?me\b|"
+    r"\b(call|phone|e-?mail|text|message|reach|send|notify|inform|update)\w*\s+(\w+\s+){0,2}me\b|"
     r"\breceive\s+(\w+\s+)?(calls?|texts?|e-?mails?|messages?|notifications?|updates?)|"
     r"marketing|newsletter|"
     # non-compete in every shape
-    r"\bcompet\w*|\bcovenant",
+    r"compet\w*|\bcovenant",
     re.I)
 
 
